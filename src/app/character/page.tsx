@@ -280,14 +280,14 @@ export default function CharacterPage() {
                   <img
                     src={generated[key]}
                     alt={label}
-                    className="aspect-[3/4] w-full object-cover"
+                    className="aspect-[9/16] w-full object-contain bg-secondary/20"
                     onError={(e) => {
                       const el = e.currentTarget
                       el.style.display = "none"
                       el.nextElementSibling?.removeAttribute("hidden")
                     }}
                   />
-                  <div hidden className="flex aspect-[3/4] items-center justify-center bg-secondary/40">
+                  <div hidden className="flex aspect-[9/16] items-center justify-center bg-secondary/40">
                     <ImageIcon className="h-8 w-8 text-muted-foreground/30" />
                   </div>
                   <p className="py-2 text-center text-xs font-medium text-muted-foreground">

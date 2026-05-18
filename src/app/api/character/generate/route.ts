@@ -3,25 +3,33 @@ import OpenAI from "openai"
 import fs from "fs"
 import path from "path"
 
+const FULL_BODY_SUFFIX =
+  `Full body shot from head to toe, including feet and shoes. ` +
+  `Subject fits entirely within the frame with generous margin at top and bottom. ` +
+  `Standing pose, every body part visible, do not crop any part of the body.`
+
 const FRONT_PROMPT = (appearance: string, outfit: string, hair: string) =>
   `Photorealistic full-body portrait of a Korean woman in her late 20s. ` +
   `Appearance: ${appearance}. ` +
   `Hair: ${hair}. ` +
   `Outfit: ${outfit}. ` +
   `Front view, facing the camera directly, neutral expression, slight smile. ` +
-  `White seamless studio background, sharp soft lighting, 4K detail.`
+  `White seamless studio background, sharp soft lighting, 4K detail. ` +
+  FULL_BODY_SUFFIX
 
 const SIDE_PROMPT = (outfit: string, hair: string) =>
   `The exact same Korean woman — same face, same ${hair} hairstyle, same ${outfit} outfit — ` +
-  `side profile view, facing left 90 degrees, full body. ` +
+  `side profile view, facing left 90 degrees. ` +
   `White seamless studio background, sharp soft lighting, 4K detail. ` +
-  `Keep face and outfit identical to the reference image.`
+  `Keep face and outfit identical to the reference image. ` +
+  FULL_BODY_SUFFIX
 
 const BACK_PROMPT = (outfit: string, hair: string) =>
   `The exact same Korean woman — same ${hair} hairstyle, same ${outfit} outfit — ` +
-  `back view, facing completely away from camera, full body. ` +
+  `back view, facing completely away from camera. ` +
   `White seamless studio background, sharp soft lighting, 4K detail. ` +
-  `Keep hairstyle and outfit identical to the reference image.`
+  `Keep hairstyle and outfit identical to the reference image. ` +
+  FULL_BODY_SUFFIX
 
 async function generateImage(client: OpenAI, prompt: string): Promise<Buffer> {
   const response = await client.images.generate({
