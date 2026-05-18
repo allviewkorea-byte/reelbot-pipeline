@@ -1,5 +1,11 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
+# Python
+travel-pipeline/__pycache__/
+travel-pipeline/*.pyc
+travel-pipeline/output/
+travel-pipeline/.env
+
 # dependencies
 /node_modules
 /.pnp
