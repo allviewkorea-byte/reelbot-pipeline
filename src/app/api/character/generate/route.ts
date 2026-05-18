@@ -3,33 +3,70 @@ import OpenAI from "openai"
 import fs from "fs"
 import path from "path"
 
+// ── Prompt builders ───────────────────────────────────────────────
+
 const FULL_BODY_SUFFIX =
   `Full body shot from head to toe, including feet and shoes. ` +
   `Subject fits entirely within the frame with generous margin at top and bottom. ` +
   `Standing pose, every body part visible, do not crop any part of the body.`
 
-const FRONT_PROMPT = (appearance: string, outfit: string, hair: string) =>
-  `Photorealistic full-body portrait of a Korean woman in her late 20s. ` +
-  `Appearance: ${appearance}. ` +
-  `Hair: ${hair}. ` +
-  `Outfit: ${outfit}. ` +
-  `Front view, facing the camera directly, neutral expression, slight smile. ` +
-  `White seamless studio background, sharp soft lighting, 4K detail. ` +
-  FULL_BODY_SUFFIX
+function buildAccessoryClause(acc: {
+  headwear: string
+  eyewear: string
+  bag: string
+  shoes: string
+  jewelry: string[]
+}): string {
+  const parts: string[] = []
+  if (acc.headwear) parts.push(acc.headwear)
+  if (acc.eyewear)  parts.push(acc.eyewear)
+  if (acc.bag)      parts.push(acc.bag)
+  if (acc.shoes)    parts.push(acc.shoes)
+  if (acc.jewelry.length) parts.push(acc.jewelry.join(", "))
+  return parts.length ? parts.join(", ") + "." : ""
+}
 
-const SIDE_PROMPT = (outfit: string, hair: string) =>
-  `The exact same Korean woman — same face, same ${hair} hairstyle, same ${outfit} outfit — ` +
-  `side profile view, facing left 90 degrees. ` +
-  `White seamless studio background, sharp soft lighting, 4K detail. ` +
-  `Keep face and outfit identical to the reference image. ` +
-  FULL_BODY_SUFFIX
+function buildFrontPrompt(
+  appearance: string,
+  outfit: string,
+  hair: string,
+  accClause: string
+): string {
+  return (
+    `Photorealistic full-body portrait of a Korean woman in her late 20s. ` +
+    `Appearance: ${appearance}. ` +
+    `Hair: ${hair}. ` +
+    `Outfit: ${outfit}. ` +
+    (accClause ? `Accessories: ${accClause} ` : ``) +
+    `Front view, facing the camera directly, neutral expression, slight smile. ` +
+    `White seamless studio background, sharp soft lighting, 4K detail. ` +
+    FULL_BODY_SUFFIX
+  )
+}
 
-const BACK_PROMPT = (outfit: string, hair: string) =>
-  `The exact same Korean woman — same ${hair} hairstyle, same ${outfit} outfit — ` +
-  `back view, facing completely away from camera. ` +
-  `White seamless studio background, sharp soft lighting, 4K detail. ` +
-  `Keep hairstyle and outfit identical to the reference image. ` +
-  FULL_BODY_SUFFIX
+function buildSidePrompt(outfit: string, hair: string, accClause: string): string {
+  return (
+    `The exact same Korean woman — same face, same ${hair} hairstyle, same ${outfit} outfit` +
+    (accClause ? `, ${accClause}` : ``) +
+    ` — side profile view, facing left 90 degrees. ` +
+    `White seamless studio background, sharp soft lighting, 4K detail. ` +
+    `Keep face and outfit identical to the reference image. ` +
+    FULL_BODY_SUFFIX
+  )
+}
+
+function buildBackPrompt(outfit: string, hair: string, accClause: string): string {
+  return (
+    `The exact same Korean woman — same ${hair} hairstyle, same ${outfit} outfit` +
+    (accClause ? `, ${accClause}` : ``) +
+    ` — back view, facing completely away from camera. ` +
+    `White seamless studio background, sharp soft lighting, 4K detail. ` +
+    `Keep hairstyle and outfit identical to the reference image. ` +
+    FULL_BODY_SUFFIX
+  )
+}
+
+// ── Image generation helpers ──────────────────────────────────────
 
 async function generateImage(client: OpenAI, prompt: string): Promise<Buffer> {
   const response = await client.images.generate({
@@ -51,7 +88,6 @@ async function generateImageFromRef(
 ): Promise<Buffer> {
   const { toFile } = await import("openai")
   const refFile = await toFile(refBuffer, "reference.png", { type: "image/png" })
-
   const response = await client.images.edit({
     model: "gpt-image-1",
     image: refFile,
@@ -65,6 +101,23 @@ async function generateImageFromRef(
   return Buffer.from(b64, "base64")
 }
 
+// ── Route handler ─────────────────────────────────────────────────
+
+interface AccessoriesBody {
+  headwear?: string
+  eyewear?: string
+  bag?: string
+  shoes?: string
+  jewelry?: string[]
+}
+
+interface RequestBody {
+  appearance?: string
+  outfit?: string
+  accessories?: AccessoriesBody
+  hair?: string
+}
+
 export async function POST(req: NextRequest) {
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) {
@@ -74,45 +127,58 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  let body: { appearance?: string; outfit?: string; hair?: string }
+  let body: RequestBody
   try {
     body = await req.json()
   } catch {
     return NextResponse.json({ success: false, error: "Invalid JSON" }, { status: 400 })
   }
 
-  const appearance = body.appearance?.trim() || "slim build, fair skin, bright eyes"
-  const outfit = body.outfit?.trim() || "trendy street fashion"
-  const hair = body.hair?.trim() || "long wavy dark hair"
+  const appearance = body.appearance?.trim() || "slim build, fair skin, bright almond eyes, natural makeup"
+  const outfit     = body.outfit?.trim()     || "casual travel outfit, comfortable t-shirt and jeans"
+  const hair       = body.hair?.trim()       || "long wavy dark hair flowing past shoulders"
+
+  const acc: Required<AccessoriesBody> & { jewelry: string[] } = {
+    headwear: body.accessories?.headwear || "",
+    eyewear:  body.accessories?.eyewear  || "",
+    bag:      body.accessories?.bag      || "",
+    shoes:    body.accessories?.shoes    || "wearing white sneakers",
+    jewelry:  body.accessories?.jewelry  || [],
+  }
+  const accClause = buildAccessoryClause(acc)
 
   const client = new OpenAI({ apiKey })
 
   try {
-    // Step 1: front (text only)
-    const frontBuf = await generateImage(client, FRONT_PROMPT(appearance, outfit, hair))
+    const frontBuf = await generateImage(
+      client,
+      buildFrontPrompt(appearance, outfit, hair, accClause)
+    )
+    const sideBuf = await generateImageFromRef(
+      client,
+      buildSidePrompt(outfit, hair, accClause),
+      frontBuf
+    )
+    const backBuf = await generateImageFromRef(
+      client,
+      buildBackPrompt(outfit, hair, accClause),
+      frontBuf
+    )
 
-    // Step 2: side (reference = front)
-    const sideBuf = await generateImageFromRef(client, SIDE_PROMPT(outfit, hair), frontBuf)
-
-    // Step 3: back (reference = front)
-    const backBuf = await generateImageFromRef(client, BACK_PROMPT(outfit, hair), frontBuf)
-
-    // Save to public/character-seeds/[timestamp]/
-    const id = Date.now().toString()
+    const id  = Date.now().toString()
     const dir = path.join(process.cwd(), "public", "character-seeds", id)
     fs.mkdirSync(dir, { recursive: true })
-
     fs.writeFileSync(path.join(dir, "front.png"), frontBuf)
-    fs.writeFileSync(path.join(dir, "side.png"), sideBuf)
-    fs.writeFileSync(path.join(dir, "back.png"), backBuf)
+    fs.writeFileSync(path.join(dir, "side.png"),  sideBuf)
+    fs.writeFileSync(path.join(dir, "back.png"),  backBuf)
 
     return NextResponse.json({
       success: true,
       id,
       images: {
         front: `/character-seeds/${id}/front.png`,
-        side: `/character-seeds/${id}/side.png`,
-        back: `/character-seeds/${id}/back.png`,
+        side:  `/character-seeds/${id}/side.png`,
+        back:  `/character-seeds/${id}/back.png`,
       },
     })
   } catch (err) {
