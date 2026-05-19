@@ -1,0 +1,54 @@
+{
+  "characters": [
+    {
+      "id": "char_1779160894537",
+      "name": "정키",
+      "createdAt": "2026-05-19T03:21:34.537Z",
+      "config": {
+        "appearance": "한국인 비율좋고 누구나 인기가 많을것 같은 연예인상의 외모를 가졌음",
+        "outfit": "resort beachwear, flowy sundress, beach hat",
+        "accessories": {
+          "headwear": "wearing a baseball cap",
+          "eyewear": "",
+          "bag": "pulling a travel suitcase",
+          "shoes": "wearing sandals",
+          "jewelry": [
+            "wearing a necklace",
+            "wearing a watch",
+            "wearing earrings",
+            "wearing a bracelet",
+            "wearing rings"
+          ]
+        },
+        "hair": "medium-length layered hair"
+      },
+      "images": {
+        "front": "/character-seeds/1779160864794/front.png",
+        "side": "/character-seeds/1779160864794/side.png",
+        "back": "/character-seeds/1779160864794/back.png"
+      }
+    },
+    {
+      "id": "char_1779165848501",
+      "name": "나은",
+      "createdAt": "2026-05-19T04:44:08.501Z",
+      "config": {
+        "appearance": "",
+        "outfit": "casual travel outfit, comfortable t-shirt and jeans",
+        "accessories": {
+          "headwear": "",
+          "eyewear": "",
+          "bag": "",
+          "shoes": "wearing white sneakers",
+          "jewelry": []
+        },
+        "hair": "long wavy dark hair flowing past shoulders"
+      },
+      "images": {
+        "front": "/character-seeds/1779165711162/front.png",
+        "side": "/character-seeds/1779165711162/side.png",
+        "back": "/character-seeds/1779165711162/back.png"
+      }
+    }
+  ]
+}

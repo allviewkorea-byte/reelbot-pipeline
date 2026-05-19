@@ -73,7 +73,7 @@ async function generateImage(client: OpenAI, prompt: string): Promise<Buffer> {
     model: "gpt-image-1",
     prompt,
     size: "1024x1536",
-    quality: "medium",
+    quality: "high",
     n: 1,
   })
   const b64 = response.data?.[0]?.b64_json
@@ -93,7 +93,7 @@ async function generateImageFromRef(
     image: refFile,
     prompt,
     size: "1024x1536",
-    quality: "medium",
+    quality: "high",
     n: 1,
   })
   const b64 = response.data?.[0]?.b64_json
@@ -134,7 +134,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: "Invalid JSON" }, { status: 400 })
   }
 
-  const appearance = body.appearance?.trim() || "slim build, fair skin, bright almond eyes, natural makeup"
+  const appearance = body.appearance?.trim() || "Korean idol-style beauty with fair porcelain skin, defined double eyelids, high nose bridge, small oval face, slim elegant proportions. 한국인 여성 몸매좋고 비율좋은 연예인상의 이쁜 외모"
+
   const outfit     = body.outfit?.trim()     || "casual travel outfit, comfortable t-shirt and jeans"
   const hair       = body.hair?.trim()       || "long wavy dark hair flowing past shoulders"
 
