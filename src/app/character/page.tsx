@@ -1,6 +1,6 @@
 "use client"
-
-import { useState, useEffect, useCallback, useRef } from "react"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import {
   Check,
@@ -14,6 +14,8 @@ import {
   Trash2,
   FolderOpen,
   Clapperboard,
+  Upload,
+  X,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -130,6 +132,8 @@ interface Character {
   images: CharacterImages
 }
 
+type SlotPosition = "front" | "side" | "back"
+
 // ── Helpers ───────────────────────────────────────────────────────
 function SelectField({
   label,
@@ -173,6 +177,89 @@ function SkeletonCard() {
   )
 }
 
+function UploadSlot({
+  position,
+  label,
+  file,
+  onFileSelect,
+  disabled,
+}: {
+  position: SlotPosition
+  label: string
+  file: File | null
+  onFileSelect: (pos: SlotPosition, file: File | null) => void
+  disabled?: boolean
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const previewUrl = useMemo(
+    () => (file ? URL.createObjectURL(file) : null),
+    [file]
+  )
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl)
+    }
+  }, [previewUrl])
+
+  return (
+    <div className="space-y-2">
+      <div
+        onClick={() => !disabled && inputRef.current?.click()}
+        className={`relative aspect-[2/3] overflow-hidden rounded-xl border-2 border-dashed transition-all ${
+          disabled
+            ? "cursor-not-allowed opacity-50"
+            : "cursor-pointer"
+        } ${
+          file
+            ? "border-primary/40 bg-card"
+            : "border-border bg-card/40 hover:border-primary/40 hover:bg-card"
+        }`}
+      >
+        {file && previewUrl ? (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={previewUrl}
+              alt={label}
+              className="h-full w-full object-contain"
+            />
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onFileSelect(position, null)
+              }}
+              className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-white transition-colors hover:bg-black/90"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </>
+        ) : (
+          <div className="flex h-full flex-col items-center justify-center gap-2">
+            <Upload className="h-7 w-7 text-muted-foreground/60" />
+            <span className="text-xs text-muted-foreground">클릭해서 업로드</span>
+            <span className="text-[10px] text-muted-foreground/60">PNG / JPG</span>
+          </div>
+        )}
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            onFileSelect(position, f ?? null)
+            // 같은 파일 재선택 가능하도록 초기화
+            e.target.value = ""
+          }}
+        />
+      </div>
+      <p className="text-center text-xs font-medium text-muted-foreground">{label}</p>
+    </div>
+  )
+}
+
 function formatDate(iso: string) {
   return iso.slice(0, 10)
 }
@@ -182,7 +269,10 @@ export default function CharacterPage() {
   const router = useRouter()
   const topRef = useRef<HTMLDivElement>(null)
 
-  // Form state
+  // Tab state
+  const [activeTab, setActiveTab] = useState<"generate" | "upload">("generate")
+
+  // Generate form state
   const [appearance,     setAppearance]     = useState("")
   const [selectedOutfit, setSelectedOutfit] = useState(OUTFIT_OPTIONS[1].value)
   const [hair,           setHair]           = useState(HAIR_OPTIONS[0].value)
@@ -197,13 +287,22 @@ export default function CharacterPage() {
   const [generated, setGenerated] = useState<CharacterImages | null>(null)
   const [errorMsg,  setErrorMsg]  = useState("")
 
-  // Save state
+  // Save (generated) state
   const [charName,  setCharName]  = useState("")
   const [saving,    setSaving]    = useState(false)
 
+  // Upload state
+  const [uploadFiles, setUploadFiles] = useState<{
+    front: File | null
+    side: File | null
+    back: File | null
+  }>({ front: null, side: null, back: null })
+  const [uploadName, setUploadName] = useState("")
+  const [uploading,  setUploading]  = useState(false)
+
   // Library state
-  const [library,      setLibrary]      = useState<Character[]>([])
-  const [libLoading,   setLibLoading]   = useState(true)
+  const [library,    setLibrary]    = useState<Character[]>([])
+  const [libLoading, setLibLoading] = useState(true)
 
   const isGenerating = step !== "idle" && step !== "done" && step !== "error"
 
@@ -315,7 +414,43 @@ export default function CharacterPage() {
     }
   }
 
+  function handleFileSelect(position: SlotPosition, file: File | null) {
+    setUploadFiles((prev) => ({ ...prev, [position]: file }))
+  }
+
+  async function handleUpload() {
+    if (!uploadFiles.front || !uploadFiles.side || !uploadFiles.back || !uploadName.trim()) {
+      toast.error("3장 이미지와 이름을 모두 입력해주세요")
+      return
+    }
+    setUploading(true)
+    try {
+      const formData = new FormData()
+      formData.append("name", uploadName.trim())
+      formData.append("front", uploadFiles.front)
+      formData.append("side",  uploadFiles.side)
+      formData.append("back",  uploadFiles.back)
+
+      const res = await fetch("/api/character/upload", {
+        method: "POST",
+        body: formData,
+      })
+      const data = await res.json()
+      if (!res.ok || !data.success) throw new Error(data.error ?? "업로드 실패")
+
+      toast.success("캐릭터가 업로드되었어요")
+      setUploadFiles({ front: null, side: null, back: null })
+      setUploadName("")
+      fetchLibrary()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "업로드 중 오류가 발생했어요")
+    } finally {
+      setUploading(false)
+    }
+  }
+
   function handleLoad(char: Character) {
+    setActiveTab("generate")
     restoreConfig(char.config)
     setGenerated(char.images)
     setStep("done")
@@ -342,264 +477,374 @@ export default function CharacterPage() {
     }
   }
 
+  const uploadReady =
+    !!uploadFiles.front && !!uploadFiles.side && !!uploadFiles.back && uploadName.trim().length > 0
+
   return (
     <div ref={topRef} className="flex flex-1 flex-col gap-6 overflow-auto p-6">
       {/* Header */}
       <div>
         <h1 className="text-xl font-semibold text-foreground">캐릭터 설정</h1>
-        <p className="mt-0.5 text-sm text-muted-foreground">AI로 캐릭터를 생성하고 라이브러리에 저장하세요</p>
+        <p className="mt-0.5 text-sm text-muted-foreground">AI로 캐릭터를 생성하거나 직접 업로드하세요</p>
       </div>
 
-      {/* ── Generation form ───────────────────────────────────────── */}
-      <div className="rounded-xl border border-primary/20 bg-primary/5 p-5">
-        <div className="mb-4 flex items-center gap-2">
-          <Wand2 className="h-4 w-4 text-primary" />
-          <h2 className="text-sm font-semibold text-foreground">직접 생성하기</h2>
-          <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary">
+      {/* ── Tabs ──────────────────────────────────────────────────── */}
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "generate" | "upload")}>
+        <TabsList className="grid w-full max-w-md grid-cols-2">
+          <TabsTrigger value="generate" className="flex items-center gap-1.5">
+            <Wand2 className="h-3.5 w-3.5" />
             AI 생성
-          </span>
-        </div>
+          </TabsTrigger>
+          <TabsTrigger value="upload" className="flex items-center gap-1.5">
+            <Upload className="h-3.5 w-3.5" />
+            직접 업로드
+          </TabsTrigger>
+        </TabsList>
 
-        <div className="flex flex-col gap-5">
-          {/* Appearance */}
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-              외모 설명
-            </label>
-            <textarea
-              rows={2}
-              value={appearance}
-              onChange={(e) => setAppearance(e.target.value)}
-              disabled={isGenerating}
-              placeholder={
-                "예: slim build, fair skin, bright almond eyes, natural makeup\n" +
-                "비워두면 기본값이 사용됩니다"
-              }
-              className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/30 disabled:opacity-50"
-            />
-          </div>
+        {/* ── AI Generate Tab ─────────────────────────────────────── */}
+        <TabsContent value="generate" className="mt-4">
+          <div className="rounded-xl border border-primary/20 bg-primary/5 p-5">
+            <div className="mb-4 flex items-center gap-2">
+              <Wand2 className="h-4 w-4 text-primary" />
+              <h2 className="text-sm font-semibold text-foreground">직접 생성하기</h2>
+              <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary">
+                AI 생성
+              </span>
+            </div>
 
-          {/* Outfit 4×4 card grid */}
-          <div>
-            <label className="mb-2 block text-xs font-medium text-muted-foreground">
-              의상 스타일
-            </label>
-            <div className="grid grid-cols-4 gap-2">
-              {OUTFIT_OPTIONS.map((o) => {
-                const active = selectedOutfit === o.value
-                return (
-                  <button
-                    key={o.value}
-                    onClick={() => setSelectedOutfit(o.value)}
+            <div className="flex flex-col gap-5">
+              {/* Appearance */}
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                  외모 설명
+                </label>
+                <textarea
+                  rows={2}
+                  value={appearance}
+                  onChange={(e) => setAppearance(e.target.value)}
+                  disabled={isGenerating}
+                  placeholder={
+                    "예: slim build, fair skin, bright almond eyes, natural makeup\n" +
+                    "비워두면 기본값이 사용됩니다"
+                  }
+                  className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/30 disabled:opacity-50"
+                />
+              </div>
+
+              {/* Outfit 4×4 card grid */}
+              <div>
+                <label className="mb-2 block text-xs font-medium text-muted-foreground">
+                  의상 스타일
+                </label>
+                <div className="grid grid-cols-4 gap-2">
+                  {OUTFIT_OPTIONS.map((o) => {
+                    const active = selectedOutfit === o.value
+                    return (
+                      <button
+                        key={o.value}
+                        onClick={() => setSelectedOutfit(o.value)}
+                        disabled={isGenerating}
+                        className={`relative flex items-center justify-center rounded-lg border px-2 py-2.5 text-center text-xs font-medium transition-all disabled:opacity-50 ${
+                          active
+                            ? "border-primary/60 bg-primary/15 text-foreground ring-1 ring-primary/30"
+                            : "border-border bg-background text-muted-foreground hover:border-primary/30 hover:bg-primary/5 hover:text-foreground"
+                        }`}
+                      >
+                        {active && (
+                          <span className="absolute right-1.5 top-1.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary">
+                            <Check className="h-2.5 w-2.5 text-primary-foreground" />
+                          </span>
+                        )}
+                        {o.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Hair */}
+              <SelectField
+                label="헤어 스타일"
+                value={hair}
+                onChange={setHair}
+                options={HAIR_OPTIONS}
+                disabled={isGenerating}
+              />
+
+              {/* Accessories */}
+              <div>
+                <p className="mb-2 text-xs font-medium text-muted-foreground">악세사리</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <SelectField
+                    label="모자/머리 장식"
+                    value={headwear}
+                    onChange={setHeadwear}
+                    options={HEADWEAR_OPTIONS}
                     disabled={isGenerating}
-                    className={`relative flex items-center justify-center rounded-lg border px-2 py-2.5 text-center text-xs font-medium transition-all disabled:opacity-50 ${
-                      active
-                        ? "border-primary/60 bg-primary/15 text-foreground ring-1 ring-primary/30"
-                        : "border-border bg-background text-muted-foreground hover:border-primary/30 hover:bg-primary/5 hover:text-foreground"
-                    }`}
+                  />
+                  <SelectField
+                    label="아이웨어"
+                    value={eyewear}
+                    onChange={setEyewear}
+                    options={EYEWEAR_OPTIONS}
+                    disabled={isGenerating}
+                  />
+                  <SelectField
+                    label="가방"
+                    value={bag}
+                    onChange={setBag}
+                    options={BAG_OPTIONS}
+                    disabled={isGenerating}
+                  />
+                  <SelectField
+                    label="신발"
+                    value={shoes}
+                    onChange={setShoes}
+                    options={SHOES_OPTIONS}
+                    disabled={isGenerating}
+                  />
+                </div>
+
+                {/* Jewelry multi-toggle */}
+                <div className="mt-3">
+                  <label className="mb-2 block text-xs font-medium text-muted-foreground">
+                    주얼리 (복수 선택 가능)
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {JEWELRY_OPTIONS.map((j) => {
+                      const active = jewelry.includes(j.value)
+                      return (
+                        <button
+                          key={j.value}
+                          onClick={() => toggleJewelry(j.value)}
+                          disabled={isGenerating}
+                          className={`rounded-full border px-3 py-1 text-xs font-medium transition-all disabled:opacity-50 ${
+                            active
+                              ? "border-primary/60 bg-primary/15 text-foreground"
+                              : "border-border bg-background text-muted-foreground hover:border-primary/30 hover:text-foreground"
+                          }`}
+                        >
+                          {active && "✓ "}{j.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Generate button + status */}
+              <div className="flex items-center gap-3">
+                {step !== "done" ? (
+                  <button
+                    onClick={handleGenerate}
+                    disabled={isGenerating}
+                    className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-md shadow-primary/20 transition-opacity hover:opacity-90 disabled:opacity-60"
                   >
-                    {active && (
-                      <span className="absolute right-1.5 top-1.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary">
-                        <Check className="h-2.5 w-2.5 text-primary-foreground" />
-                      </span>
+                    {isGenerating ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-4 w-4" />
                     )}
-                    {o.label}
+                    {isGenerating ? "생성 중..." : "✦ 캐릭터 생성"}
                   </button>
-                )
-              })}
-            </div>
-          </div>
+                ) : (
+                  <button
+                    onClick={handleReset}
+                    className="flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-secondary/40"
+                  >
+                    <RefreshCw className="h-4 w-4 text-muted-foreground" />
+                    다시 생성
+                  </button>
+                )}
 
-          {/* Hair */}
-          <SelectField
-            label="헤어 스타일"
-            value={hair}
-            onChange={setHair}
-            options={HAIR_OPTIONS}
-            disabled={isGenerating}
-          />
-
-          {/* Accessories */}
-          <div>
-            <p className="mb-2 text-xs font-medium text-muted-foreground">악세사리</p>
-            <div className="grid grid-cols-2 gap-3">
-              <SelectField
-                label="모자/머리 장식"
-                value={headwear}
-                onChange={setHeadwear}
-                options={HEADWEAR_OPTIONS}
-                disabled={isGenerating}
-              />
-              <SelectField
-                label="아이웨어"
-                value={eyewear}
-                onChange={setEyewear}
-                options={EYEWEAR_OPTIONS}
-                disabled={isGenerating}
-              />
-              <SelectField
-                label="가방"
-                value={bag}
-                onChange={setBag}
-                options={BAG_OPTIONS}
-                disabled={isGenerating}
-              />
-              <SelectField
-                label="신발"
-                value={shoes}
-                onChange={setShoes}
-                options={SHOES_OPTIONS}
-                disabled={isGenerating}
-              />
-            </div>
-
-            {/* Jewelry multi-toggle */}
-            <div className="mt-3">
-              <label className="mb-2 block text-xs font-medium text-muted-foreground">
-                주얼리 (복수 선택 가능)
-              </label>
-              <div className="flex flex-wrap gap-2">
-                {JEWELRY_OPTIONS.map((j) => {
-                  const active = jewelry.includes(j.value)
-                  return (
-                    <button
-                      key={j.value}
-                      onClick={() => toggleJewelry(j.value)}
-                      disabled={isGenerating}
-                      className={`rounded-full border px-3 py-1 text-xs font-medium transition-all disabled:opacity-50 ${
-                        active
-                          ? "border-primary/60 bg-primary/15 text-foreground"
-                          : "border-border bg-background text-muted-foreground hover:border-primary/30 hover:text-foreground"
-                      }`}
-                    >
-                      {active && "✓ "}{j.label}
-                    </button>
-                  )
-                })}
+                {isGenerating && (
+                  <span className="text-xs text-muted-foreground">{STEP_LABELS[step]}</span>
+                )}
+                {step === "error" && (
+                  <span className="text-xs text-red-400">{errorMsg}</span>
+                )}
               </div>
             </div>
-          </div>
 
-          {/* Generate button + status */}
-          <div className="flex items-center gap-3">
-            {step !== "done" ? (
-              <button
-                onClick={handleGenerate}
-                disabled={isGenerating}
-                className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-md shadow-primary/20 transition-opacity hover:opacity-90 disabled:opacity-60"
-              >
-                {isGenerating ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Sparkles className="h-4 w-4" />
-                )}
-                {isGenerating ? "생성 중..." : "✦ 캐릭터 생성"}
-              </button>
-            ) : (
-              <button
-                onClick={handleReset}
-                className="flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-secondary/40"
-              >
-                <RefreshCw className="h-4 w-4 text-muted-foreground" />
-                다시 생성
-              </button>
-            )}
+            {/* Generated result */}
+            {generated && (
+              <div className="mt-5">
+                <p className="mb-3 text-xs font-medium text-muted-foreground">생성된 캐릭터</p>
 
-            {isGenerating && (
-              <span className="text-xs text-muted-foreground">{STEP_LABELS[step]}</span>
-            )}
-            {step === "error" && (
-              <span className="text-xs text-red-400">{errorMsg}</span>
-            )}
-          </div>
-        </div>
-
-        {/* Generated result */}
-        {generated && (
-          <div className="mt-5">
-            <p className="mb-3 text-xs font-medium text-muted-foreground">생성된 캐릭터</p>
-
-            {/* 3-image grid */}
-            <div className="grid grid-cols-3 gap-3">
-              {([
-                { key: "front", label: "정면" },
-                { key: "side",  label: "측면" },
-                { key: "back",  label: "뒷모습" },
-              ] as const).map(({ key, label }) => (
-                <div key={key} className="overflow-hidden rounded-xl border border-border bg-card">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={generated[key]}
-                    alt={label}
-                    className="aspect-[2/3] w-full object-contain bg-secondary/20"
-                    onError={(e) => {
-                      const el = e.currentTarget
-                      el.style.display = "none"
-                      el.nextElementSibling?.removeAttribute("hidden")
-                    }}
-                  />
-                  <div hidden className="flex aspect-[2/3] items-center justify-center bg-secondary/40">
-                    <ImageIcon className="h-8 w-8 text-muted-foreground/30" />
-                  </div>
-                  <p className="py-2 text-center text-xs font-medium text-muted-foreground">
-                    {label}
-                  </p>
+                {/* 3-image grid */}
+                <div className="grid grid-cols-3 gap-3">
+                  {([
+                    { key: "front", label: "정면" },
+                    { key: "side",  label: "측면" },
+                    { key: "back",  label: "뒷모습" },
+                  ] as const).map(({ key, label }) => (
+                    <div key={key} className="overflow-hidden rounded-xl border border-border bg-card">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={generated[key]}
+                        alt={label}
+                        className="aspect-[2/3] w-full object-contain bg-secondary/20"
+                        onError={(e) => {
+                          const el = e.currentTarget
+                          el.style.display = "none"
+                          el.nextElementSibling?.removeAttribute("hidden")
+                        }}
+                      />
+                      <div hidden className="flex aspect-[2/3] items-center justify-center bg-secondary/40">
+                        <ImageIcon className="h-8 w-8 text-muted-foreground/30" />
+                      </div>
+                      <p className="py-2 text-center text-xs font-medium text-muted-foreground">
+                        {label}
+                      </p>
+                    </div>
+                  ))}
                 </div>
-              ))}
+
+                {/* Action row */}
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  {/* Name input */}
+                  <input
+                    type="text"
+                    value={charName}
+                    onChange={(e) => setCharName(e.target.value)}
+                    maxLength={20}
+                    placeholder="예: 지수"
+                    className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/30 w-36"
+                  />
+
+                  {/* Save button */}
+                  <button
+                    onClick={handleSave}
+                    disabled={!charName.trim() || saving}
+                    className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-40"
+                  >
+                    {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                    저장
+                  </button>
+
+                  {/* Reset */}
+                  <button
+                    onClick={handleReset}
+                    className="flex items-center gap-1.5 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary/40"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
+                    다시 생성
+                  </button>
+
+                  {/* Video nav */}
+                  <button
+                    onClick={() => {
+                      const char: Character = {
+                        id: "",
+                        name: charName || "임시",
+                        createdAt: new Date().toISOString(),
+                        config: buildConfig(),
+                        images: generated,
+                      }
+                      handleVideoNav(char)
+                    }}
+                    className="ml-auto flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+                  >
+                    이 캐릭터로 영상 만들기
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </TabsContent>
+
+        {/* ── Upload Tab ──────────────────────────────────────────── */}
+        <TabsContent value="upload" className="mt-4">
+          <div className="rounded-xl border border-primary/20 bg-primary/5 p-5">
+            <div className="mb-4 flex items-center gap-2">
+              <Upload className="h-4 w-4 text-primary" />
+              <h2 className="text-sm font-semibold text-foreground">이미지 직접 업로드</h2>
+              <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary">
+                3장 필수
+              </span>
             </div>
 
-            {/* Action row */}
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              {/* Name input */}
+            <p className="mb-4 text-xs text-muted-foreground">
+              ChatGPT나 외부 도구에서 생성한 캐릭터 이미지를 업로드하세요. 정면 · 측면 · 뒷모습 3장 모두 필요합니다.
+            </p>
+
+            {/* Upload slots */}
+            <div className="grid grid-cols-3 gap-3">
+              <UploadSlot
+                position="front"
+                label="정면"
+                file={uploadFiles.front}
+                onFileSelect={handleFileSelect}
+                disabled={uploading}
+              />
+              <UploadSlot
+                position="side"
+                label="측면"
+                file={uploadFiles.side}
+                onFileSelect={handleFileSelect}
+                disabled={uploading}
+              />
+              <UploadSlot
+                position="back"
+                label="뒷모습"
+                file={uploadFiles.back}
+                onFileSelect={handleFileSelect}
+                disabled={uploading}
+              />
+            </div>
+
+            {/* Name + Save row */}
+            <div className="mt-5 flex flex-wrap items-center gap-2">
               <input
                 type="text"
-                value={charName}
-                onChange={(e) => setCharName(e.target.value)}
+                value={uploadName}
+                onChange={(e) => setUploadName(e.target.value)}
                 maxLength={20}
-                placeholder="예: 지수"
-                className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/30 w-36"
+                placeholder="캐릭터 이름 (예: 지수)"
+                disabled={uploading}
+                className="flex-1 min-w-[200px] rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/30 disabled:opacity-50"
               />
 
-              {/* Save button */}
               <button
-                onClick={handleSave}
-                disabled={!charName.trim() || saving}
-                className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-40"
+                onClick={handleUpload}
+                disabled={!uploadReady || uploading}
+                className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-40"
               >
-                {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                저장
+                {uploading ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Save className="h-3.5 w-3.5" />
+                )}
+                {uploading ? "업로드 중..." : "라이브러리에 저장"}
               </button>
 
-              {/* Reset */}
-              <button
-                onClick={handleReset}
-                className="flex items-center gap-1.5 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary/40"
-              >
-                <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
-                다시 생성
-              </button>
-
-              {/* Video nav */}
-              <button
-                onClick={() => {
-                  const char: Character = {
-                    id: "",
-                    name: charName || "임시",
-                    createdAt: new Date().toISOString(),
-                    config: buildConfig(),
-                    images: generated,
-                  }
-                  handleVideoNav(char)
-                }}
-                className="ml-auto flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
-              >
-                이 캐릭터로 영상 만들기
-                <ChevronRight className="h-3.5 w-3.5" />
-              </button>
+              {(uploadFiles.front || uploadFiles.side || uploadFiles.back || uploadName) && (
+                <button
+                  onClick={() => {
+                    setUploadFiles({ front: null, side: null, back: null })
+                    setUploadName("")
+                  }}
+                  disabled={uploading}
+                  className="flex items-center gap-1.5 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary/40 disabled:opacity-40"
+                >
+                  <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
+                  초기화
+                </button>
+              )}
             </div>
+
+            {/* Progress hint */}
+            {!uploadReady && !uploading && (
+              <p className="mt-3 text-xs text-muted-foreground/70">
+                {!uploadFiles.front || !uploadFiles.side || !uploadFiles.back
+                  ? "💡 3장 이미지를 모두 업로드해주세요"
+                  : "💡 캐릭터 이름을 입력해주세요"}
+              </p>
+            )}
           </div>
-        )}
-      </div>
+        </TabsContent>
+      </Tabs>
 
       {/* ── My Character Library ──────────────────────────────────── */}
       <div>

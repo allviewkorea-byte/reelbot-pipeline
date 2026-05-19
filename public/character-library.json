@@ -29,9 +29,9 @@
       }
     },
     {
-      "id": "char_1779165848501",
-      "name": "나은",
-      "createdAt": "2026-05-19T04:44:08.501Z",
+      "id": "char_1779168019739",
+      "name": "현이",
+      "createdAt": "2026-05-19T05:20:19.739Z",
       "config": {
         "appearance": "",
         "outfit": "casual travel outfit, comfortable t-shirt and jeans",
@@ -45,9 +45,9 @@
         "hair": "long wavy dark hair flowing past shoulders"
       },
       "images": {
-        "front": "/character-seeds/1779165711162/front.png",
-        "side": "/character-seeds/1779165711162/side.png",
-        "back": "/character-seeds/1779165711162/back.png"
+        "front": "/character-seeds/1779167985719/front.png",
+        "side": "/character-seeds/1779167985719/side.png",
+        "back": "/character-seeds/1779167985719/back.png"
       }
     }
   ]
