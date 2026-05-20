@@ -22,6 +22,7 @@ import {
 import { cn } from "@/lib/utils"
 import { Separator } from "@/components/ui/separator"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { HealthIndicator } from "@/components/video/HealthIndicator"
 
 interface NavItem {
   label: string
@@ -109,6 +110,8 @@ export function Sidebar() {
             <NavItemLink key={item.href} item={item} pathname={pathname} />
           ))}
         </nav>
+        <Separator className="my-3" />
+        <HealthIndicator />
       </div>
     </aside>
   )
