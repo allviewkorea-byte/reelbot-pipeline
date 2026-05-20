@@ -80,6 +80,30 @@ def _build_prompt(scene: dict, extra_instructions: str | None = None) -> str:
     return " ".join(parts)
 
 
+def _resolve_character_image(character_image_path: str | None, config: Config) -> str | None:
+    """캐릭터 reference 경로 확정.
+
+    프론트에서 character_image_path를 안 보내는 경우(빈 값)가 많아,
+    비었으면 config.character_library_front(.env의 CHARACTER_LIBRARY_FRONT) 로 폴백한다.
+    최종적으로 실제 존재하는 파일 경로만 반환하고, 없으면 None.
+    """
+    candidate = (character_image_path or "").strip()
+    source = "요청"
+    if not candidate:
+        candidate = (getattr(config, "character_library_front", "") or "").strip()
+        source = "CHARACTER_LIBRARY_FRONT 폴백"
+
+    if candidate and Path(candidate).exists():
+        print(f"  [storyboard] 캐릭터 reference 확정({source}): {candidate}")
+        return candidate
+
+    if candidate:
+        print(f"  [storyboard] ⚠ 캐릭터 reference 파일 없음({source}): {candidate}")
+    else:
+        print("  [storyboard] ⚠ 캐릭터 reference 미지정 — reference 없이 생성 (캐릭터 일관성 보장 안 됨)")
+    return None
+
+
 def _call_image_api(
     client: OpenAI,
     prompt: str,
@@ -89,6 +113,7 @@ def _call_image_api(
     char_path = Path(character_image_path) if character_image_path else None
 
     if char_path and char_path.exists():
+        print(f"  [storyboard] gpt-image-1 images.edit 호출 — reference 전달: {char_path}")
         with char_path.open("rb") as f:
             response = client.images.edit(
                 model=_IMAGE_MODEL,
@@ -99,6 +124,10 @@ def _call_image_api(
                 n=1,
             )
     else:
+        if character_image_path:
+            print(f"  [storyboard] ⚠ reference 경로 무효 — reference 없이 images.generate 호출: {character_image_path}")
+        else:
+            print("  [storyboard] ⚠ reference 없이 images.generate 호출 — 매번 다른 인물이 나올 수 있음")
         response = client.images.generate(
             model=_IMAGE_MODEL,
             prompt=prompt,
@@ -148,7 +177,8 @@ def generate_storyboard(
 
     Args:
         scenes: [{"scene_id": 1, "description": "...", "camera": "wide shot", "location": "..."}, ...]
-        character_image_path: 캐릭터 reference 이미지 경로 (없으면 reference 없이 생성)
+        character_image_path: 캐릭터 reference 이미지 경로. 비었으면
+            config.character_library_front(.env의 CHARACTER_LIBRARY_FRONT)로 폴백.
         output_dir: 출력 폴더 (예: output/storyboard/{job_id}/)
         config: Config 인스턴스 (없으면 새로 생성). OPENAI_API_KEY 필요.
         progress_callback: callable(scene_index, total, message) 형태. 진행률 보고용.
@@ -165,13 +195,15 @@ def generate_storyboard(
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    character_ref = _resolve_character_image(character_image_path, config)
+
     results: list[dict] = []
     total = len(scenes)
 
     for idx, scene in enumerate(scenes, 1):
         scene_id = scene.get("scene_id", idx)
         prompt = _build_prompt(scene)
-        cache_key = _scene_cache_key(scene, character_image_path, None)
+        cache_key = _scene_cache_key(scene, character_ref or "", None)
         image_path = out_dir / _scene_filename(scene_id)
 
         cached = False
@@ -189,7 +221,7 @@ def generate_storyboard(
             if progress_callback:
                 progress_callback(idx, total, f"씬 {scene_id} 콘티 생성 중...")
             print(f"  [storyboard] ({idx}/{total}) 씬 {scene_id} 콘티 생성 중")
-            image_bytes = _call_image_api(client, prompt, character_image_path)
+            image_bytes = _call_image_api(client, prompt, character_ref)
             image_path.write_bytes(image_bytes)
             _write_meta(image_path, prompt, cache_key)
             print(f"  [storyboard] 저장: {image_path}")
@@ -225,11 +257,12 @@ def regenerate_single_scene(
     out_path = Path(output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    character_ref = _resolve_character_image(character_image_path, config)
     prompt = _build_prompt(scene, extra_instructions=extra_instructions)
-    cache_key = _scene_cache_key(scene, character_image_path, extra_instructions)
+    cache_key = _scene_cache_key(scene, character_ref or "", extra_instructions)
 
     print(f"  [storyboard] 씬 {scene.get('scene_id')} 재생성 중...")
-    image_bytes = _call_image_api(client, prompt, character_image_path)
+    image_bytes = _call_image_api(client, prompt, character_ref)
     out_path.write_bytes(image_bytes)
     _write_meta(out_path, prompt, cache_key)
     print(f"  [storyboard] 재생성 저장: {out_path}")

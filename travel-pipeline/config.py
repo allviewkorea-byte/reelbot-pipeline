@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import List
 
 @dataclass
@@ -48,7 +49,8 @@ class Config:
     character_library_front: str = field(
         default_factory=lambda: os.environ.get(
             "CHARACTER_LIBRARY_FRONT",
-            r"C:\Users\micro\reelbot-pipeline\public\character-seeds\char_1779198264788\front.png"
+            str(Path(__file__).resolve().parent.parent
+                / "public" / "character-seeds" / "char_1779198264788" / "front.png"),
         )
     )
 

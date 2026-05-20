@@ -6,9 +6,14 @@
 
 from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+
+# FastAPI 진입점에서도 .env 로드 (캐릭터 reference 등 환경변수 의존).
+# main.py만 load_dotenv 하던 탓에 storyboard-only 흐름에서 누락될 수 있었다.
+load_dotenv()
 
 from api.routes import health, status, storyboard, video
 
