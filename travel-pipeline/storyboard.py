@@ -1,0 +1,219 @@
+"""
+콘티(스토리보드) 이미지 생성 모듈.
+
+영상을 만들기 전에 씬별로 정지 이미지를 먼저 만들어서 사용자가 시각 검증할 수 있게 한다.
+- 모델: gpt-image-1, 1024x1536, quality "high"
+- 캐릭터 일관성: character_image_path를 reference로 전달 (images.edit API)
+- 캐시: 동일 (scene + character + extra) 조합이면 기존 PNG 재사용
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+from pathlib import Path
+
+from openai import OpenAI
+
+from config import Config
+
+
+_IMAGE_MODEL = "gpt-image-1"
+_IMAGE_SIZE = "1024x1536"
+_IMAGE_QUALITY = "high"
+
+
+def _scene_cache_key(scene: dict, character_image_path: str, extra: str | None) -> str:
+    payload = json.dumps(
+        {
+            "scene_id": scene.get("scene_id"),
+            "description": scene.get("description", ""),
+            "camera": scene.get("camera", ""),
+            "character": str(character_image_path),
+            "extra": extra or "",
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def _build_prompt(scene: dict, extra_instructions: str | None = None) -> str:
+    description = scene.get("description", "").strip()
+    camera = scene.get("camera", "").strip()
+    location = scene.get("location", "").strip()
+
+    parts = [
+        "Cinematic storyboard frame, single still image (not a video frame sequence).",
+        "Maintain the exact same character identity, face, hair, and outfit as in the reference image.",
+        "Photorealistic, vertical 9:16 composition, sharp focus, natural lighting.",
+    ]
+    if camera:
+        parts.append(f"Camera: {camera}.")
+    if location:
+        parts.append(f"Location: {location}.")
+    if description:
+        parts.append(f"Action / scene: {description}")
+    if extra_instructions:
+        parts.append(f"Additional direction: {extra_instructions}")
+    return " ".join(parts)
+
+
+def _call_image_api(
+    client: OpenAI,
+    prompt: str,
+    character_image_path: str | None,
+) -> bytes:
+    """gpt-image-1 호출. character_image_path가 있으면 reference로 edit 사용."""
+    char_path = Path(character_image_path) if character_image_path else None
+
+    if char_path and char_path.exists():
+        with char_path.open("rb") as f:
+            response = client.images.edit(
+                model=_IMAGE_MODEL,
+                image=f,
+                prompt=prompt,
+                size=_IMAGE_SIZE,
+                quality=_IMAGE_QUALITY,
+                n=1,
+            )
+    else:
+        response = client.images.generate(
+            model=_IMAGE_MODEL,
+            prompt=prompt,
+            size=_IMAGE_SIZE,
+            quality=_IMAGE_QUALITY,
+            n=1,
+        )
+
+    return base64.b64decode(response.data[0].b64_json)
+
+
+def _scene_filename(scene_id: int | str) -> str:
+    return f"scene_{scene_id}.png"
+
+
+def _write_meta(image_path: Path, prompt: str, cache_key: str) -> None:
+    meta_path = image_path.with_suffix(".json")
+    meta_path.write_text(
+        json.dumps(
+            {"prompt": prompt, "cache_key": cache_key},
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+def _read_meta(image_path: Path) -> dict | None:
+    meta_path = image_path.with_suffix(".json")
+    if not meta_path.exists():
+        return None
+    try:
+        return json.loads(meta_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def generate_storyboard(
+    scenes: list[dict],
+    character_image_path: str,
+    output_dir: str,
+    config: Config | None = None,
+    progress_callback=None,
+) -> list[dict]:
+    """
+    각 씬에 대해 gpt-image-1으로 콘티 이미지 1장씩 생성.
+
+    Args:
+        scenes: [{"scene_id": 1, "description": "...", "camera": "wide shot", "location": "..."}, ...]
+        character_image_path: 캐릭터 reference 이미지 경로 (없으면 reference 없이 생성)
+        output_dir: 출력 폴더 (예: output/storyboard/{job_id}/)
+        config: Config 인스턴스 (없으면 새로 생성). OPENAI_API_KEY 필요.
+        progress_callback: callable(scene_index, total, message) 형태. 진행률 보고용.
+
+    Returns:
+        [{"scene_id": ..., "image_path": "...", "prompt": "...", "cached": bool}, ...]
+    """
+    if config is None:
+        config = Config()
+
+    client = OpenAI(api_key=config.openai_api_key)
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    results: list[dict] = []
+    total = len(scenes)
+
+    for idx, scene in enumerate(scenes, 1):
+        scene_id = scene.get("scene_id", idx)
+        prompt = _build_prompt(scene)
+        cache_key = _scene_cache_key(scene, character_image_path, None)
+        image_path = out_dir / _scene_filename(scene_id)
+
+        cached = False
+        existing_meta = _read_meta(image_path)
+        if (
+            image_path.exists()
+            and existing_meta
+            and existing_meta.get("cache_key") == cache_key
+        ):
+            cached = True
+            if progress_callback:
+                progress_callback(idx, total, f"씬 {scene_id} 캐시 사용")
+            print(f"  [storyboard] ({idx}/{total}) 씬 {scene_id} 캐시 재사용")
+        else:
+            if progress_callback:
+                progress_callback(idx, total, f"씬 {scene_id} 콘티 생성 중...")
+            print(f"  [storyboard] ({idx}/{total}) 씬 {scene_id} 콘티 생성 중")
+            image_bytes = _call_image_api(client, prompt, character_image_path)
+            image_path.write_bytes(image_bytes)
+            _write_meta(image_path, prompt, cache_key)
+            print(f"  [storyboard] 저장: {image_path}")
+
+        results.append({
+            "scene_id": scene_id,
+            "image_path": str(image_path),
+            "prompt": prompt,
+            "cached": cached,
+        })
+
+    return results
+
+
+def regenerate_single_scene(
+    scene: dict,
+    character_image_path: str,
+    output_path: str,
+    extra_instructions: str | None = None,
+    config: Config | None = None,
+) -> dict:
+    """
+    한 씬만 재생성. 사용자가 마음에 안 든 씬을 다시 만들 때 사용.
+    캐시 무시하고 무조건 새로 호출.
+
+    Returns: {"scene_id": ..., "image_path": "...", "prompt": "...", "cached": False}
+    """
+    if config is None:
+        config = Config()
+
+    client = OpenAI(api_key=config.openai_api_key)
+    out_path = Path(output_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    prompt = _build_prompt(scene, extra_instructions=extra_instructions)
+    cache_key = _scene_cache_key(scene, character_image_path, extra_instructions)
+
+    print(f"  [storyboard] 씬 {scene.get('scene_id')} 재생성 중...")
+    image_bytes = _call_image_api(client, prompt, character_image_path)
+    out_path.write_bytes(image_bytes)
+    _write_meta(out_path, prompt, cache_key)
+    print(f"  [storyboard] 재생성 저장: {out_path}")
+
+    return {
+        "scene_id": scene.get("scene_id"),
+        "image_path": str(out_path),
+        "prompt": prompt,
+        "cached": False,
+    }

@@ -7,6 +7,7 @@ AI 여행 유튜브 채널 자동화 파이프라인
 """
 
 import argparse
+import json
 import sys
 import traceback
 from pathlib import Path
@@ -24,6 +25,241 @@ from cost_tracker import CostTracker, print_cost_estimate
 
 
 DURATION_SCENE_COUNT = {1: 6, 2: 12, 4: 24}
+
+
+# ──────────────────────────────────────────────────────────────────────
+#  모듈화된 재사용 함수 (FastAPI 백엔드에서 호출)
+#  기존 CLI(run_pipeline) 흐름과는 독립적 — 아래 함수들은 CLI를 깨지 않는다.
+# ──────────────────────────────────────────────────────────────────────
+
+
+def _strip_code_fence(raw: str) -> str:
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    return raw.strip()
+
+
+def generate_scenario(country: str, duration_min: int, config: Config | None = None) -> dict:
+    """
+    Claude API로 여행 영상 시나리오 + 씬 리스트 생성.
+
+    Returns:
+        {
+          "country": "...",
+          "duration_min": 1,
+          "scenario": "전체 시나리오 텍스트",
+          "scenes": [
+            {"scene_id": 1, "location": "...", "description": "...",
+             "camera": "wide shot", "narration": "한국어 나레이션",
+             "prompt_en": "english prompt for video", "duration_sec": 5},
+            ...
+          ]
+        }
+    """
+    import anthropic
+
+    if config is None:
+        config = Config()
+
+    scene_count = DURATION_SCENE_COUNT.get(duration_min, 6)
+
+    system_prompt = (
+        "너는 트렌디한 한국 여성 여행 유튜버의 영상 시나리오를 짜는 PD야. "
+        f"{country} 여행 숏폼 영상의 씬 구성을 만든다. "
+        f"정확히 {scene_count}개의 씬을 만들어. "
+        "각 씬은 한 장소/한 동작 중심의 9:16 세로 영상이야. "
+        "JSON으로만 응답하고, 다음 스키마를 지켜:\n"
+        "{\n"
+        '  "scenario": "전체 시나리오 요약 (한국어, 2~3문장)",\n'
+        '  "scenes": [\n'
+        '    {"scene_id": 1, "location": "장소명(영문)", '
+        '"description": "씬에서 일어나는 행동/구도(영문)", '
+        '"camera": "카메라 앵글(예: wide shot, close-up)", '
+        '"narration": "한국어 나레이션 (60~80자)", '
+        '"prompt_en": "Kling 영상 생성용 영어 프롬프트", '
+        '"duration_sec": 5}\n'
+        "  ]\n"
+        "}"
+    )
+
+    client = anthropic.Anthropic(api_key=config.anthropic_api_key)
+    message = client.messages.create(
+        model="claude-opus-4-7",
+        max_tokens=2048,
+        system=system_prompt,
+        messages=[{
+            "role": "user",
+            "content": f"{country} {duration_min}분짜리 여행 숏폼 시나리오를 만들어줘.",
+        }],
+    )
+
+    data = json.loads(_strip_code_fence(message.content[0].text))
+    return {
+        "country": country,
+        "duration_min": duration_min,
+        "scenario": data.get("scenario", ""),
+        "scenes": data.get("scenes", []),
+    }
+
+
+def _generate_tts(text: str, out_path: Path, config: Config) -> Path | None:
+    """나레이션 텍스트를 Edge TTS로 음성 파일 생성. 실패 시 None."""
+    if not text:
+        return None
+    try:
+        import asyncio
+        import edge_tts
+
+        async def _run():
+            communicate = edge_tts.Communicate(text, config.tts_voice, rate=config.tts_rate)
+            await communicate.save(str(out_path))
+
+        asyncio.run(_run())
+        return out_path
+    except Exception as e:
+        print(f"  [tts] 음성 생성 실패 (건너뜀): {e}")
+        return None
+
+
+def generate_video_from_storyboard(
+    scenes: list[dict],
+    approved_storyboards: list[dict],
+    output_dir: str,
+    scenario_mode: str = "B",
+    seedance_mode: str = "kie",
+    config: Config | None = None,
+    progress_callback=None,
+) -> dict:
+    """
+    승인된 콘티 이미지를 reference로 Kling 영상 생성 후 합성.
+
+    Args:
+        scenes: generate_scenario()가 만든 씬 리스트
+        approved_storyboards: [{"scene_id": 1, "image_path": "..."}, ...]
+        output_dir: 출력 폴더 (예: output/video/{job_id}/)
+        scenario_mode: "A"(풀 영상) / "B"(하이브리드) — 현재는 메타로만 기록
+        seedance_mode: "kie"(자동) / "manual"(브리프만 생성)
+        progress_callback: callable(progress:int 0-100, step:str)
+
+    Returns:
+        {"final_video": "...", "clips": [...], "mode": "kie"} 또는
+        {"brief_dir": "...", "mode": "manual"}
+    """
+    from kie_client import generate_kie_clip
+
+    if config is None:
+        config = Config()
+
+    out_dir = Path(output_dir)
+    clips_dir = out_dir / "clips"
+    clips_dir.mkdir(parents=True, exist_ok=True)
+
+    storyboard_by_id = {sb.get("scene_id"): sb.get("image_path") for sb in approved_storyboards}
+
+    def _report(progress: int, step: str):
+        if progress_callback:
+            progress_callback(progress, step)
+        print(f"  [video] {progress}% — {step}")
+
+    if seedance_mode == "manual":
+        # MVP: manual 모드는 자동 영상 생성 대신 안내만 반환 (Phase 2에서 resume 흐름 연동)
+        _report(100, "manual 모드 — 콘티 승인본 저장 완료")
+        return {
+            "mode": "manual",
+            "output_dir": str(out_dir),
+            "scenes": scenes,
+            "approved_storyboards": approved_storyboards,
+            "note": "manual 모드는 클립을 직접 생성해야 합니다 (Phase 2 연동 예정).",
+        }
+
+    total_steps = len(scenes) + 1  # 씬별 Kling + 최종 합성
+    clip_paths: list[Path] = []
+
+    for i, scene in enumerate(scenes, 1):
+        scene_id = scene.get("scene_id", i)
+        _report(int((i - 1) / total_steps * 100), f"씬 {scene_id} 영상 생성 중...")
+
+        ref_path = storyboard_by_id.get(scene_id)
+        ref_image = Path(ref_path) if ref_path else None
+
+        kie_scene = {
+            "prompt_en": scene.get("prompt_en") or scene.get("description", ""),
+            "duration_sec": scene.get("duration_sec", 5),
+        }
+        dest = clips_dir / f"scene_{scene_id}.mp4"
+        clip = generate_kie_clip(kie_scene, ref_image, dest, config)
+
+        # 나레이션이 있으면 TTS 합성
+        narration = scene.get("narration")
+        if narration:
+            audio_path = out_dir / f"scene_{scene_id}_narration.mp3"
+            audio = _generate_tts(narration, audio_path, config)
+            if audio:
+                merged = _merge_clip_audio(clip, audio, scene_id, config, out_dir)
+                clip = merged
+
+        clip_paths.append(clip)
+
+    _report(int(len(scenes) / total_steps * 100), "최종 영상 합성 중...")
+    final_video = _concat_clips(clip_paths, out_dir, config)
+
+    _report(100, "완료")
+    return {
+        "mode": "kie",
+        "final_video": str(final_video),
+        "clips": [str(p) for p in clip_paths],
+        "scenario_mode": scenario_mode,
+    }
+
+
+def _merge_clip_audio(clip: Path, audio: Path, scene_id, config: Config, out_dir: Path) -> Path:
+    """클립 + 나레이션 음성 합성 (ffmpeg). compose.py와 동일 패턴."""
+    import subprocess
+
+    out_path = out_dir / "clips" / f"scene_{scene_id}_with_audio.mp4"
+    cmd = [
+        "ffmpeg", "-y",
+        "-stream_loop", "-1", "-i", str(clip),
+        "-i", str(audio),
+        "-c:v", "libx264", "-c:a", "aac", "-b:a", "192k",
+        "-shortest",
+        "-vf", f"scale={config.video_width}:{config.video_height}:force_original_aspect_ratio=decrease,"
+               f"pad={config.video_width}:{config.video_height}:(ow-iw)/2:(oh-ih)/2:black",
+        "-r", str(config.video_fps),
+        "-movflags", "+faststart",
+        str(out_path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"  [video] 음성 합성 실패, 원본 클립 사용: {result.stderr[:200]}")
+        return clip
+    return out_path
+
+
+def _concat_clips(clip_paths: list[Path], out_dir: Path, config: Config) -> Path:
+    """모든 클립을 하나로 이어붙임 (ffmpeg concat)."""
+    import subprocess
+
+    concat_list = out_dir / "concat_list.txt"
+    concat_list.write_text(
+        "".join(f"file '{p.resolve()}'\n" for p in clip_paths),
+        encoding="utf-8",
+    )
+    out_path = out_dir / "final.mp4"
+    cmd = [
+        "ffmpeg", "-y",
+        "-f", "concat", "-safe", "0", "-i", str(concat_list),
+        "-c:v", "libx264", "-c:a", "aac", "-b:a", "192k",
+        "-movflags", "+faststart",
+        str(out_path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"최종 합성 실패: {result.stderr}")
+    return out_path
 
 
 def parse_args():

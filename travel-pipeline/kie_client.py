@@ -93,6 +93,37 @@ def _download(url: str, dest: Path):
             f.write(chunk)
 
 
+def generate_kie_clip(
+    scene: dict,
+    ref_image: Path | None,
+    dest: Path,
+    config: Config,
+    max_retries: int = MAX_RETRIES,
+) -> Path:
+    """
+    단일 씬 영상 생성 (per-scene reference 지원).
+    - dest가 이미 있으면 캐시 반환.
+    - 실패 시 max_retries회까지 재시도.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists():
+        print(f"  [kie] 캐시 사용: {dest.name}")
+        return dest
+
+    last_err: Exception | None = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            task_id = _submit(scene, ref_image, config)
+            video_url = _poll(task_id, config)
+            _download(video_url, dest)
+            return dest
+        except Exception as e:
+            last_err = e
+            print(f"  [kie] 실패 (시도 {attempt}/{max_retries}): {e}")
+
+    raise RuntimeError(f"KIE 생성 실패: {last_err}")
+
+
 def generate_kie_clips(brief: dict, brief_dir: Path, config: Config) -> list[Path]:
     """
     brief["scenes"]의 모든 씬에 대해 KIE API로 영상 생성.
