@@ -33,13 +33,13 @@ export const TRACK_BADGE: Record<Track, string> = {
 export const SCENARIO_TONES = ["여행", "일상", "분석", "정성", "리뷰"] as const
 
 export const STORYBOARD_MODELS = [
-  { value: "gpt-image-1", label: "gpt-image-1 (현재)", disabled: false },
-  { value: "z-image-turbo", label: "Z-Image Turbo (Phase 3 예정)", disabled: true },
+  { value: "gpt-image-1", label: "gpt-image-1 (기본, $0.25/장)", disabled: false },
+  { value: "z-image-turbo", label: "Z-Image Turbo (저렴, $0.01/장, WaveSpeed)", disabled: false },
 ] as const
 
 export const VIDEO_MODELS = [
-  { value: "kling-v1", label: "Kling v1 (현재)", disabled: false },
-  { value: "kling-v3", label: "Kling v3 + Character ID (Phase 3 예정)", disabled: true },
+  { value: "kling-v1", label: "Kling v1 (기본)", disabled: false },
+  { value: "kling-v3", label: "Kling v3 + Character ID (WaveSpeed, 일관성 ↑)", disabled: false },
 ] as const
 
 export const SUBTITLE_STYLES = [
