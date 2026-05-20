@@ -1,9 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { RefreshCw, Pencil, Check, X, ChevronDown, ChevronUp, ArrowRight, Loader2 } from "lucide-react"
+import { useChannels } from "@/components/channels/ChannelProvider"
 
+// 기존 여행 기본값 (100% 보존)
 const META = {
   channel: "방콕 여행 채널",
   spots: "왓아룬, 왕궁, 카오산로드, 아시아티크",
@@ -37,6 +39,56 @@ const INITIAL_SCENES = [
   { id: "S23", title: "하이라이트 몽타주 — 베스트 컷",           sec: 10, desc: "오늘 최고 순간 5컷 빠른 편집, BGM 클라이맥스" },
   { id: "S24", title: "아웃트로 — 구독·좋아요 CTA",             sec: 10, desc: "카메라 향해 구독 부탁, 다음 여행지 티저 공개" },
 ]
+
+// ── 파라미터 옵션 ───────────────────────────────────────────────────
+const CATEGORIES = [
+  "여행", "음식·맛집", "라이프스타일", "패션·뷰티", "교육·정보",
+  "유머·엔터테인먼트", "동기부여", "일상", "비즈니스",
+]
+const TONES = ["밝고 경쾌", "감성적·잔잔", "유머러스", "진지·정보전달", "영감·동기부여"]
+const DURATIONS = [
+  { label: "1분", min: 1 },
+  { label: "2분", min: 2 },
+  { label: "4분", min: 4 },
+  { label: "10분", min: 10 },
+]
+const SCENE_PRESETS = [6, 12, 24]
+const MODEL_COUNTS = ["1인", "2인", "3인+"]
+
+// 분량 → 권장 장면 수 (10초 기준)
+function recommendSceneCount(min: number): number {
+  return Math.max(6, min * 6)
+}
+
+const SCENARIO_STORE_KEY = "reelbot.scenarios.v1"
+
+// ── Chip ────────────────────────────────────────────────────────────
+function Chip({
+  active,
+  onClick,
+  children,
+  disabled,
+}: {
+  active: boolean
+  onClick: () => void
+  children: React.ReactNode
+  disabled?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-all disabled:opacity-50 ${
+        active
+          ? "border-primary/60 bg-primary/15 text-foreground"
+          : "border-border bg-background text-muted-foreground hover:border-primary/30 hover:text-foreground"
+      }`}
+    >
+      {children}
+    </button>
+  )
+}
 
 function SceneRow({
   scene,
@@ -111,31 +163,149 @@ function SceneRow({
   )
 }
 
+type Scene = { id: string; title: string; sec: number; desc: string }
+
 export default function ScenarioPage() {
   const router = useRouter()
-  const [scenes, setScenes] = useState(INITIAL_SCENES)
+  const { channels } = useChannels()
+  const firstChannel = channels[0]
+
+  // 시나리오 파라미터
+  const [category, setCategory] = useState("여행")
+  const [tone, setTone] = useState("밝고 경쾌")
+  const [format, setFormat] = useState<"long" | "short">(
+    firstChannel?.stack.contentType === "short" ? "short" : "long"
+  )
+  const [durationMin, setDurationMin] = useState(4)
+  const [customDuration, setCustomDuration] = useState(false)
+  const [sceneCount, setSceneCount] = useState(24)
+  const [customScene, setCustomScene] = useState(false)
+  const [modelCount, setModelCount] = useState("1인")
+  const [topic, setTopic] = useState(META.spots)
+  const [selectedModels, setSelectedModels] = useState<string[]>(
+    firstChannel?.stack.characters ?? []
+  )
+  const [libraryNames, setLibraryNames] = useState<string[]>([])
+
+  const [scenes, setScenes] = useState<Scene[]>(INITIAL_SCENES)
   const [expanded, setExpanded] = useState(false)
   const [generating, setGenerating] = useState(false)
 
   const visibleScenes = expanded ? scenes : scenes.slice(0, 4)
+  const durationLabel = `${durationMin}분`
+
+  // 캐릭터 라이브러리에서 모델 목록 로드
+  useEffect(() => {
+    fetch("/api/character/library")
+      .then((r) => r.json())
+      .then((d) => {
+        const names = (d.characters ?? [])
+          .map((c: { name?: string }) => c.name)
+          .filter(Boolean) as string[]
+        setLibraryNames(names)
+      })
+      .catch(() => { /* 무시 */ })
+  }, [])
+
+  // 경쟁사 분석 등에서 넘어온 파라미터 자동 채우기
+  useEffect(() => {
+    let raw: string | null = null
+    try {
+      raw = sessionStorage.getItem("reelbot:scenarioParams")
+    } catch {
+      return
+    }
+    if (!raw) return
+    try {
+      const p = JSON.parse(raw)
+      if (p.category && CATEGORIES.includes(p.category)) setCategory(p.category)
+      if (p.tone && TONES.includes(p.tone)) setTone(p.tone)
+      if (p.format === "long" || p.format === "short") setFormat(p.format)
+      if (typeof p.durationMin === "number" && p.durationMin > 0) {
+        setDurationMin(p.durationMin)
+        setCustomDuration(!DURATIONS.some((d) => d.min === p.durationMin))
+      }
+      if (typeof p.sceneCount === "number" && p.sceneCount > 0) {
+        setSceneCount(p.sceneCount)
+        setCustomScene(!SCENE_PRESETS.includes(p.sceneCount))
+      }
+      if (typeof p.modelCount === "string") setModelCount(p.modelCount)
+      if (typeof p.topic === "string") setTopic(p.topic)
+      if (Array.isArray(p.models)) setSelectedModels(p.models)
+    } catch {
+      /* 손상된 값 무시 */
+    } finally {
+      sessionStorage.removeItem("reelbot:scenarioParams")
+    }
+  }, [])
+
+  function handleDurationSelect(min: number) {
+    setCustomDuration(false)
+    setDurationMin(min)
+    // 분량 선택 시 장면 수 자동 추천
+    if (!customScene) {
+      const rec = recommendSceneCount(min)
+      setSceneCount(rec)
+      setCustomScene(!SCENE_PRESETS.includes(rec))
+    }
+  }
+
+  function toggleModel(name: string) {
+    setSelectedModels((prev) =>
+      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]
+    )
+  }
+
+  const persistScenario = useCallback(
+    (generated: Scene[]) => {
+      try {
+        const raw = localStorage.getItem(SCENARIO_STORE_KEY)
+        const list = raw ? (JSON.parse(raw) as unknown[]) : []
+        list.push({
+          createdAt: new Date().toISOString(),
+          params: { category, tone, format, durationMin, sceneCount, modelCount, topic, models: selectedModels },
+          scenes: generated,
+        })
+        localStorage.setItem(SCENARIO_STORE_KEY, JSON.stringify(list))
+      } catch {
+        /* 저장 실패는 무시 */
+      }
+    },
+    [category, tone, format, durationMin, sceneCount, modelCount, topic, selectedModels]
+  )
 
   async function handleRegenerate() {
     setGenerating(true)
     try {
+      const isTravel = category === "여행"
       const res = await fetch("/api/scenario/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          channel: META.channel,
-          spots: META.spots,
-          duration: META.duration,
-          mode: META.mode,
+          category,
+          topic,
+          tone,
+          format,
+          durationMin,
+          sceneCount,
+          modelCount,
+          models: selectedModels,
+          // 여행 카테고리는 기존 동작 보존을 위해 레거시 필드도 전달
+          ...(isTravel
+            ? {
+                channel: firstChannel?.name ?? META.channel,
+                spots: topic || META.spots,
+                duration: `${durationLabel} (${sceneCount}장면)`,
+                mode: META.mode,
+              }
+            : {}),
         }),
       })
       const data = await res.json()
       if (!res.ok || !data.success) throw new Error(data.error || "생성 실패")
       setScenes(data.scenes)
       setExpanded(false)
+      persistScenario(data.scenes)
     } catch (err) {
       console.error(err)
       alert("시나리오 생성에 실패했습니다. 다시 시도해주세요.")
@@ -148,29 +318,182 @@ export default function ScenarioPage() {
     setScenes((prev) => prev.map((s) => (s.id === id ? { ...s, title, desc } : s)))
   }
 
+  const modelOptions = Array.from(new Set([...selectedModels, ...libraryNames]))
+
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       <div className="flex shrink-0 items-center justify-between border-b border-border px-6 py-4">
         <div>
           <h1 className="text-xl font-semibold text-foreground">시나리오 생성</h1>
-          <p className="mt-0.5 text-xs text-muted-foreground">AI가 분석한 인사이트 기반으로 대본을 자동 생성합니다</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">카테고리·톤·분량을 선택하면 AI가 대본을 자동 생성합니다</p>
         </div>
         <button
           onClick={handleRegenerate}
           disabled={generating}
-          className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary/40 disabled:opacity-50"
+          className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground shadow-md shadow-primary/20 transition-opacity hover:opacity-90 disabled:opacity-50"
         >
           {generating
-            ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-            : <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />}
-          {generating ? "생성 중..." : "시나리오 재생성"}
+            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            : <RefreshCw className="h-3.5 w-3.5" />}
+          {generating ? "생성 중..." : "시나리오 생성"}
         </button>
       </div>
 
       <div className="flex-1 overflow-y-auto">
         <div className="flex flex-col gap-4 p-6">
+          {/* 파라미터 패널 */}
+          <div className="flex flex-col gap-5 rounded-xl border border-border bg-card p-5">
+            {/* 카테고리 */}
+            <div>
+              <label className="mb-2 block text-xs font-medium text-muted-foreground">주제 카테고리</label>
+              <div className="flex flex-wrap gap-2">
+                {CATEGORIES.map((c) => (
+                  <Chip key={c} active={category === c} onClick={() => setCategory(c)} disabled={generating}>
+                    {c}
+                  </Chip>
+                ))}
+              </div>
+            </div>
+
+            {/* 소재 */}
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">소재 (주제 키워드)</label>
+              <input
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+                disabled={generating}
+                placeholder="예: 방콕 여행 / 강남 맛집 투어 / 직장인 모닝 루틴"
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/30 disabled:opacity-50"
+              />
+            </div>
+
+            {/* 톤 */}
+            <div>
+              <label className="mb-2 block text-xs font-medium text-muted-foreground">감정·톤</label>
+              <div className="flex flex-wrap gap-2">
+                {TONES.map((t) => (
+                  <Chip key={t} active={tone === t} onClick={() => setTone(t)} disabled={generating}>
+                    {t}
+                  </Chip>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+              {/* 영상 형식 */}
+              <div>
+                <label className="mb-2 block text-xs font-medium text-muted-foreground">영상 형식</label>
+                <div className="flex flex-wrap gap-2">
+                  <Chip active={format === "long"} onClick={() => setFormat("long")} disabled={generating}>롱폼 (16:9)</Chip>
+                  <Chip active={format === "short"} onClick={() => setFormat("short")} disabled={generating}>숏폼 (9:16)</Chip>
+                </div>
+              </div>
+
+              {/* 출연 모델 수 */}
+              <div>
+                <label className="mb-2 block text-xs font-medium text-muted-foreground">출연 모델 수</label>
+                <div className="flex flex-wrap gap-2">
+                  {MODEL_COUNTS.map((m) => (
+                    <Chip key={m} active={modelCount === m} onClick={() => setModelCount(m)} disabled={generating}>
+                      {m}
+                    </Chip>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* 분량 */}
+            <div>
+              <label className="mb-2 block text-xs font-medium text-muted-foreground">분량</label>
+              <div className="flex flex-wrap items-center gap-2">
+                {DURATIONS.map((d) => (
+                  <Chip
+                    key={d.min}
+                    active={!customDuration && durationMin === d.min}
+                    onClick={() => handleDurationSelect(d.min)}
+                    disabled={generating}
+                  >
+                    {d.label}
+                  </Chip>
+                ))}
+                <Chip active={customDuration} onClick={() => setCustomDuration(true)} disabled={generating}>직접 입력</Chip>
+                {customDuration && (
+                  <input
+                    type="number"
+                    min={1}
+                    value={durationMin}
+                    onChange={(e) => setDurationMin(Math.max(1, Number(e.target.value) || 1))}
+                    disabled={generating}
+                    className="w-20 rounded-lg border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/30 disabled:opacity-50"
+                  />
+                )}
+                {customDuration && <span className="text-xs text-muted-foreground">분</span>}
+              </div>
+            </div>
+
+            {/* 장면 수 */}
+            <div>
+              <label className="mb-2 block text-xs font-medium text-muted-foreground">
+                장면 수 <span className="text-muted-foreground/60">(분량 선택 시 자동 추천)</span>
+              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                {SCENE_PRESETS.map((n) => (
+                  <Chip
+                    key={n}
+                    active={!customScene && sceneCount === n}
+                    onClick={() => { setCustomScene(false); setSceneCount(n) }}
+                    disabled={generating}
+                  >
+                    {n}
+                  </Chip>
+                ))}
+                <Chip active={customScene} onClick={() => setCustomScene(true)} disabled={generating}>직접 입력</Chip>
+                {customScene && (
+                  <input
+                    type="number"
+                    min={1}
+                    value={sceneCount}
+                    onChange={(e) => setSceneCount(Math.max(1, Number(e.target.value) || 1))}
+                    disabled={generating}
+                    className="w-20 rounded-lg border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/30 disabled:opacity-50"
+                  />
+                )}
+                {customScene && <span className="text-xs text-muted-foreground">개</span>}
+              </div>
+            </div>
+
+            {/* 모델 선택 */}
+            <div>
+              <label className="mb-2 block text-xs font-medium text-muted-foreground">
+                모델 선택 <span className="text-muted-foreground/60">(채널 스택 기본값 자동 불러옴)</span>
+              </label>
+              {modelOptions.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {modelOptions.map((name) => (
+                    <Chip
+                      key={name}
+                      active={selectedModels.includes(name)}
+                      onClick={() => toggleModel(name)}
+                      disabled={generating}
+                    >
+                      {selectedModels.includes(name) && "✓ "}{name}
+                    </Chip>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground/60">캐릭터 라이브러리에 저장된 모델이 없습니다</p>
+              )}
+            </div>
+          </div>
+
+          {/* 요약 카드 */}
           <div className="grid grid-cols-4 gap-3">
-            {Object.entries({ 채널: META.channel, 여행지: META.spots, "영상 길이": META.duration, 모드: META.mode }).map(([label, value]) => (
+            {Object.entries({
+              카테고리: category,
+              소재: topic || "—",
+              "영상 길이": `${durationLabel} (${sceneCount}장면)`,
+              형식: format === "short" ? "숏폼 (9:16)" : "롱폼 (16:9)",
+            }).map(([label, value]) => (
               <div key={label} className="rounded-xl border border-border bg-card p-3">
                 <p className="text-[10px] text-muted-foreground">{label}</p>
                 <p className="mt-1 text-xs font-semibold text-foreground leading-snug">{value}</p>
@@ -192,16 +515,18 @@ export default function ScenarioPage() {
                 </div>
               ))}
             </div>
-            <button
-              onClick={() => setExpanded((p) => !p)}
-              className="flex w-full items-center justify-center gap-1.5 border-t border-border py-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary/30 hover:text-foreground"
-            >
-              {expanded ? (
-                <><ChevronUp className="h-3.5 w-3.5" /> 접기</>
-              ) : (
-                <><ChevronDown className="h-3.5 w-3.5" /> 나머지 {scenes.length - 4}개 장면 더보기</>
-              )}
-            </button>
+            {scenes.length > 4 && (
+              <button
+                onClick={() => setExpanded((p) => !p)}
+                className="flex w-full items-center justify-center gap-1.5 border-t border-border py-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary/30 hover:text-foreground"
+              >
+                {expanded ? (
+                  <><ChevronUp className="h-3.5 w-3.5" /> 접기</>
+                ) : (
+                  <><ChevronDown className="h-3.5 w-3.5" /> 나머지 {scenes.length - 4}개 장면 더보기</>
+                )}
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -212,7 +537,7 @@ export default function ScenarioPage() {
             총 {scenes.length}장면
           </span>
           <span className="text-muted-foreground">/</span>
-          <span className="text-sm text-muted-foreground">4분</span>
+          <span className="text-sm text-muted-foreground">{durationLabel}</span>
         </div>
         <button
           onClick={() => router.push("/video")}
