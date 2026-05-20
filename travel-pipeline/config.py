@@ -2,6 +2,15 @@ import os
 from dataclasses import dataclass, field
 from typing import List
 
+# 리포 루트 (이 파일은 travel-pipeline/ 아래에 있고 public/ 은 루트에 있음)
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# 기본 캐릭터: 김이안 (char_1779198264788) — 콘티 reference 일관성 유지용
+DEFAULT_CHARACTER_ID = "char_1779198264788"
+_DEFAULT_CHARACTER_FRONT = os.path.join(
+    _PROJECT_ROOT, "public", "character-seeds", DEFAULT_CHARACTER_ID, "front.png"
+)
+
 @dataclass
 class BangkokSpot:
     id: str
@@ -48,7 +57,7 @@ class Config:
     character_library_front: str = field(
         default_factory=lambda: os.environ.get(
             "CHARACTER_LIBRARY_FRONT",
-            r"C:\Users\micro\reelbot-pipeline\public\character-seeds\char_1779198264788\front.png"
+            _DEFAULT_CHARACTER_FRONT
         )
     )
 
