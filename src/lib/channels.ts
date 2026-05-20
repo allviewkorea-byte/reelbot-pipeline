@@ -42,6 +42,26 @@ export const VIDEO_MODELS = [
   { value: "kling-v3", label: "Kling v3 + Character ID (WaveSpeed, 일관성 ↑)", disabled: false },
 ] as const
 
+// 콘티/영상 비용 추정 (USD) — Phase 3 어댑터 단가와 일치.
+export const STORYBOARD_MODEL_COST: Record<string, number> = {
+  "gpt-image-1": 0.25,
+  "z-image-turbo": 0.01,
+}
+
+// 영상은 초당 단가 추정. kling-v1(기존 KIE)은 별도 추정 없음(0으로 표기).
+export const VIDEO_MODEL_COST_PER_SEC: Record<string, number> = {
+  "kling-v1": 0,
+  "kling-v3": 0.28,
+}
+
+export function storyboardCost(model: string, sceneCount: number): number {
+  return (STORYBOARD_MODEL_COST[model] ?? STORYBOARD_MODEL_COST["gpt-image-1"]) * sceneCount
+}
+
+export function videoCost(model: string, totalSeconds: number): number {
+  return (VIDEO_MODEL_COST_PER_SEC[model] ?? 0) * totalSeconds
+}
+
 export const SUBTITLE_STYLES = [
   { value: "basic", label: "기본" },
   { value: "caption", label: "캡션" },

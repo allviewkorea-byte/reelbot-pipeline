@@ -68,6 +68,7 @@ export function useStoryboard() {
         storyboardJobId?: string
         characterImagePath?: string | null
         extraInstructions?: string | null
+        storyboardModel?: string
         onDone?: (sb: Storyboard) => void
       },
     ) => {
@@ -79,6 +80,7 @@ export function useStoryboard() {
           scene,
           character_image_path: opts?.characterImagePath ?? null,
           extra_instructions: opts?.extraInstructions ?? null,
+          storyboard_model: opts?.storyboardModel,
         }
         const { job_id } = await regenerateScene(params)
         return await new Promise<Storyboard | null>((resolve) => {
