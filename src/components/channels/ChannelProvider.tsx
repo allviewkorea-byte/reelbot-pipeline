@@ -5,8 +5,12 @@ import {
   DEFAULT_CHANNELS,
   getDefaultRatio,
   type Channel,
+  type ContentType,
+  type Platform,
   type StackConfig,
 } from "@/lib/channels"
+
+const NEW_CHANNEL_COLORS = ["#8b5cf6", "#06b6d4", "#f59e0b", "#ec4899", "#10b981"]
 
 const STORAGE_KEY = "reelbot.channels.v1"
 
@@ -14,6 +18,12 @@ interface ChannelContextValue {
   channels: Channel[]
   hydrated: boolean
   getChannel: (id: string) => Channel | undefined
+  createChannel: (input: {
+    name: string
+    platform: Platform
+    contentType: ContentType
+    character?: string
+  }) => string
   updateStack: (id: string, patch: Partial<StackConfig>) => void
   updateChannel: (id: string, patch: Partial<Omit<Channel, "stack">>) => void
   cloneChannel: (sourceId: string, newName: string) => string | null
@@ -62,6 +72,41 @@ export function ChannelProvider({ children }: { children: React.ReactNode }) {
   const getChannel = useCallback(
     (id: string) => channels.find((c) => c.id === id),
     [channels]
+  )
+
+  const createChannel = useCallback<ChannelContextValue["createChannel"]>(
+    ({ name, platform, contentType, character }) => {
+      const newId = genId(name)
+      const channel: Channel = {
+        id: newId,
+        name,
+        platform,
+        character: character || "지수",
+        subscribers: "0",
+        videos: 0,
+        revenue: 0,
+        avgViews: "0",
+        status: "준비 중",
+        statusVariant: "pending",
+        color: NEW_CHANNEL_COLORS[Math.floor(Math.random() * NEW_CHANNEL_COLORS.length)],
+        stack: {
+          track: "auto",
+          characters: character ? [character] : ["지수"],
+          scenarioTone: "여행",
+          storyboardModel: "gpt-image-1",
+          videoModel: "kling-v1",
+          subtitleStyle: "basic",
+          publishTargets: [platform],
+          schedule: "매일 09시",
+          contentType,
+          ratio: getDefaultRatio(platform, contentType),
+          ratioOverride: false,
+        },
+      }
+      setChannels((prev) => [...prev, channel])
+      return newId
+    },
+    []
   )
 
   const updateStack = useCallback((id: string, patch: Partial<StackConfig>) => {
@@ -116,6 +161,7 @@ export function ChannelProvider({ children }: { children: React.ReactNode }) {
         channels,
         hydrated,
         getChannel,
+        createChannel,
         updateStack,
         updateChannel,
         cloneChannel,
