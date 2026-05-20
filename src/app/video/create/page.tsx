@@ -1,7 +1,7 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
-import { Wand2, AlertTriangle, ArrowLeft } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Wand2, AlertTriangle, ArrowLeft, DollarSign } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { useStoryboard } from "@/hooks/useStoryboard"
@@ -11,17 +11,30 @@ import { StoryboardReview } from "@/components/video/StoryboardReview"
 import { ProgressTracker } from "@/components/video/ProgressTracker"
 import { ResultViewer } from "@/components/video/ResultViewer"
 import type { SceneStatus } from "@/components/video/SceneCard"
+import { useChannels } from "@/components/channels/ChannelProvider"
+import {
+  STORYBOARD_MODELS,
+  VIDEO_MODELS,
+  TRACK_LABELS,
+  storyboardCost,
+  videoCost,
+} from "@/lib/channels"
 
 type Phase = "input" | "storyboard" | "generating" | "done"
 
 const DURATION_OPTIONS = [
-  { label: "1분 (6씬)", min: 1 },
-  { label: "2분 (12씬)", min: 2 },
-  { label: "4분 (24씬)", min: 4 },
+  { label: "1분 (6씬)", min: 1, scenes: 6 },
+  { label: "2분 (12씬)", min: 2, scenes: 12 },
+  { label: "4분 (24씬)", min: 4, scenes: 24 },
 ]
 
-// Phase 3 대비 — UI placeholder (동작 없음)
-const MODEL_OPTIONS = ["Kling v1", "Kling v2.6", "Kling v3.0"]
+const DEFAULT_STORYBOARD_MODEL = "gpt-image-1"
+const DEFAULT_VIDEO_MODEL = "kling-v1"
+const ASSUMED_SEC_PER_SCENE = 5
+
+function modelLabel(list: ReadonlyArray<{ value: string; label: string }>, value: string): string {
+  return list.find((m) => m.value === value)?.label ?? value
+}
 
 export default function VideoCreatePage() {
   const [phase, setPhase] = useState<Phase>("input")
@@ -32,8 +45,33 @@ export default function VideoCreatePage() {
   const [scenes, setScenes] = useState<Scene[]>([])
   const [statuses, setStatuses] = useState<Record<string, SceneStatus>>({})
 
+  // ?channel= 로 진입하면 해당 채널 스택(모델/트랙)을 적용한다. (클라이언트에서만 읽음)
+  const { getChannel } = useChannels()
+  const [channelId, setChannelId] = useState<string | null>(null)
+  useEffect(() => {
+    const cid = new URLSearchParams(window.location.search).get("channel")
+    setChannelId(cid)
+  }, [])
+  const channel = channelId ? getChannel(channelId) : undefined
+
+  const storyboardModel = channel?.stack.storyboardModel ?? DEFAULT_STORYBOARD_MODEL
+  const videoModel = channel?.stack.videoModel ?? DEFAULT_VIDEO_MODEL
+  // 완전 자동(fullAuto)일 때만 콘티 완료 후 영상 자동 진행. 그 외엔 모든 트랙에서
+  // 콘티 검토 후 사용자가 '영상 생성 시작'을 눌러야 비싼 영상 단계로 넘어간다.
+  const autoAdvance = channel?.stack.fullAuto === true
+
   const storyboard = useStoryboard()
   const video = useVideoGeneration()
+
+  // 비용 추정: 콘티 단계 전엔 길이 옵션의 씬 수로, 이후엔 실제 씬으로 계산.
+  const expectedScenes =
+    DURATION_OPTIONS.find((o) => o.min === durationMin)?.scenes ?? 12
+  const sceneCount = scenes.length || expectedScenes
+  const totalSeconds = scenes.length
+    ? scenes.reduce((sum, s) => sum + (s.duration_sec ?? ASSUMED_SEC_PER_SCENE), 0)
+    : sceneCount * ASSUMED_SEC_PER_SCENE
+  const contiCost = storyboardCost(storyboardModel, sceneCount)
+  const videoEst = videoCost(videoModel, totalSeconds)
 
   // ── 콘티 생성: 시나리오 → 씬 리스트 → 콘티 이미지 ──
   const handleStartStoryboard = useCallback(async () => {
@@ -54,13 +92,17 @@ export default function VideoCreatePage() {
         Object.fromEntries(sc.map((s) => [String(s.scene_id), "pending" as SceneStatus])),
       )
       setPhase("storyboard")
-      await storyboard.generate({ scenario: res.scenario ?? "", scenes: sc })
+      await storyboard.generate({
+        scenario: res.scenario ?? "",
+        scenes: sc,
+        storyboard_model: storyboardModel,
+      })
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "콘티 생성에 실패했습니다.")
     } finally {
       setPreparingScenario(false)
     }
-  }, [country, durationMin, storyboard])
+  }, [country, durationMin, storyboard, storyboardModel])
 
   const handleApprove = useCallback((sceneId: string) => {
     setStatuses((prev) => ({
@@ -78,13 +120,15 @@ export default function VideoCreatePage() {
       await storyboard.regenerate(numericId, scene as unknown as Record<string, unknown>, {
         storyboardJobId: storyboard.job?.job_id,
         extraInstructions: extra ?? null,
+        storyboardModel,
       })
       setStatuses((prev) => ({ ...prev, [sceneId]: "pending" }))
       toast.success(`${sceneId} 재생성 완료`)
     },
-    [scenes, storyboard],
+    [scenes, storyboard, storyboardModel],
   )
 
+  const autoStartedRef = useRef(false)
   const handleStartVideo = useCallback(async () => {
     setPhase("generating")
     await video.start({
@@ -93,8 +137,36 @@ export default function VideoCreatePage() {
       approved_storyboards: storyboard.storyboards,
       scenario_mode: "B",
       seedance_mode: "kie",
+      video_model: videoModel,
     })
-  }, [scenes, storyboard, video])
+  }, [scenes, storyboard, video, videoModel])
+
+  // 완전 자동 모드에서만: 콘티가 모두 생성되면 사용자 개입 없이 영상 단계로 진행.
+  useEffect(() => {
+    if (!autoAdvance) return
+    if (phase !== "storyboard") return
+    if (storyboard.isGenerating || storyboard.error) return
+    if (scenes.length === 0 || storyboard.storyboards.length < scenes.length) return
+    if (autoStartedRef.current) return
+    autoStartedRef.current = true
+    toast.info("완전 자동 모드: 콘티 완료 → 영상 생성을 자동으로 시작합니다.")
+    handleStartVideo()
+  }, [
+    autoAdvance,
+    phase,
+    scenes.length,
+    storyboard.isGenerating,
+    storyboard.error,
+    storyboard.storyboards.length,
+    handleStartVideo,
+  ])
+
+  function resetToInput() {
+    setPhase("input")
+    setScenes([])
+    setStatuses({})
+    autoStartedRef.current = false
+  }
 
   // 영상 완료 시 done 단계로 (파생값 — setState 효과 없이 렌더에서 계산)
   const effectivePhase: Phase =
@@ -104,11 +176,13 @@ export default function VideoCreatePage() {
     () =>
       ({
         input: "여행지를 입력하고 콘티 생성을 시작하세요",
-        storyboard: "생성된 콘티를 검토하고 승인하세요",
+        storyboard: autoAdvance
+          ? "콘티 생성 후 자동으로 영상 단계로 진행됩니다"
+          : "생성된 콘티를 검토하고 승인하세요",
         generating: "영상을 생성하는 중입니다",
         done: "영상이 완성되었습니다",
       })[effectivePhase],
-    [effectivePhase],
+    [effectivePhase, autoAdvance],
   )
 
   return (
@@ -120,15 +194,7 @@ export default function VideoCreatePage() {
           <p className="mt-0.5 text-xs text-muted-foreground">{headerSub}</p>
         </div>
         {effectivePhase !== "input" && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setPhase("input")
-              setScenes([])
-              setStatuses({})
-            }}
-          >
+          <Button variant="outline" size="sm" onClick={resetToInput}>
             <ArrowLeft className="h-4 w-4" />
             처음으로
           </Button>
@@ -138,6 +204,15 @@ export default function VideoCreatePage() {
       <div className="container mx-auto w-full max-w-5xl px-6 py-8">
         {effectivePhase === "input" && (
           <div className="mx-auto flex max-w-md flex-col gap-5 rounded-xl border border-border bg-card p-6">
+            {channel && (
+              <div className="flex items-center justify-between rounded-lg border border-border/60 bg-background/40 px-3 py-2 text-xs">
+                <span className="text-muted-foreground">채널</span>
+                <span className="font-medium text-foreground">
+                  {channel.name} · {TRACK_LABELS[channel.stack.track]}
+                </span>
+              </div>
+            )}
+
             <div className="flex flex-col gap-2">
               <label className="text-xs font-medium text-muted-foreground">여행지 (국가 / 도시)</label>
               <input
@@ -167,26 +242,32 @@ export default function VideoCreatePage() {
               </div>
             </div>
 
-            {/* Phase 3 대비 placeholder — 동작 없음 */}
-            <div className="flex flex-col gap-2 opacity-60">
-              <label className="text-xs font-medium text-muted-foreground">
-                영상 모델 <span className="text-[10px]">(준비 중)</span>
-              </label>
-              <select
-                disabled
-                className="cursor-not-allowed rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-muted-foreground"
-              >
-                {MODEL_OPTIONS.map((m) => (
-                  <option key={m}>{m}</option>
-                ))}
-              </select>
+            {/* 모델 + 비용 안내 (채널 스택에서 결정됨) */}
+            <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-background/40 p-3">
+              <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                <DollarSign className="h-3.5 w-3.5 text-emerald-400" />
+                예상 비용
+              </div>
+              <CostRow
+                label="콘티"
+                model={modelLabel(STORYBOARD_MODELS, storyboardModel)}
+                detail={`${sceneCount}장 × $${storyboardCost(storyboardModel, 1).toFixed(2)}`}
+                cost={contiCost}
+              />
+              <CostRow
+                label="영상"
+                model={modelLabel(VIDEO_MODELS, videoModel)}
+                detail={videoEst > 0 ? `${totalSeconds}초 추정` : "추정 단가 없음"}
+                cost={videoEst}
+              />
+              {!channel && (
+                <p className="mt-0.5 text-[10px] text-muted-foreground">
+                  채널을 통해 진입하면 채널 스택의 모델/트랙 설정이 적용됩니다.
+                </p>
+              )}
             </div>
 
-            <Button
-              className="mt-1"
-              disabled={preparingScenario}
-              onClick={handleStartStoryboard}
-            >
+            <Button className="mt-1" disabled={preparingScenario} onClick={handleStartStoryboard}>
               <Wand2 className="h-4 w-4" />
               {preparingScenario ? "시나리오 생성 중…" : "콘티 생성"}
             </Button>
@@ -202,7 +283,15 @@ export default function VideoCreatePage() {
               </div>
             )}
             {storyboard.isGenerating ? (
-              <ProgressTracker jobStatus={storyboard.job} title="콘티 생성 중" />
+              <ProgressTracker
+                jobStatus={storyboard.job}
+                title={`콘티 생성 중 · ${modelLabel(STORYBOARD_MODELS, storyboardModel)} · 예상 $${contiCost.toFixed(2)}`}
+              />
+            ) : autoAdvance ? (
+              <ProgressTracker
+                jobStatus={storyboard.job}
+                title="콘티 완료 — 영상 단계로 자동 진행 중"
+              />
             ) : (
               <StoryboardReview
                 scenes={scenes}
@@ -224,7 +313,10 @@ export default function VideoCreatePage() {
                 {video.error}
               </div>
             )}
-            <ProgressTracker jobStatus={video.job} title="영상 생성 중" />
+            <ProgressTracker
+              jobStatus={video.job}
+              title={`영상 생성 중 · ${modelLabel(VIDEO_MODELS, videoModel)}`}
+            />
           </>
         )}
 
@@ -232,13 +324,38 @@ export default function VideoCreatePage() {
           <ResultViewer
             result={video.result}
             onRestart={() => {
-              setPhase("input")
-              setScenes([])
-              setStatuses({})
+              resetToInput()
               setCountry("")
             }}
           />
         )}
+      </div>
+    </div>
+  )
+}
+
+function CostRow({
+  label,
+  model,
+  detail,
+  cost,
+}: {
+  label: string
+  model: string
+  detail: string
+  cost: number
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2 text-xs">
+      <div className="min-w-0">
+        <span className="text-muted-foreground">{label}</span>
+        <span className="ml-1.5 truncate text-foreground/80">{model}</span>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <span className="text-[10px] text-muted-foreground">{detail}</span>
+        <span className="font-semibold text-foreground" style={{ fontFamily: "var(--font-geist-mono)" }}>
+          ${cost.toFixed(2)}
+        </span>
       </div>
     </div>
   )

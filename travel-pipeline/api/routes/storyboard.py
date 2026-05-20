@@ -24,7 +24,12 @@ def scenario(req: ScenarioGenerateRequest):
     return generate_scenario(req.country, req.duration_min)
 
 
-def _run_storyboard(job_id: str, scenes: list[dict], character_image_path: str | None):
+def _run_storyboard(
+    job_id: str,
+    scenes: list[dict],
+    character_image_path: str | None,
+    model: str = "default",
+):
     job_manager.start_job(job_id)
     try:
         def cb(idx: int, total: int, msg: str):
@@ -35,6 +40,7 @@ def _run_storyboard(job_id: str, scenes: list[dict], character_image_path: str |
             character_image_path=character_image_path or "",
             output_dir=f"output/storyboard/{job_id}",
             progress_callback=cb,
+            model=model,
         )
         job_manager.complete_job(job_id, {"storyboards": results})
     except Exception as e:
@@ -44,7 +50,13 @@ def _run_storyboard(job_id: str, scenes: list[dict], character_image_path: str |
 @router.post("/generate", response_model=StoryboardGenerateResponse)
 def generate(req: StoryboardGenerateRequest, background: BackgroundTasks):
     job = job_manager.create_job("storyboard")
-    background.add_task(_run_storyboard, job.job_id, req.scenes, req.character_image_path)
+    background.add_task(
+        _run_storyboard,
+        job.job_id,
+        req.scenes,
+        req.character_image_path,
+        req.storyboard_model,
+    )
     return StoryboardGenerateResponse(job_id=job.job_id, status=job.status.value)
 
 
@@ -54,6 +66,7 @@ def _run_regenerate(
     scene_id: int,
     character_image_path: str | None,
     extra_instructions: str | None,
+    model: str = "default",
 ):
     job_manager.start_job(job_id)
     try:
@@ -63,6 +76,7 @@ def _run_regenerate(
             character_image_path=character_image_path or "",
             output_path=output_path,
             extra_instructions=extra_instructions,
+            model=model,
         )
         job_manager.complete_job(job_id, {"storyboard": result})
     except Exception as e:
@@ -80,5 +94,6 @@ def regenerate(req: StoryboardRegenerateRequest, background: BackgroundTasks):
         req.scene_id,
         req.character_image_path,
         req.extra_instructions,
+        req.storyboard_model,
     )
     return StoryboardGenerateResponse(job_id=job.job_id, status=job.status.value)

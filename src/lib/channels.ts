@@ -33,14 +33,34 @@ export const TRACK_BADGE: Record<Track, string> = {
 export const SCENARIO_TONES = ["여행", "일상", "분석", "정성", "리뷰"] as const
 
 export const STORYBOARD_MODELS = [
-  { value: "gpt-image-1", label: "gpt-image-1 (현재)", disabled: false },
-  { value: "z-image-turbo", label: "Z-Image Turbo (Phase 3 예정)", disabled: true },
+  { value: "gpt-image-1", label: "gpt-image-1 (기본, $0.25/장)", disabled: false },
+  { value: "z-image-turbo", label: "Z-Image Turbo (저렴, $0.01/장, WaveSpeed)", disabled: false },
 ] as const
 
 export const VIDEO_MODELS = [
-  { value: "kling-v1", label: "Kling v1 (현재)", disabled: false },
-  { value: "kling-v3", label: "Kling v3 + Character ID (Phase 3 예정)", disabled: true },
+  { value: "kling-v1", label: "Kling v1 (기본)", disabled: false },
+  { value: "kling-v3", label: "Kling v3 + Character ID (WaveSpeed, 일관성 ↑)", disabled: false },
 ] as const
+
+// 콘티/영상 비용 추정 (USD) — Phase 3 어댑터 단가와 일치.
+export const STORYBOARD_MODEL_COST: Record<string, number> = {
+  "gpt-image-1": 0.25,
+  "z-image-turbo": 0.01,
+}
+
+// 영상은 초당 단가 추정. kling-v1(기존 KIE)은 별도 추정 없음(0으로 표기).
+export const VIDEO_MODEL_COST_PER_SEC: Record<string, number> = {
+  "kling-v1": 0,
+  "kling-v3": 0.28,
+}
+
+export function storyboardCost(model: string, sceneCount: number): number {
+  return (STORYBOARD_MODEL_COST[model] ?? STORYBOARD_MODEL_COST["gpt-image-1"]) * sceneCount
+}
+
+export function videoCost(model: string, totalSeconds: number): number {
+  return (VIDEO_MODEL_COST_PER_SEC[model] ?? 0) * totalSeconds
+}
 
 export const SUBTITLE_STYLES = [
   { value: "basic", label: "기본" },
@@ -60,6 +80,8 @@ export interface StackConfig {
   contentType: ContentType
   ratio: string
   ratioOverride: boolean
+  // 완전 자동: 콘티 검토 없이 영상 자동 진행. 기본값 false(콘티 확인 후 사용자가 영상 시작).
+  fullAuto: boolean
 }
 
 export interface Channel {
@@ -111,6 +133,7 @@ export const DEFAULT_CHANNELS: Channel[] = [
       contentType: "long",
       ratio: "16:9",
       ratioOverride: false,
+      fullAuto: false,
     },
   },
   {
@@ -137,6 +160,7 @@ export const DEFAULT_CHANNELS: Channel[] = [
       contentType: "short",
       ratio: "9:16",
       ratioOverride: false,
+      fullAuto: false,
     },
   },
   {
@@ -163,6 +187,7 @@ export const DEFAULT_CHANNELS: Channel[] = [
       contentType: "long",
       ratio: "16:9",
       ratioOverride: false,
+      fullAuto: false,
     },
   },
 ]

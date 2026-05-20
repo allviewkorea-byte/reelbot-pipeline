@@ -101,6 +101,7 @@ export function ChannelProvider({ children }: { children: React.ReactNode }) {
           contentType,
           ratio: getDefaultRatio(platform, contentType),
           ratioOverride: false,
+          fullAuto: false,
         },
       }
       setChannels((prev) => [...prev, channel])

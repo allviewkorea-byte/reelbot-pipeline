@@ -15,6 +15,7 @@ class StoryboardGenerateRequest(BaseModel):
     character_name: str = ""
     character_image_path: str | None = None
     scenes: list[dict]
+    storyboard_model: str = "default"
 
 
 class StoryboardGenerateResponse(BaseModel):
@@ -28,6 +29,7 @@ class StoryboardRegenerateRequest(BaseModel):
     scene: dict
     character_image_path: str | None = None
     extra_instructions: str | None = None
+    storyboard_model: str = "default"
 
 
 class VideoStartRequest(BaseModel):
@@ -36,6 +38,8 @@ class VideoStartRequest(BaseModel):
     approved_storyboards: list[dict]
     scenario_mode: str = "B"
     seedance_mode: str = "kie"
+    video_model: str = "default"
+    character_id: str | None = None
 
 
 class JobStatusResponse(BaseModel):

@@ -43,6 +43,7 @@ export interface StoryboardGenerateParams {
   character_name?: string
   character_image_path?: string | null
   scenes: Scene[] | Record<string, unknown>[]
+  storyboard_model?: string
 }
 
 export interface SceneRegenerateParams {
@@ -51,6 +52,7 @@ export interface SceneRegenerateParams {
   scene: Record<string, unknown>
   character_image_path?: string | null
   extra_instructions?: string | null
+  storyboard_model?: string
 }
 
 export interface VideoStartParams {
@@ -59,6 +61,8 @@ export interface VideoStartParams {
   approved_storyboards: Storyboard[]
   scenario_mode?: string
   seedance_mode?: string
+  video_model?: string
+  character_id?: string | null
 }
 
 export type JobState =
