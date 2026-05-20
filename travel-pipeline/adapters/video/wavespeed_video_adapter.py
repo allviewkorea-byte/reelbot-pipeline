@@ -8,6 +8,7 @@ API 패턴은 WavespeedImageAdapter 와 동일 (submit → poll predictions/resu
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from typing import Optional
 
@@ -15,6 +16,8 @@ import httpx
 
 from ..base import VideoGenerationRequest, VideoGenerationResult, VideoModelAdapter
 from ..utils import download_to, to_data_uri
+
+logger = logging.getLogger(__name__)
 
 # WaveSpeed 모델별 초당 대략 단가 (USD). 문서 가격표 기준 추정.
 _PRICE_PER_SECOND = {
@@ -74,7 +77,15 @@ class WavespeedVideoAdapter(VideoModelAdapter):
                 headers=headers,
                 json=payload,
             )
-            submit.raise_for_status()
+            try:
+                submit.raise_for_status()
+            except httpx.HTTPStatusError:
+                logger.error(
+                    "WaveSpeed video submit error: %s - %s",
+                    submit.status_code,
+                    submit.text,
+                )
+                raise
             task_id = submit.json()["data"]["id"]
 
             for _ in range(180):  # max ~3min (Kling 영상 생성)
@@ -83,7 +94,15 @@ class WavespeedVideoAdapter(VideoModelAdapter):
                     f"{self.BASE_URL}/predictions/{task_id}/result",
                     headers=headers,
                 )
-                poll.raise_for_status()
+                try:
+                    poll.raise_for_status()
+                except httpx.HTTPStatusError:
+                    logger.error(
+                        "WaveSpeed video poll error: %s - %s",
+                        poll.status_code,
+                        poll.text,
+                    )
+                    raise
                 data = poll.json()["data"]
                 status = data.get("status")
                 if status == "completed":

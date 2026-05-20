@@ -13,12 +13,15 @@ reference_images 는 의도적으로 전달하지 않는다 (text-to-image).
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 
 import httpx
 
 from ..base import ImageGenerationRequest, ImageGenerationResult, ImageModelAdapter
 from ..utils import download_to
+
+logger = logging.getLogger(__name__)
 
 _ASPECT_TO_SIZE = {
     "1:1": "1024*1024",
@@ -30,7 +33,7 @@ _ASPECT_TO_SIZE = {
 class WavespeedImageAdapter(ImageModelAdapter):
     BASE_URL = "https://api.wavespeed.ai/api/v3"
 
-    def __init__(self, model_id: str = "wavespeed-ai/z-image-turbo"):
+    def __init__(self, model_id: str = "wavespeed-ai/z-image/turbo"):
         self.model_id = model_id
 
     @property
@@ -40,7 +43,7 @@ class WavespeedImageAdapter(ImageModelAdapter):
     @property
     def cost_per_image(self) -> float:
         prices = {
-            "wavespeed-ai/z-image-turbo": 0.01,
+            "wavespeed-ai/z-image/turbo": 0.01,
             "wavespeed-ai/nano-banana-2": 0.013,
             "wavespeed-ai/seedream-v5-lite": 0.032,
         }
@@ -58,10 +61,14 @@ class WavespeedImageAdapter(ImageModelAdapter):
 
         headers = {"Authorization": f"Bearer {api_key}"}
         size = _ASPECT_TO_SIZE.get(request.aspect_ratio, "1024*1024")
+        # 공식 docs(z-image/turbo) request body 형식.
         payload = {
             "prompt": request.prompt,
             "size": size,
-            "enable_safety_checker": True,
+            "seed": -1,
+            "output_format": "jpeg",
+            "enable_sync_mode": False,
+            "enable_base64_output": False,
             **(request.extra_params or {}),
         }
 
@@ -71,7 +78,15 @@ class WavespeedImageAdapter(ImageModelAdapter):
                 headers=headers,
                 json=payload,
             )
-            submit.raise_for_status()
+            try:
+                submit.raise_for_status()
+            except httpx.HTTPStatusError:
+                logger.error(
+                    "WaveSpeed image submit error: %s - %s",
+                    submit.status_code,
+                    submit.text,
+                )
+                raise
             task_id = submit.json()["data"]["id"]
 
             for _ in range(60):  # max ~60s (Z-Image Turbo는 보통 3-5초)
@@ -80,7 +95,15 @@ class WavespeedImageAdapter(ImageModelAdapter):
                     f"{self.BASE_URL}/predictions/{task_id}/result",
                     headers=headers,
                 )
-                poll.raise_for_status()
+                try:
+                    poll.raise_for_status()
+                except httpx.HTTPStatusError:
+                    logger.error(
+                        "WaveSpeed image poll error: %s - %s",
+                        poll.status_code,
+                        poll.text,
+                    )
+                    raise
                 data = poll.json()["data"]
                 status = data.get("status")
                 if status == "completed":

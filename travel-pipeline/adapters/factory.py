@@ -17,7 +17,7 @@ def get_image_adapter(model: str = "default") -> ImageModelAdapter:
     if model == "z-image-turbo":
         from .image.wavespeed_image_adapter import WavespeedImageAdapter
 
-        adapter = WavespeedImageAdapter(model_id="wavespeed-ai/z-image-turbo")
+        adapter = WavespeedImageAdapter(model_id="wavespeed-ai/z-image/turbo")
         if adapter.is_available():
             return adapter
         # WAVESPEED_API_KEY 없으면 fallback
