@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Bot, Camera, Layers } from "lucide-react"
+import { Bot, Camera } from "lucide-react"
 
 function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -23,21 +23,15 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void 
 const MODES = [
   {
     id: "auto",
-    label: "AI 완전 자동 모드",
+    label: "자동화",
     desc: "GPT-4o + Seedance + 자동 대본 + 자동 업로드",
     icon: Bot,
   },
   {
     id: "normal",
-    label: "일반 모드",
+    label: "반자동",
     desc: "직접 촬영 영상 + 자동 편집만",
     icon: Camera,
-  },
-  {
-    id: "hybrid",
-    label: "하이브리드 모드",
-    desc: "AI 대본 + 실제 촬영 영상 조합",
-    icon: Layers,
   },
 ]
 
@@ -51,14 +45,13 @@ const FEATURES_INIT = [
 ]
 
 const CHANNEL_MODES = [
-  { channel: "방콕 여행", mode: "AI 완전 자동", modeId: "auto" },
-  { channel: "도쿄 일상", mode: "하이브리드", modeId: "hybrid" },
-  { channel: "유럽 감성", mode: "일반 모드", modeId: "normal" },
+  { channel: "방콕 여행", mode: "자동화", modeId: "auto" },
+  { channel: "도쿄 일상", mode: "반자동", modeId: "normal" },
+  { channel: "유럽 감성", mode: "반자동", modeId: "normal" },
 ]
 
 const MODE_BADGE: Record<string, string> = {
   auto: "bg-primary/15 text-primary",
-  hybrid: "bg-sky-500/15 text-sky-400",
   normal: "bg-secondary text-muted-foreground",
 }
 
@@ -70,7 +63,7 @@ export default function ModePage() {
     <div className="flex flex-1 flex-col gap-5 overflow-auto p-6">
       <div>
         <h1 className="text-xl font-semibold text-foreground">모드 설정</h1>
-        <p className="mt-0.5 text-sm text-muted-foreground">AI 모드와 일반 모드를 선택하세요</p>
+        <p className="mt-0.5 text-sm text-muted-foreground">자동화와 반자동 중 선택하세요</p>
       </div>
 
       {/* Mode selector */}

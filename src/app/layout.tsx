@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Sidebar } from "@/components/layout/Sidebar";
+import { ChannelProvider } from "@/components/channels/ChannelProvider";
 import { Toaster } from "sonner";
 
 const geistSans = Geist({
@@ -30,10 +31,12 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="flex h-full bg-background text-foreground">
-        <Sidebar />
-        <main className="flex flex-1 flex-col overflow-auto">
-          {children}
-        </main>
+        <ChannelProvider>
+          <Sidebar />
+          <main className="flex flex-1 flex-col overflow-auto">
+            {children}
+          </main>
+        </ChannelProvider>
         <Toaster position="bottom-right" richColors />
       </body>
     </html>
