@@ -1,0 +1,45 @@
+{
+  "generated_at": "20260520_012443",
+  "pipeline_settings": {
+    "duration_min": 1,
+    "total_scene_count": 6,
+    "seedance_scene_count": 2,
+    "scenario": "B",
+    "seedance_mode": "manual"
+  },
+  "video_settings": {
+    "resolution": "720x1280",
+    "fps": 30,
+    "duration_per_clip_sec": 10,
+    "format": "mp4"
+  },
+  "clips_output_folder": "clips/",
+  "scenes": [
+    {
+      "scene_id": "scene_01",
+      "file_name": "scene_01.mp4",
+      "spot_id": "wat_arun",
+      "spot_name_ko": "왓아룬",
+      "spot_name_en": "Wat Arun",
+      "reference_bg": "scene_01_bg.png",
+      "reference_character": "character_ref.png",
+      "prompt_ko": "왓아룬 사원 탑 앞에서 캐릭터가 카메라를 바라보며 미소짓고 손을 흔듦",
+      "prompt_en": "Stylish Korean woman standing in front of Wat Arun temple, smiling and waving at the camera, cinematic travel vlog, vertical 9:16.",
+      "duration_sec": 10,
+      "resolution": "720x1280"
+    },
+    {
+      "scene_id": "scene_02",
+      "file_name": "scene_02.mp4",
+      "spot_id": "grand_palace",
+      "spot_name_ko": "왕궁",
+      "spot_name_en": "Grand Palace",
+      "reference_bg": "scene_02_bg.png",
+      "reference_character": "character_ref.png",
+      "prompt_ko": "황금빛 왕궁 정문 앞에서 캐릭터가 두 손을 모아 합장 인사",
+      "prompt_en": "Stylish Korean woman at the Grand Palace gate, hands in prayer gesture, golden rooftop in background, vertical 9:16.",
+      "duration_sec": 10,
+      "resolution": "720x1280"
+    }
+  ]
+}

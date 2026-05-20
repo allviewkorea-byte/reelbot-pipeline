@@ -1,21 +1,33 @@
 """
 KIE (Kling Image-to-video Engine) API 클라이언트.
-brief.json의 씬 목록을 받아 영상을 자동 생성한다.
-
-API: https://api.klingai.com (Kling AI by Kuaishou)
-Auth: Authorization: Bearer {KIE_API_KEY}
+JWT 인증: Access Key + Secret Key → HS256 JWT 토큰 생성
 """
 
 import time
 import base64
 import requests
+import jwt
 from pathlib import Path
 from config import Config
 
 KIE_API_BASE = "https://api.klingai.com"
 MAX_RETRIES = 2
-POLL_INTERVAL = 30   # 초
-POLL_TIMEOUT = 900   # 최대 15분
+POLL_INTERVAL = 30
+POLL_TIMEOUT = 900
+
+
+def _generate_jwt_token(config: Config) -> str:
+    """Access Key + Secret Key로 JWT 토큰 생성."""
+    headers = {"alg": "HS256", "typ": "JWT"}
+    payload = {
+        "iss": config.kie_access_key,
+        "exp": int(time.time()) + 1800,
+        "nbf": int(time.time()) - 5,
+    }
+    token = jwt.encode(payload, config.kie_secret_key, algorithm="HS256", headers=headers)
+    if isinstance(token, bytes):
+        return token.decode("utf-8")
+    return token
 
 
 def _to_b64(path: Path) -> str:
@@ -23,14 +35,14 @@ def _to_b64(path: Path) -> str:
 
 
 def _headers(config: Config) -> dict:
+    token = _generate_jwt_token(config)
     return {
-        "Authorization": f"Bearer {config.kie_api_key}",
+        "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
 
 
 def _submit(scene: dict, char_ref: Path | None, config: Config) -> str:
-    """영상 생성 작업 제출 → task_id 반환."""
     payload = {
         "model_name": "kling-v1",
         "prompt": scene["prompt_en"],
@@ -39,9 +51,8 @@ def _submit(scene: dict, char_ref: Path | None, config: Config) -> str:
         "cfg_scale": 0.5,
         "mode": "std",
     }
-
     if char_ref and char_ref.exists():
-        payload["image"] = f"data:image/png;base64,{_to_b64(char_ref)}"
+        payload["image"] = _to_b64(char_ref)
 
     resp = requests.post(
         f"{KIE_API_BASE}/v1/videos/image2video",
@@ -49,22 +60,20 @@ def _submit(scene: dict, char_ref: Path | None, config: Config) -> str:
         headers=_headers(config),
         timeout=30,
     )
+    if not resp.ok:
+        print(f"  [kie] 오류 응답: {resp.status_code} - {resp.text[:300]}")
     resp.raise_for_status()
     data = resp.json()
-
     if data.get("code", 0) != 0:
         raise RuntimeError(f"KIE 제출 오류: {data.get('message', data)}")
-
     return data["data"]["task_id"]
 
 
 def _poll(task_id: str, config: Config) -> str:
-    """완료까지 30초 간격 폴링 → 영상 URL 반환."""
     elapsed = 0
     while elapsed < POLL_TIMEOUT:
         time.sleep(POLL_INTERVAL)
         elapsed += POLL_INTERVAL
-
         resp = requests.get(
             f"{KIE_API_BASE}/v1/videos/image2video/{task_id}",
             headers=_headers(config),
@@ -73,16 +82,12 @@ def _poll(task_id: str, config: Config) -> str:
         resp.raise_for_status()
         data = resp.json()["data"]
         status = data["task_status"]
-
         if status == "succeed":
             return data["task_result"]["videos"][0]["url"]
         if status == "failed":
-            msg = data.get("task_status_msg", "알 수 없는 오류")
-            raise RuntimeError(f"KIE 생성 실패: {msg}")
-
+            raise RuntimeError(f"KIE 생성 실패: {data.get('task_status_msg', '알 수 없는 오류')}")
         print(f"    [kie] {task_id[:10]}… 상태: {status} ({elapsed}s)")
-
-    raise TimeoutError(f"KIE 타임아웃 (task_id={task_id}, {POLL_TIMEOUT}s 초과)")
+    raise TimeoutError(f"KIE 타임아웃 ({POLL_TIMEOUT}s 초과)")
 
 
 def _download(url: str, dest: Path):
@@ -94,12 +99,6 @@ def _download(url: str, dest: Path):
 
 
 def generate_kie_clips(brief: dict, brief_dir: Path, config: Config) -> list[Path]:
-    """
-    brief["scenes"]의 모든 씬에 대해 KIE API로 영상 생성.
-    - 이미 clips/에 mp4가 있으면 재사용 (캐시)
-    - 실패 시 최대 MAX_RETRIES(2)회 재시도
-    - 완료된 mp4 Path 목록 반환 (실패 씬은 제외)
-    """
     clips_dir = brief_dir / "clips"
     clips_dir.mkdir(exist_ok=True)
     char_ref = brief_dir / "character_ref.png"
@@ -123,22 +122,16 @@ def generate_kie_clips(brief: dict, brief_dir: Path, config: Config) -> list[Pat
                 print(f"  [kie] ({i}/{total}) {label} — 제출 중 (시도 {attempt}/{MAX_RETRIES})")
                 task_id = _submit(scene, char_ref, config)
                 print(f"  [kie] task_id={task_id[:16]}… 완료 대기 중")
-
                 video_url = _poll(task_id, config)
                 _download(video_url, dest)
-
                 print(f"  [kie] 완료: {dest.name}")
                 results.append(dest)
                 success = True
                 break
-
             except Exception as e:
                 print(f"  [kie] 실패 (시도 {attempt}/{MAX_RETRIES}): {e}")
                 if attempt == MAX_RETRIES:
                     print(f"  [kie] {label} 건너뜀 — 최대 재시도 초과")
-
-        if not success:
-            continue
 
     print(f"\n  [kie] 완료 {len(results)}/{total}개 클립")
     return results

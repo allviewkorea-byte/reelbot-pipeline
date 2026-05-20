@@ -5,7 +5,8 @@ AI 여행 유튜브 채널 자동화 파이프라인
 실행: python main.py [--skip-video] [--skip-upload] [--spots SPOT_ID ...]
           [--duration {1,2,4}] [--scenario {A,B}] [--seedance-mode {manual,kie}]
 """
-
+from dotenv import load_dotenv
+load_dotenv()
 import argparse
 import sys
 import traceback

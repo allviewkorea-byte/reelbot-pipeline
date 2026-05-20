@@ -15,22 +15,17 @@ def merge_video_audio(
     spot: BangkokSpot,
     config: Config,
 ) -> Path:
-    """
-    영상 클립과 나레이션 음성을 합성.
-    음성 길이에 맞게 영상을 루프하거나 트리밍.
-    """
     print(f"  [compose] {spot.name_ko} 영상+음성 합성 중...")
-
     out_path = Path(config.videos_dir) / f"{spot.id}_with_audio.mp4"
 
     _run_ffmpeg([
-        "-stream_loop", "-1",        # 영상 루프 (음성 길이에 맞게)
+        "-stream_loop", "-1",
         "-i", str(video_path),
         "-i", str(audio_path),
         "-c:v", "libx264",
         "-c:a", "aac",
         "-b:a", "192k",
-        "-shortest",                  # 음성 끝나면 컷
+        "-shortest",
         "-vf", f"scale={config.video_width}:{config.video_height}:force_original_aspect_ratio=decrease,"
                f"pad={config.video_width}:{config.video_height}:(ow-iw)/2:(oh-ih)/2:black",
         "-r", str(config.video_fps),
@@ -47,16 +42,16 @@ def add_subtitles_overlay(
     spot: BangkokSpot,
     config: Config,
 ) -> Path:
-    """
-    관광지 이름 자막 오버레이 추가 (하단 위치).
-    """
     print(f"  [compose] {spot.name_ko} 자막 추가 중...")
-
     out_path = Path(config.videos_dir) / f"{spot.id}_subtitled.mp4"
 
-    title_text = spot.name_ko
+    # Windows 한국어 폰트 경로 직접 지정
+    font_path = "C:/Windows/Fonts/malgun.ttf"
+    title_text = spot.name_en  # 한국어 대신 영어 사용 (인코딩 문제 방지)
+
     subtitle_filter = (
-        f"drawtext=text='{title_text}'"
+        f"drawtext=fontfile='{font_path}'"
+        f":text='{title_text}'"
         f":fontsize=72"
         f":fontcolor=white"
         f":borderw=4"
@@ -66,17 +61,21 @@ def add_subtitles_overlay(
         f":enable='between(t,0,3)'"
     )
 
-    _run_ffmpeg([
-        "-i", str(video_path),
-        "-vf", subtitle_filter,
-        "-c:v", "libx264",
-        "-c:a", "copy",
-        "-movflags", "+faststart",
-        str(out_path),
-    ])
-
-    print(f"  [compose] 자막 저장 완료: {out_path}")
-    return out_path
+    try:
+        _run_ffmpeg([
+            "-i", str(video_path),
+            "-vf", subtitle_filter,
+            "-c:v", "libx264",
+            "-c:a", "copy",
+            "-movflags", "+faststart",
+            str(out_path),
+        ])
+        print(f"  [compose] 자막 저장 완료: {out_path}")
+        return out_path
+    except Exception as e:
+        # 자막 실패 시 원본 사용
+        print(f"  [compose] 자막 추가 실패, 원본 사용: {e}")
+        return video_path
 
 
 def concatenate_clips(
@@ -84,12 +83,8 @@ def concatenate_clips(
     config: Config,
     output_name: str = "bangkok_travel_final.mp4",
 ) -> Path:
-    """
-    모든 클립을 하나의 최종 영상으로 이어 붙임.
-    """
     print("  [compose] 최종 영상 합치는 중...")
 
-    # 파일 목록 텍스트 생성
     concat_list = Path(config.final_dir) / "concat_list.txt"
     lines = [f"file '../videos/{p.name}'\n" for p in clip_paths]
     concat_list.write_text("".join(lines))
@@ -116,10 +111,6 @@ def add_background_music(
     music_path: Path,
     config: Config,
 ) -> Path:
-    """
-    배경음악 믹싱 (나레이션 -0dB, 배경음악 -15dB).
-    선택 사항: music_path가 없으면 원본 반환.
-    """
     if not music_path or not music_path.exists():
         return video_path
 
