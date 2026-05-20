@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
+import Link from "next/link"
 import {
   ChevronDown,
   Play,
@@ -260,9 +261,18 @@ export default function VideoPage() {
             Street View 동선을 확인하고 영상을 자동 생성합니다
           </p>
         </div>
-        <div className="flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5">
-          <div className="h-2 w-2 rounded-full bg-emerald-400" />
-          <span className="text-xs font-medium text-foreground">방콕 여행 채널</span>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/video/create"
+            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
+          >
+            <Wand2 className="h-3.5 w-3.5" />
+            자동 제작
+          </Link>
+          <div className="flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5">
+            <div className="h-2 w-2 rounded-full bg-emerald-400" />
+            <span className="text-xs font-medium text-foreground">방콕 여행 채널</span>
+          </div>
         </div>
       </div>
 
