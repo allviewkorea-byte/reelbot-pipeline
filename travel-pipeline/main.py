@@ -154,6 +154,7 @@ def generate_video_from_storyboard(
     import asyncio
 
     from adapters import VideoGenerationRequest, get_video_adapter
+    from adapters.utils import load_character_references
 
     if config is None:
         config = Config()
@@ -164,6 +165,10 @@ def generate_video_from_storyboard(
     clips_dir.mkdir(parents=True, exist_ok=True)
 
     storyboard_by_id = {sb.get("scene_id"): sb.get("image_path") for sb in approved_storyboards}
+
+    # 작업 3-4: Character ID 지원 모델(Kling v3 등)에는 캐릭터 3면 reference를 자동 전달.
+    # 기존 Kling v1 경로는 콘티 프레임을 start image로 사용(동작 보존).
+    character_refs = load_character_references(character_id) if character_id else []
 
     def _report(progress: int, step: str):
         if progress_callback:
@@ -189,7 +194,12 @@ def generate_video_from_storyboard(
         _report(int((i - 1) / total_steps * 100), f"씬 {scene_id} 영상 생성 중...")
 
         ref_path = storyboard_by_id.get(scene_id)
-        references = [ref_path] if ref_path else None
+        if adapter.supports_character_id and character_refs:
+            references = character_refs
+        elif ref_path:
+            references = [ref_path]
+        else:
+            references = None
 
         dest = clips_dir / f"scene_{scene_id}.mp4"
         request = VideoGenerationRequest(
