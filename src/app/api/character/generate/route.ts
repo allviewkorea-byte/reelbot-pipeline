@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
-import OpenAI from "openai"
 import fs from "fs"
 import path from "path"
+import { WavespeedImageAdapter } from "@/lib/wavespeed"
 
 // ── Prompt builders ───────────────────────────────────────────────
 
@@ -66,41 +66,6 @@ function buildBackPrompt(outfit: string, hair: string, accClause: string): strin
   )
 }
 
-// ── Image generation helpers ──────────────────────────────────────
-
-async function generateImage(client: OpenAI, prompt: string): Promise<Buffer> {
-  const response = await client.images.generate({
-    model: "gpt-image-1",
-    prompt,
-    size: "1024x1536",
-    quality: "high",
-    n: 1,
-  })
-  const b64 = response.data?.[0]?.b64_json
-  if (!b64) throw new Error("No image data returned")
-  return Buffer.from(b64, "base64")
-}
-
-async function generateImageFromRef(
-  client: OpenAI,
-  prompt: string,
-  refBuffer: Buffer
-): Promise<Buffer> {
-  const { toFile } = await import("openai")
-  const refFile = await toFile(refBuffer, "reference.png", { type: "image/png" })
-  const response = await client.images.edit({
-    model: "gpt-image-1",
-    image: refFile,
-    prompt,
-    size: "1024x1536",
-    quality: "high",
-    n: 1,
-  })
-  const b64 = response.data?.[0]?.b64_json
-  if (!b64) throw new Error("No image data returned from edit")
-  return Buffer.from(b64, "base64")
-}
-
 // ── Route handler ─────────────────────────────────────────────────
 
 interface AccessoriesBody {
@@ -119,10 +84,10 @@ interface RequestBody {
 }
 
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.OPENAI_API_KEY
+  const apiKey = process.env.WAVESPEED_API_KEY
   if (!apiKey) {
     return NextResponse.json(
-      { success: false, error: "OPENAI_API_KEY not configured" },
+      { success: false, error: "WAVESPEED_API_KEY not configured" },
       { status: 500 }
     )
   }
@@ -148,23 +113,23 @@ export async function POST(req: NextRequest) {
   }
   const accClause = buildAccessoryClause(acc)
 
-  const client = new OpenAI({ apiKey })
+  const adapter = new WavespeedImageAdapter(apiKey)
+  // 앞/측/뒷면 3장에 동일한 seed를 사용해 같은 캐릭터 외모를 유지한다.
+  const seed = Math.floor(Math.random() * 1_000_000)
 
   try {
-    const frontBuf = await generateImage(
-      client,
-      buildFrontPrompt(appearance, outfit, hair, accClause)
-    )
-    const sideBuf = await generateImageFromRef(
-      client,
-      buildSidePrompt(outfit, hair, accClause),
-      frontBuf
-    )
-    const backBuf = await generateImageFromRef(
-      client,
-      buildBackPrompt(outfit, hair, accClause),
-      frontBuf
-    )
+    const frontBuf = await adapter.generate({
+      prompt: buildFrontPrompt(appearance, outfit, hair, accClause),
+      seed,
+    })
+    const sideBuf = await adapter.generate({
+      prompt: buildSidePrompt(outfit, hair, accClause),
+      seed,
+    })
+    const backBuf = await adapter.generate({
+      prompt: buildBackPrompt(outfit, hair, accClause),
+      seed,
+    })
 
     const id  = Date.now().toString()
     const dir = path.join(process.cwd(), "public", "character-seeds", id)
