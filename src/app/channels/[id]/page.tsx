@@ -7,6 +7,8 @@ import { toast } from "sonner"
 import {
   ArrowLeft,
   Trash2,
+  Copy,
+  X,
   Users,
   Video,
   DollarSign,
@@ -55,10 +57,11 @@ export default function ChannelDetailPage() {
   const params = useParams<{ id: string }>()
   const id = params.id
   const router = useRouter()
-  const { getChannel, updateStack, deleteChannel, hydrated } = useChannels()
+  const { getChannel, updateStack, deleteChannel, cloneChannel, hydrated } = useChannels()
   const channel = getChannel(id)
 
   const [draft, setDraft] = useState<StackConfig | null>(channel ? channel.stack : null)
+  const [showClone, setShowClone] = useState(false)
 
   useEffect(() => {
     if (channel) setDraft(channel.stack)
@@ -151,6 +154,13 @@ export default function ChannelDetailPage() {
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <button
+            onClick={() => setShowClone(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-primary/5"
+          >
+            <Copy className="h-4 w-4" />
+            이 채널 복제
+          </button>
+          <button
             onClick={handleDelete}
             className="flex items-center gap-1.5 rounded-lg border border-red-500/30 px-3 py-2 text-sm font-medium text-red-400 transition-colors hover:bg-red-500/10"
           >
@@ -159,6 +169,21 @@ export default function ChannelDetailPage() {
           </button>
         </div>
       </div>
+
+      {showClone && (
+        <CloneModal
+          defaultName={`${channel.name} 복사본`}
+          onClose={() => setShowClone(false)}
+          onConfirm={(newName) => {
+            const newId = cloneChannel(channel.id, newName)
+            setShowClone(false)
+            if (newId) {
+              toast.success("채널을 복제했습니다")
+              router.push(`/channels/${newId}`)
+            }
+          }}
+        />
+      )}
 
       <Tabs defaultValue="overview" className="w-full">
         <TabsList>
@@ -389,6 +414,58 @@ export default function ChannelDetailPage() {
           </div>
         </TabsContent>
       </Tabs>
+    </div>
+  )
+}
+
+function CloneModal({
+  defaultName,
+  onClose,
+  onConfirm,
+}: {
+  defaultName: string
+  onClose: () => void
+  onConfirm: (name: string) => void
+}) {
+  const [name, setName] = useState(defaultName)
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-base font-semibold text-foreground">채널 복제</h2>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground" aria-label="닫기">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <p className="mb-3 text-xs text-muted-foreground">
+          스택 설정(트랙·캐릭터·모델·자막·발행·스케줄)은 그대로 복사되고, 통계는 0으로 초기화됩니다.
+        </p>
+        <label className="mb-1.5 block text-xs font-medium text-muted-foreground">새 채널 이름</label>
+        <input
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
+        />
+        <div className="mt-6 flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+          >
+            취소
+          </button>
+          <button
+            onClick={() => onConfirm(name.trim() || defaultName)}
+            disabled={!name.trim()}
+            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+          >
+            복제하기
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
