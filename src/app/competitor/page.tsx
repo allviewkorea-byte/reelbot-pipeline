@@ -40,10 +40,39 @@ const INSIGHTS = [
   },
 ]
 
+// 분석 인사이트 → 시나리오 생성 파라미터 매핑
+function buildScenarioParams(url: string) {
+  const lengthInsight = INSIGHTS.find((i) => i.id === "length")
+  const minMatch = lengthInsight?.subtitle.match(/(\d+)/)
+  const durationMin = minMatch ? parseInt(minMatch[1]) : 4
+  const sceneCount = Math.max(6, durationMin * 6)
+  return {
+    category: "여행",
+    tone: "밝고 경쾌",
+    format: "long" as const,
+    durationMin,
+    sceneCount,
+    modelCount: "1인",
+    topic: url.trim() || "경쟁사 인기 콘텐츠 벤치마킹",
+  }
+}
+
 export default function CompetitorPage() {
   const router = useRouter()
   const [url, setUrl] = useState("")
   const [analyzed, setAnalyzed] = useState(true) // show mock results by default
+
+  function handleGenerateScenario() {
+    try {
+      sessionStorage.setItem(
+        "reelbot:scenarioParams",
+        JSON.stringify(buildScenarioParams(url))
+      )
+    } catch {
+      /* sessionStorage 사용 불가 시에도 이동은 진행 */
+    }
+    router.push("/scenario")
+  }
 
   return (
     <div className="flex flex-1 flex-col gap-6 p-6 overflow-auto">
@@ -158,14 +187,14 @@ export default function CompetitorPage() {
                   인사이트 적용 준비 완료
                 </p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  3개 전략이 시나리오에 자동 반영됩니다
+                  분석 결과(주제·톤·길이·장면 수)가 시나리오 파라미터로 자동 채워집니다
                 </p>
               </div>
               <button
-                onClick={() => router.push("/scenario")}
+                onClick={handleGenerateScenario}
                 className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
               >
-                이 인사이트를 시나리오에 반영
+                이 분석으로 시나리오 생성
                 <ArrowRight className="h-4 w-4" />
               </button>
             </div>
