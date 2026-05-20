@@ -211,6 +211,12 @@ export default function VideoPage() {
     ) as typeof SETTINGS_OPTIONS
   )
   const [scenario, setScenario] = useState<"A" | "B">("B")
+  // 채널 컨테이너에서 진입(?channel=)하면 실제 2단계 생성 플로우(/video/create)로 연결.
+  const [channelQuery, setChannelQuery] = useState("")
+  useEffect(() => {
+    const cid = new URLSearchParams(window.location.search).get("channel")
+    setChannelQuery(cid ? `?channel=${cid}` : "")
+  }, [])
 // 라이브러리 캐릭터 동적 로드 + sessionStorage 선택 캐릭터 반영
   useEffect(() => {
     // 라이브러리에서 캐릭터 목록 가져오기
@@ -263,7 +269,7 @@ export default function VideoPage() {
         </div>
         <div className="flex items-center gap-3">
           <Link
-            href="/video/create"
+            href={`/video/create${channelQuery}`}
             className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
           >
             <Wand2 className="h-3.5 w-3.5" />
@@ -402,12 +408,15 @@ export default function VideoPage() {
       <div className="shrink-0 flex items-center justify-between border-t border-border bg-card/50 px-6 py-4">
         <div className="flex items-center gap-2 text-xs text-amber-400/80">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-          <span>시나리오를 변경하면 모든 씬이 재생성됩니다</span>
+          <span>콘티 생성 후 검토를 거쳐 영상을 생성합니다</span>
         </div>
-        <button className="flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/20 transition-opacity hover:opacity-90">
+        <Link
+          href={`/video/create${channelQuery}`}
+          className="flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/20 transition-opacity hover:opacity-90"
+        >
           <Play className="h-4 w-4 fill-current" />
-          영상 생성 시작
-        </button>
+          콘티 생성하러 가기
+        </Link>
       </div>
     </div>
   )
