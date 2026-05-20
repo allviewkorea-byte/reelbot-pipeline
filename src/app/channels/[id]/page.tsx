@@ -32,8 +32,10 @@ import {
   VIDEO_MODELS,
   SUBTITLE_STYLES,
   CHARACTER_OPTIONS,
+  getDefaultRatio,
   type Track,
   type Platform,
+  type ContentType,
   type StackConfig,
 } from "@/lib/channels"
 
@@ -93,6 +95,22 @@ export default function ChannelDetailPage() {
       const has = d.characters.includes(name)
       const next = has ? d.characters.filter((c) => c !== name) : [...d.characters, name]
       return { ...d, characters: next.length ? next : d.characters }
+    })
+  }
+
+  function setContentType(ct: ContentType) {
+    setDraft((d) => {
+      if (!d) return d
+      const ratio = d.ratioOverride ? d.ratio : getDefaultRatio(channel!.platform, ct)
+      return { ...d, contentType: ct, ratio }
+    })
+  }
+
+  function setOverride(on: boolean) {
+    setDraft((d) => {
+      if (!d) return d
+      const ratio = on ? d.ratio : getDefaultRatio(channel!.platform, d.contentType)
+      return { ...d, ratioOverride: on, ratio }
     })
   }
 
@@ -326,6 +344,52 @@ export default function ChannelDetailPage() {
                 className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
               />
             </Field>
+          </div>
+
+          {/* 비율 자동 매핑 (작업 2.5-5) */}
+          <div className="rounded-xl border border-border bg-card p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-foreground">화면 비율</h2>
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={draft.ratioOverride}
+                  onChange={(e) => setOverride(e.target.checked)}
+                  className="h-4 w-4 accent-[var(--primary)]"
+                />
+                수동 override
+              </label>
+            </div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              {channel.platform === "youtube" && (
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-muted-foreground">콘텐츠 유형</label>
+                  <Select value={draft.contentType} onChange={(v) => setContentType(v as ContentType)}>
+                    <option value="long">롱폼</option>
+                    <option value="short">숏폼</option>
+                  </Select>
+                </div>
+              )}
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                  비율{draft.ratioOverride ? "" : " (자동)"}
+                </label>
+                <input
+                  value={draft.ratio}
+                  readOnly={!draft.ratioOverride}
+                  disabled={!draft.ratioOverride}
+                  onChange={(e) => patch({ ratio: e.target.value })}
+                  className={`w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary/50 ${
+                    draft.ratioOverride
+                      ? "bg-background text-foreground"
+                      : "cursor-not-allowed bg-secondary/40 text-muted-foreground"
+                  }`}
+                />
+              </div>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              {PLATFORM_LABELS[channel.platform]} 기본 비율: {getDefaultRatio(channel.platform, draft.contentType)}
+            </p>
           </div>
 
           {/* 발행 채널 매핑 */}
