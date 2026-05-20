@@ -40,11 +40,22 @@ export async function POST(request: NextRequest) {
 
     // Update character-library.json
     const libraryPath = path.join(process.cwd(), 'public', 'character-library.json');
-    let characters = [];
+    let libraryData: { characters: any[] } = { characters: [] };
 
     if (existsSync(libraryPath)) {
       const content = await readFile(libraryPath, 'utf-8');
-      characters = JSON.parse(content);
+      try {
+        const parsed = JSON.parse(content);
+        // 호환성: 배열 형태와 { characters: [...] } 형태 모두 처리
+        if (Array.isArray(parsed)) {
+          libraryData = { characters: parsed };
+        } else if (parsed && Array.isArray(parsed.characters)) {
+          libraryData = parsed;
+        }
+      } catch {
+        // 파일 손상 시 빈 구조로 시작
+        libraryData = { characters: [] };
+      }
     }
 
     const newCharacter = {
@@ -54,7 +65,13 @@ export async function POST(request: NextRequest) {
       config: {
         appearance: '',
         outfit: '',
-        accessories: {},
+        accessories: {
+          headwear: '',
+          eyewear: '',
+          bag: '',
+          shoes: '',
+          jewelry: [],
+        },
         hair: '',
       },
       images: {
@@ -64,8 +81,8 @@ export async function POST(request: NextRequest) {
       },
     };
 
-    characters.unshift(newCharacter);
-    await writeFile(libraryPath, JSON.stringify(characters, null, 2));
+    libraryData.characters.unshift(newCharacter);
+    await writeFile(libraryPath, JSON.stringify(libraryData, null, 2));
 
     return NextResponse.json({ success: true, character: newCharacter });
   } catch (error) {

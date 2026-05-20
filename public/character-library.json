@@ -1,6 +1,28 @@
 {
   "characters": [
     {
+      "id": "char_1779198264788",
+      "name": "김이안",
+      "createdAt": "2026-05-19T13:44:24.811Z",
+      "config": {
+        "appearance": "",
+        "outfit": "",
+        "accessories": {
+          "headwear": "",
+          "eyewear": "",
+          "bag": "",
+          "shoes": "",
+          "jewelry": []
+        },
+        "hair": ""
+      },
+      "images": {
+        "front": "/character-seeds/char_1779198264788/front.png",
+        "side": "/character-seeds/char_1779198264788/side.png",
+        "back": "/character-seeds/char_1779198264788/back.png"
+      }
+    },
+    {
       "id": "char_1779160894537",
       "name": "정키",
       "createdAt": "2026-05-19T03:21:34.537Z",
@@ -48,6 +70,31 @@
         "front": "/character-seeds/1779167985719/front.png",
         "side": "/character-seeds/1779167985719/side.png",
         "back": "/character-seeds/1779167985719/back.png"
+      }
+    },
+    {
+      "id": "char_1779198703529",
+      "name": "정지수",
+      "createdAt": "2026-05-19T13:51:43.529Z",
+      "config": {
+        "appearance": "",
+        "outfit": "vintage 70s-80s retro fashion",
+        "accessories": {
+          "headwear": "",
+          "eyewear": "",
+          "bag": "",
+          "shoes": "wearing white sneakers",
+          "jewelry": [
+            "wearing a watch",
+            "wearing rings"
+          ]
+        },
+        "hair": "long wavy dark hair flowing past shoulders"
+      },
+      "images": {
+        "front": "/character-seeds/1779198657551/front.png",
+        "side": "/character-seeds/1779198657551/side.png",
+        "back": "/character-seeds/1779198657551/back.png"
       }
     }
   ]

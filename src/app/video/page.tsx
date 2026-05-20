@@ -210,7 +210,38 @@ export default function VideoPage() {
     ) as typeof SETTINGS_OPTIONS
   )
   const [scenario, setScenario] = useState<"A" | "B">("B")
+// 라이브러리 캐릭터 동적 로드 + sessionStorage 선택 캐릭터 반영
+  useEffect(() => {
+    // 라이브러리에서 캐릭터 목록 가져오기
+    fetch("/api/character/library")
+      .then((r) => r.json())
+      .then((data) => {
+        const names: string[] = (data.characters ?? []).map(
+          (c: { name: string }) => c.name
+        )
+        if (names.length > 0) {
+          setSettings((prev) => ({
+            ...prev,
+            character: { ...prev.character, options: names },
+          }))
+        }
+      })
+      .catch(() => {})
 
+    // 캐릭터 라이브러리에서 "영상 만들기" 클릭 시 전달된 캐릭터 반영
+    try {
+      const raw = sessionStorage.getItem("reelbot:selectedCharacter")
+      if (raw) {
+        const char = JSON.parse(raw)
+        if (char?.name) {
+          setSettings((prev) => ({
+            ...prev,
+            character: { ...prev.character, value: char.name },
+          }))
+        }
+      }
+    } catch {}
+  }, [])
   const doneCnt = SCENES.filter((s) => s.status === "done").length
   const totalCnt = SCENES.length
   const pct = Math.round((doneCnt / totalCnt) * 100)
