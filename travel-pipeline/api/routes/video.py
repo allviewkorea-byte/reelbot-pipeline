@@ -14,6 +14,8 @@ def _run_video(
     approved_storyboards: list[dict],
     scenario_mode: str,
     seedance_mode: str,
+    video_model: str = "default",
+    character_id: str | None = None,
 ):
     from main import generate_video_from_storyboard
 
@@ -29,6 +31,8 @@ def _run_video(
             scenario_mode=scenario_mode,
             seedance_mode=seedance_mode,
             progress_callback=cb,
+            video_model=video_model,
+            character_id=character_id,
         )
         job_manager.complete_job(job_id, result)
     except Exception as e:
@@ -45,5 +49,7 @@ def start(req: VideoStartRequest, background: BackgroundTasks):
         req.approved_storyboards,
         req.scenario_mode,
         req.seedance_mode,
+        req.video_model,
+        req.character_id,
     )
     return StoryboardGenerateResponse(job_id=job.job_id, status=job.status.value)

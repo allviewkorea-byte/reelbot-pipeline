@@ -9,20 +9,14 @@
 
 from __future__ import annotations
 
-import base64
+import asyncio
 import hashlib
 import json
 import os
 from pathlib import Path
 
-from openai import OpenAI
-
+from adapters import ImageGenerationRequest, get_image_adapter
 from config import Config
-
-
-_IMAGE_MODEL = "gpt-image-1"
-_IMAGE_SIZE = "1024x1536"
-_IMAGE_QUALITY = "high"
 
 # 브라우저가 접근할 백엔드 베이스 URL. server.py가 output/ 를 /static 으로 마운트한다.
 _PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
@@ -80,34 +74,23 @@ def _build_prompt(scene: dict, extra_instructions: str | None = None) -> str:
     return " ".join(parts)
 
 
-def _call_image_api(
-    client: OpenAI,
+def _generate_image(
+    adapter,
     prompt: str,
     character_image_path: str | None,
-) -> bytes:
-    """gpt-image-1 호출. character_image_path가 있으면 reference로 edit 사용."""
-    char_path = Path(character_image_path) if character_image_path else None
-
-    if char_path and char_path.exists():
-        with char_path.open("rb") as f:
-            response = client.images.edit(
-                model=_IMAGE_MODEL,
-                image=f,
-                prompt=prompt,
-                size=_IMAGE_SIZE,
-                quality=_IMAGE_QUALITY,
-                n=1,
-            )
-    else:
-        response = client.images.generate(
-            model=_IMAGE_MODEL,
-            prompt=prompt,
-            size=_IMAGE_SIZE,
-            quality=_IMAGE_QUALITY,
-            n=1,
-        )
-
-    return base64.b64decode(response.data[0].b64_json)
+    output_path: Path,
+) -> None:
+    """선택된 어댑터로 콘티 이미지 1장 생성 후 output_path에 저장."""
+    references = None
+    if character_image_path:
+        references = [character_image_path]
+    request = ImageGenerationRequest(
+        prompt=prompt,
+        reference_images=references,
+        aspect_ratio="9:16",
+        output_path=str(output_path),
+    )
+    asyncio.run(adapter.generate(request))
 
 
 def _scene_filename(scene_id: int | str) -> str:
@@ -142,6 +125,7 @@ def generate_storyboard(
     output_dir: str,
     config: Config | None = None,
     progress_callback=None,
+    model: str = "default",
 ) -> list[dict]:
     """
     각 씬에 대해 gpt-image-1으로 콘티 이미지 1장씩 생성.
@@ -161,7 +145,7 @@ def generate_storyboard(
     if config is None:
         config = Config()
 
-    client = OpenAI(api_key=config.openai_api_key)
+    adapter = get_image_adapter(model)
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -188,9 +172,8 @@ def generate_storyboard(
         else:
             if progress_callback:
                 progress_callback(idx, total, f"씬 {scene_id} 콘티 생성 중...")
-            print(f"  [storyboard] ({idx}/{total}) 씬 {scene_id} 콘티 생성 중")
-            image_bytes = _call_image_api(client, prompt, character_image_path)
-            image_path.write_bytes(image_bytes)
+            print(f"  [storyboard] ({idx}/{total}) 씬 {scene_id} 콘티 생성 중 (모델: {adapter.name})")
+            _generate_image(adapter, prompt, character_image_path, image_path)
             _write_meta(image_path, prompt, cache_key)
             print(f"  [storyboard] 저장: {image_path}")
 
@@ -211,6 +194,7 @@ def regenerate_single_scene(
     output_path: str,
     extra_instructions: str | None = None,
     config: Config | None = None,
+    model: str = "default",
 ) -> dict:
     """
     한 씬만 재생성. 사용자가 마음에 안 든 씬을 다시 만들 때 사용.
@@ -221,16 +205,15 @@ def regenerate_single_scene(
     if config is None:
         config = Config()
 
-    client = OpenAI(api_key=config.openai_api_key)
+    adapter = get_image_adapter(model)
     out_path = Path(output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     prompt = _build_prompt(scene, extra_instructions=extra_instructions)
     cache_key = _scene_cache_key(scene, character_image_path, extra_instructions)
 
-    print(f"  [storyboard] 씬 {scene.get('scene_id')} 재생성 중...")
-    image_bytes = _call_image_api(client, prompt, character_image_path)
-    out_path.write_bytes(image_bytes)
+    print(f"  [storyboard] 씬 {scene.get('scene_id')} 재생성 중 (모델: {adapter.name})")
+    _generate_image(adapter, prompt, character_image_path, out_path)
     _write_meta(out_path, prompt, cache_key)
     print(f"  [storyboard] 재생성 저장: {out_path}")
 

@@ -133,6 +133,8 @@ def generate_video_from_storyboard(
     seedance_mode: str = "kie",
     config: Config | None = None,
     progress_callback=None,
+    video_model: str = "default",
+    character_id: str | None = None,
 ) -> dict:
     """
     승인된 콘티 이미지를 reference로 Kling 영상 생성 후 합성.
@@ -149,11 +151,14 @@ def generate_video_from_storyboard(
         {"final_video": "...", "clips": [...], "mode": "kie"} 또는
         {"brief_dir": "...", "mode": "manual"}
     """
-    from kie_client import generate_kie_clip
+    import asyncio
+
+    from adapters import VideoGenerationRequest, get_video_adapter
 
     if config is None:
         config = Config()
 
+    adapter = get_video_adapter(video_model)
     out_dir = Path(output_dir)
     clips_dir = out_dir / "clips"
     clips_dir.mkdir(parents=True, exist_ok=True)
@@ -184,14 +189,19 @@ def generate_video_from_storyboard(
         _report(int((i - 1) / total_steps * 100), f"씬 {scene_id} 영상 생성 중...")
 
         ref_path = storyboard_by_id.get(scene_id)
-        ref_image = Path(ref_path) if ref_path else None
+        references = [ref_path] if ref_path else None
 
-        kie_scene = {
-            "prompt_en": scene.get("prompt_en") or scene.get("description", ""),
-            "duration_sec": scene.get("duration_sec", 5),
-        }
         dest = clips_dir / f"scene_{scene_id}.mp4"
-        clip = generate_kie_clip(kie_scene, ref_image, dest, config)
+        request = VideoGenerationRequest(
+            prompt=scene.get("prompt_en") or scene.get("description", ""),
+            reference_images=references,
+            character_id=character_id if adapter.supports_character_id else None,
+            aspect_ratio="9:16",
+            duration_seconds=scene.get("duration_sec", 5),
+            output_path=str(dest),
+        )
+        result = asyncio.run(adapter.generate(request))
+        clip = Path(result.video_path)
 
         # 나레이션이 있으면 TTS 합성
         narration = scene.get("narration")
