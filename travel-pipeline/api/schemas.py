@@ -1,0 +1,47 @@
+"""Pydantic 요청/응답 모델."""
+
+from __future__ import annotations
+
+from pydantic import BaseModel
+
+
+class ScenarioGenerateRequest(BaseModel):
+    country: str
+    duration_min: int = 1
+
+
+class StoryboardGenerateRequest(BaseModel):
+    scenario: str = ""
+    character_name: str = ""
+    character_image_path: str | None = None
+    scenes: list[dict]
+
+
+class StoryboardGenerateResponse(BaseModel):
+    job_id: str
+    status: str
+
+
+class StoryboardRegenerateRequest(BaseModel):
+    job_id: str
+    scene_id: int
+    scene: dict
+    character_image_path: str | None = None
+    extra_instructions: str | None = None
+
+
+class VideoStartRequest(BaseModel):
+    job_id: str  # 이전 storyboard job의 id (참조용)
+    scenes: list[dict]
+    approved_storyboards: list[dict]
+    scenario_mode: str = "B"
+    seedance_mode: str = "kie"
+
+
+class JobStatusResponse(BaseModel):
+    job_id: str
+    status: str
+    progress: int
+    current_step: str
+    result: dict | None = None
+    error: str | None = None
