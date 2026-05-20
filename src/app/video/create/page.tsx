@@ -18,7 +18,6 @@ import {
   TRACK_LABELS,
   storyboardCost,
   videoCost,
-  type Track,
 } from "@/lib/channels"
 
 type Phase = "input" | "storyboard" | "generating" | "done"
@@ -57,9 +56,9 @@ export default function VideoCreatePage() {
 
   const storyboardModel = channel?.stack.storyboardModel ?? DEFAULT_STORYBOARD_MODEL
   const videoModel = channel?.stack.videoModel ?? DEFAULT_VIDEO_MODEL
-  // 트랙이 'auto'(자동화)면 콘티 완료 후 영상 단계로 자동 진행. 채널 없이 단독 진입 시 수동.
-  const track: Track | null = channel?.stack.track ?? null
-  const isAutoTrack = track === "auto"
+  // 완전 자동(fullAuto)일 때만 콘티 완료 후 영상 자동 진행. 그 외엔 모든 트랙에서
+  // 콘티 검토 후 사용자가 '영상 생성 시작'을 눌러야 비싼 영상 단계로 넘어간다.
+  const autoAdvance = channel?.stack.fullAuto === true
 
   const storyboard = useStoryboard()
   const video = useVideoGeneration()
@@ -142,18 +141,18 @@ export default function VideoCreatePage() {
     })
   }, [scenes, storyboard, video, videoModel])
 
-  // 자동화 트랙: 콘티가 모두 생성되면 사용자 개입 없이 영상 단계로 진행.
+  // 완전 자동 모드에서만: 콘티가 모두 생성되면 사용자 개입 없이 영상 단계로 진행.
   useEffect(() => {
-    if (!isAutoTrack) return
+    if (!autoAdvance) return
     if (phase !== "storyboard") return
     if (storyboard.isGenerating || storyboard.error) return
     if (scenes.length === 0 || storyboard.storyboards.length < scenes.length) return
     if (autoStartedRef.current) return
     autoStartedRef.current = true
-    toast.info("자동화 트랙: 콘티 완료 → 영상 생성을 자동으로 시작합니다.")
+    toast.info("완전 자동 모드: 콘티 완료 → 영상 생성을 자동으로 시작합니다.")
     handleStartVideo()
   }, [
-    isAutoTrack,
+    autoAdvance,
     phase,
     scenes.length,
     storyboard.isGenerating,
@@ -177,13 +176,13 @@ export default function VideoCreatePage() {
     () =>
       ({
         input: "여행지를 입력하고 콘티 생성을 시작하세요",
-        storyboard: isAutoTrack
+        storyboard: autoAdvance
           ? "콘티 생성 후 자동으로 영상 단계로 진행됩니다"
           : "생성된 콘티를 검토하고 승인하세요",
         generating: "영상을 생성하는 중입니다",
         done: "영상이 완성되었습니다",
       })[effectivePhase],
-    [effectivePhase, isAutoTrack],
+    [effectivePhase, autoAdvance],
   )
 
   return (
@@ -288,7 +287,7 @@ export default function VideoCreatePage() {
                 jobStatus={storyboard.job}
                 title={`콘티 생성 중 · ${modelLabel(STORYBOARD_MODELS, storyboardModel)} · 예상 $${contiCost.toFixed(2)}`}
               />
-            ) : isAutoTrack ? (
+            ) : autoAdvance ? (
               <ProgressTracker
                 jobStatus={storyboard.job}
                 title="콘티 완료 — 영상 단계로 자동 진행 중"

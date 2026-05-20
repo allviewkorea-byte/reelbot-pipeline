@@ -80,6 +80,8 @@ export interface StackConfig {
   contentType: ContentType
   ratio: string
   ratioOverride: boolean
+  // 완전 자동: 콘티 검토 없이 영상 자동 진행. 기본값 false(콘티 확인 후 사용자가 영상 시작).
+  fullAuto: boolean
 }
 
 export interface Channel {
@@ -131,6 +133,7 @@ export const DEFAULT_CHANNELS: Channel[] = [
       contentType: "long",
       ratio: "16:9",
       ratioOverride: false,
+      fullAuto: false,
     },
   },
   {
@@ -157,6 +160,7 @@ export const DEFAULT_CHANNELS: Channel[] = [
       contentType: "short",
       ratio: "9:16",
       ratioOverride: false,
+      fullAuto: false,
     },
   },
   {
@@ -183,6 +187,7 @@ export const DEFAULT_CHANNELS: Channel[] = [
       contentType: "long",
       ratio: "16:9",
       ratioOverride: false,
+      fullAuto: false,
     },
   },
 ]

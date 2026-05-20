@@ -392,6 +392,26 @@ export default function ChannelDetailPage() {
             </p>
           </div>
 
+          {/* 완전 자동 모드 */}
+          <div className="rounded-xl border border-border bg-card p-5">
+            <h2 className="mb-3 text-sm font-semibold text-foreground">자동화 수준</h2>
+            <label className="flex cursor-pointer items-start gap-2.5 text-sm text-foreground">
+              <input
+                type="checkbox"
+                checked={draft.fullAuto ?? false}
+                onChange={(e) => patch({ fullAuto: e.target.checked })}
+                className="mt-0.5 h-4 w-4 accent-[var(--primary)]"
+              />
+              <span>
+                완전 자동 모드 (콘티 검토 없이 영상 자동 진행)
+                <span className="mt-1 block text-xs text-muted-foreground">
+                  체크 해제 시(기본값) 콘티 생성 후 검토·확인을 거쳐 사용자가 영상 생성을 시작합니다.
+                  체크 시 콘티 완료 즉시 영상(비용 높음)이 자동으로 시작됩니다.
+                </span>
+              </span>
+            </label>
+          </div>
+
           {/* 발행 채널 매핑 */}
           <div className="rounded-xl border border-border bg-card p-5">
             <h2 className="mb-3 text-sm font-semibold text-foreground">발행 채널 매핑</h2>
