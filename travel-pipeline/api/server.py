@@ -4,8 +4,11 @@
 문서: http://localhost:8000/docs
 """
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from api.routes import health, status, storyboard, video
 
@@ -19,6 +22,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 콘티/영상 산출물(output/)을 브라우저가 접근할 수 있도록 /static 으로 서빙.
+# 예) output/storyboard/{job_id}/scene_1.png -> http://localhost:8000/static/storyboard/{job_id}/scene_1.png
+_OUTPUT_DIR = Path(__file__).resolve().parent.parent / "output"
+_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(_OUTPUT_DIR)), name="static")
 
 app.include_router(health.router)
 app.include_router(storyboard.router, prefix="/storyboard", tags=["storyboard"])
