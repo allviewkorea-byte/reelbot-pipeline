@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 from pathlib import Path
 
 from openai import OpenAI
@@ -22,6 +23,25 @@ from config import Config
 _IMAGE_MODEL = "gpt-image-1"
 _IMAGE_SIZE = "1024x1536"
 _IMAGE_QUALITY = "high"
+
+# 브라우저가 접근할 백엔드 베이스 URL. server.py가 output/ 를 /static 으로 마운트한다.
+_PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
+_STATIC_MOUNT = "static"
+
+
+def _to_public_url(image_path: Path, output_root: str) -> str | None:
+    """output_root 하위 파일 경로를 브라우저 접근용 절대 URL로 변환.
+
+    예) output/storyboard/{job}/scene_1.png
+        -> http://localhost:8000/static/storyboard/{job}/scene_1.png
+
+    image_path가 output_root 밖이면 None.
+    """
+    try:
+        rel = image_path.resolve().relative_to(Path(output_root).resolve())
+    except ValueError:
+        return None
+    return f"{_PUBLIC_BASE_URL}/{_STATIC_MOUNT}/{rel.as_posix()}"
 
 
 def _scene_cache_key(scene: dict, character_image_path: str, extra: str | None) -> str:
@@ -134,7 +154,9 @@ def generate_storyboard(
         progress_callback: callable(scene_index, total, message) 형태. 진행률 보고용.
 
     Returns:
-        [{"scene_id": ..., "image_path": "...", "prompt": "...", "cached": bool}, ...]
+        [{"scene_id": ..., "image_path": "...", "image_url": "...", "prompt": "...", "cached": bool}, ...]
+        image_path: 서버 파일시스템 경로(영상 생성 단계에서 reference로 사용)
+        image_url: 브라우저 접근용 절대 URL(/static 마운트 경유)
     """
     if config is None:
         config = Config()
@@ -175,6 +197,7 @@ def generate_storyboard(
         results.append({
             "scene_id": scene_id,
             "image_path": str(image_path),
+            "image_url": _to_public_url(image_path, config.output_dir),
             "prompt": prompt,
             "cached": cached,
         })
@@ -193,7 +216,7 @@ def regenerate_single_scene(
     한 씬만 재생성. 사용자가 마음에 안 든 씬을 다시 만들 때 사용.
     캐시 무시하고 무조건 새로 호출.
 
-    Returns: {"scene_id": ..., "image_path": "...", "prompt": "...", "cached": False}
+    Returns: {"scene_id": ..., "image_path": "...", "image_url": "...", "prompt": "...", "cached": False}
     """
     if config is None:
         config = Config()
@@ -214,6 +237,7 @@ def regenerate_single_scene(
     return {
         "scene_id": scene.get("scene_id"),
         "image_path": str(out_path),
+        "image_url": _to_public_url(out_path, config.output_dir),
         "prompt": prompt,
         "cached": False,
     }

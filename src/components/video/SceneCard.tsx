@@ -10,13 +10,19 @@ const API_BASE =
 
 export type SceneStatus = "pending" | "approved" | "regenerating"
 
-// 백엔드가 주는 image_url(절대 URL) 우선, 없으면 image_path 를 API_BASE 기준으로 변환.
+// 백엔드가 주는 image_url(절대 URL) 우선. 없으면 image_path(서버 파일경로)를
+// /static 마운트 기준 URL로 변환한다. 백엔드는 output/ 를 /static 으로 서빙한다.
 function resolveImageSrc(sb?: Storyboard): string | null {
   if (!sb) return null
   if (sb.image_url) return String(sb.image_url)
   if (sb.image_path) {
-    const p = String(sb.image_path).replace(/^\/+/, "")
-    return `${API_BASE}/${p}`
+    const norm = String(sb.image_path).replace(/\\/g, "/")
+    const idx = norm.lastIndexOf("/output/")
+    const rel =
+      idx >= 0
+        ? norm.slice(idx + "/output/".length)
+        : norm.replace(/^output\//, "").replace(/^\/+/, "")
+    return `${API_BASE}/static/${rel}`
   }
   return null
 }
