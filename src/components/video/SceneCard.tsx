@@ -108,9 +108,13 @@ export function SceneCard({
             className="w-full resize-none rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground outline-none focus:border-primary/50"
           />
         ) : (
-          <p className="line-clamp-2 text-[11px] text-muted-foreground">
-            {storyboard?.prompt ? String(storyboard.prompt) : sceneDesc}
-          </p>
+          // 영어 AI 프롬프트(storyboard.prompt)는 UI에서 숨기고 한국어 설명만 표시.
+          // 백엔드 프롬프트와 편집 textarea(draft)에는 그대로 유지된다.
+          sceneDesc && (
+            <p className="line-clamp-2 text-[11px] text-muted-foreground">
+              {sceneDesc}
+            </p>
+          )
         )}
 
         {/* 액션 버튼 */}

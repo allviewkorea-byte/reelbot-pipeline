@@ -19,8 +19,16 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
-// ── Outfit options (16) ───────────────────────────────────────────
-const OUTFIT_OPTIONS = [
+// ── Gender ────────────────────────────────────────────────────────
+type Gender = "female" | "male"
+
+interface Option {
+  value: string
+  label: string
+}
+
+// ── Outfit options (성별별) ────────────────────────────────────────
+const FEMALE_OUTFIT_OPTIONS: Option[] = [
   { value: "trendy K-Street fashion, oversized denim jacket",             label: "트렌디 스트릿" },
   { value: "casual travel outfit, comfortable t-shirt and jeans",         label: "캐주얼 여행복" },
   { value: "luxury fashion, designer outfit, high-end clothing",          label: "럭셔리 스타일" },
@@ -39,7 +47,26 @@ const OUTFIT_OPTIONS = [
   { value: "modern casual, well-fitted contemporary outfit",              label: "모던 캐주얼" },
 ]
 
-const HAIR_OPTIONS = [
+const MALE_OUTFIT_OPTIONS: Option[] = [
+  { value: "trendy K-street menswear, oversized hoodie and cargo pants",  label: "트렌디 스트릿" },
+  { value: "casual travel outfit for men, t-shirt and shorts",            label: "캐주얼 여행복" },
+  { value: "luxury designer menswear, high-end tailored coat",            label: "럭셔리 스타일" },
+  { value: "traditional Korean hanbok for men",                           label: "현지 전통의상" },
+  { value: "resort beachwear for men, linen shirt and shorts",            label: "리조트 비치" },
+  { value: "minimalist menswear, monochrome black and white outfit",      label: "시크 미니멀" },
+  { value: "preppy style, knit sweater over collared shirt",              label: "프레피" },
+  { value: "vintage 70s-80s retro menswear",                              label: "빈티지 레트로" },
+  { value: "rugged outdoor style, padded jacket and boots",               label: "아웃도어" },
+  { value: "sporty athleisure, track jacket and joggers",                 label: "스포츠 캐주얼" },
+  { value: "smart business suit, tailored blazer and dress pants",        label: "비즈니스 정장" },
+  { value: "business casual, button-up shirt and chinos",                 label: "비즈니스 캐주얼" },
+  { value: "K-Pop idol stage outfit for men, trendy and bold",            label: "K-Pop 아이돌" },
+  { value: "evening night out outfit, sleek dark suit",                   label: "야간 외출 룩" },
+  { value: "cozy daily wear, oversized knit sweater",                     label: "데일리 코지" },
+  { value: "modern casual, well-fitted shirt and slim jeans",             label: "모던 캐주얼" },
+]
+
+const FEMALE_HAIR_OPTIONS: Option[] = [
   { value: "long wavy dark hair flowing past shoulders", label: "긴 웨이브" },
   { value: "long straight black hair",                   label: "긴 생머리" },
   { value: "medium-length layered hair",                 label: "미디엄 레이어드" },
@@ -47,6 +74,24 @@ const HAIR_OPTIONS = [
   { value: "high ponytail",                              label: "포니테일" },
   { value: "hair tied up in a bun",                      label: "묶음머리" },
 ]
+
+const MALE_HAIR_OPTIONS: Option[] = [
+  { value: "short black cropped hair",          label: "짧은 크롭" },
+  { value: "two-block undercut hairstyle",      label: "투블럭" },
+  { value: "neatly combed short hair",          label: "단정한 짧은머리" },
+  { value: "wavy medium-length hair for men",   label: "미디엄 웨이브" },
+  { value: "buzz cut",                          label: "버즈컷" },
+  { value: "slicked-back hair",                 label: "슬릭백" },
+]
+
+const OUTFIT_OPTIONS_BY_GENDER: Record<Gender, Option[]> = {
+  female: FEMALE_OUTFIT_OPTIONS,
+  male: MALE_OUTFIT_OPTIONS,
+}
+const HAIR_OPTIONS_BY_GENDER: Record<Gender, Option[]> = {
+  female: FEMALE_HAIR_OPTIONS,
+  male: MALE_HAIR_OPTIONS,
+}
 
 const HEADWEAR_OPTIONS = [
   { value: "",                          label: "없음" },
@@ -84,13 +129,54 @@ const SHOES_OPTIONS = [
   { value: "wearing loafers",           label: "로퍼" },
 ]
 
-const JEWELRY_OPTIONS = [
-  { value: "wearing a watch",    label: "시계" },
-  { value: "wearing a necklace", label: "목걸이" },
+const FEMALE_JEWELRY_OPTIONS: Option[] = [
   { value: "wearing earrings",   label: "귀걸이" },
-  { value: "wearing a bracelet", label: "팔찌" },
+  { value: "wearing a necklace", label: "목걸이" },
   { value: "wearing rings",      label: "반지" },
+  { value: "wearing a bracelet", label: "팔찌" },
+  { value: "wearing a watch",    label: "시계" },
 ]
+
+const MALE_JEWELRY_OPTIONS: Option[] = [
+  { value: "wearing a watch",                 label: "시계" },
+  { value: "wearing a bracelet",              label: "팔찌" },
+  { value: "wearing a leather strap bracelet", label: "가죽 팔찌" },
+  { value: "wearing a chain necklace",        label: "체인 목걸이" },
+  { value: "wearing a simple ring",           label: "반지" },
+]
+
+const JEWELRY_OPTIONS_BY_GENDER: Record<Gender, Option[]> = {
+  female: FEMALE_JEWELRY_OPTIONS,
+  male: MALE_JEWELRY_OPTIONS,
+}
+
+// ── 외모 자동 추천 풀 ───────────────────────────────────────────────
+// 각 풀에서 하나씩 조합 → 수백 가지 조합 (요구사항 최소 10가지 충족)
+const APPEARANCE_POOLS: Record<Gender, { age: string[]; hair: string[]; eyes: string[]; feature: string[]; vibe: string[] }> = {
+  female: {
+    age:     ["20대 초반 한국 여성", "20대 중반 한국 여성", "20대 후반 한국 여성", "30대 초반 한국 여성"],
+    hair:    ["긴 갈색 웨이브 헤어", "긴 흑발 생머리", "단발 보브 헤어", "밝은 갈색 레이어드 헤어", "포니테일로 묶은 머리"],
+    eyes:    ["크고 맑은 눈", "또렷한 쌍꺼풀 눈", "밝은 눈", "차분한 눈매"],
+    feature: ["자연스러운 메이크업", "화사한 피부 톤", "은은한 메이크업", "도자기 같은 피부"],
+    vibe:    ["청순한 분위기", "세련된 도시적 분위기", "사랑스러운 분위기", "지적인 분위기", "발랄한 분위기"],
+  },
+  male: {
+    age:     ["20대 초반 한국 남성", "20대 중반 한국 남성", "20대 후반 한국 남성", "30대 초반 한국 남성"],
+    hair:    ["짧은 검은 헤어", "투블럭 헤어", "단정하게 빗어넘긴 헤어", "자연스러운 웨이브 헤어", "버즈컷"],
+    eyes:    ["선명한 이목구비", "또렷한 눈매", "부드러운 인상", "강인한 눈빛"],
+    feature: ["깔끔한 피부", "또렷한 턱선", "균형 잡힌 얼굴형"],
+    vibe:    ["단정한 캐주얼 스타일", "세련된 도시적 분위기", "훈훈한 분위기", "지적인 분위기", "활기찬 분위기"],
+  },
+}
+
+function pickRandom<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)]
+}
+
+function randomAppearance(gender: Gender): string {
+  const p = APPEARANCE_POOLS[gender]
+  return [pickRandom(p.age), pickRandom(p.hair), pickRandom(p.eyes), pickRandom(p.feature), pickRandom(p.vibe)].join(", ")
+}
 
 // ── Types ─────────────────────────────────────────────────────────
 type GenerateStep = "idle" | "front" | "side" | "back" | "saving" | "done" | "error"
@@ -116,6 +202,7 @@ interface CharacterConfig {
     jewelry: string[]
   }
   hair: string
+  gender?: Gender
 }
 
 interface CharacterImages {
@@ -273,9 +360,10 @@ export default function CharacterPage() {
   const [activeTab, setActiveTab] = useState<"generate" | "upload">("generate")
 
   // Generate form state
+  const [gender,         setGender]         = useState<Gender>("female")
   const [appearance,     setAppearance]     = useState("")
-  const [selectedOutfit, setSelectedOutfit] = useState(OUTFIT_OPTIONS[1].value)
-  const [hair,           setHair]           = useState(HAIR_OPTIONS[0].value)
+  const [selectedOutfit, setSelectedOutfit] = useState(FEMALE_OUTFIT_OPTIONS[1].value)
+  const [hair,           setHair]           = useState(FEMALE_HAIR_OPTIONS[0].value)
   const [headwear,       setHeadwear]       = useState("")
   const [eyewear,        setEyewear]        = useState("")
   const [bag,            setBag]            = useState("")
@@ -306,6 +394,24 @@ export default function CharacterPage() {
 
   const isGenerating = step !== "idle" && step !== "done" && step !== "error"
 
+  // 성별에 따라 의상/헤어/주얼리 프리셋이 바뀐다.
+  const outfitOptions  = OUTFIT_OPTIONS_BY_GENDER[gender]
+  const hairOptions    = HAIR_OPTIONS_BY_GENDER[gender]
+  const jewelryOptions = JEWELRY_OPTIONS_BY_GENDER[gender]
+
+  function handleGenderChange(next: Gender) {
+    if (next === gender) return
+    setGender(next)
+    // 성별이 바뀌면 관련 프리셋을 새 성별 기본값으로 초기화한다.
+    setSelectedOutfit(OUTFIT_OPTIONS_BY_GENDER[next][1].value)
+    setHair(HAIR_OPTIONS_BY_GENDER[next][0].value)
+    setJewelry([])
+  }
+
+  function handleRandomAppearance() {
+    setAppearance(randomAppearance(gender))
+  }
+
   const fetchLibrary = useCallback(async () => {
     setLibLoading(true)
     try {
@@ -335,13 +441,17 @@ export default function CharacterPage() {
       outfit: selectedOutfit,
       accessories: { headwear, eyewear, bag, shoes, jewelry },
       hair,
+      gender,
     }
   }
 
   function restoreConfig(config: CharacterConfig) {
+    // 기존 캐릭터(성별 미저장)는 여성으로 간주해 동작을 보존한다.
+    const g: Gender = config.gender === "male" ? "male" : "female"
+    setGender(g)
     setAppearance(config.appearance ?? "")
-    setSelectedOutfit(config.outfit ?? OUTFIT_OPTIONS[1].value)
-    setHair(config.hair ?? HAIR_OPTIONS[0].value)
+    setSelectedOutfit(config.outfit ?? OUTFIT_OPTIONS_BY_GENDER[g][1].value)
+    setHair(config.hair ?? HAIR_OPTIONS_BY_GENDER[g][0].value)
     setHeadwear(config.accessories?.headwear ?? "")
     setEyewear(config.accessories?.eyewear ?? "")
     setBag(config.accessories?.bag ?? "")
@@ -367,6 +477,7 @@ export default function CharacterPage() {
           appearance,
           outfit: selectedOutfit,
           hair,
+          gender,
           accessories: { headwear, eyewear, bag, shoes, jewelry },
         }),
       })
@@ -513,11 +624,51 @@ export default function CharacterPage() {
             </div>
 
             <div className="flex flex-col gap-5">
-              {/* Appearance */}
+              {/* Gender toggle */}
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-                  외모 설명
+                  성별
                 </label>
+                <div className="inline-flex rounded-lg border border-border bg-background p-0.5">
+                  {([
+                    { value: "female", label: "여성" },
+                    { value: "male",   label: "남성" },
+                  ] as const).map((g) => {
+                    const active = gender === g.value
+                    return (
+                      <button
+                        key={g.value}
+                        type="button"
+                        onClick={() => handleGenderChange(g.value)}
+                        disabled={isGenerating}
+                        className={`rounded-md px-5 py-1.5 text-sm font-medium transition-colors disabled:opacity-50 ${
+                          active
+                            ? "bg-primary text-primary-foreground"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {g.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Appearance */}
+              <div>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <label className="block text-xs font-medium text-muted-foreground">
+                    외모 설명
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleRandomAppearance}
+                    disabled={isGenerating}
+                    className="flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground disabled:opacity-50"
+                  >
+                    🎲 자동 추천
+                  </button>
+                </div>
                 <textarea
                   rows={2}
                   value={appearance}
@@ -537,7 +688,7 @@ export default function CharacterPage() {
                   의상 스타일
                 </label>
                 <div className="grid grid-cols-4 gap-2">
-                  {OUTFIT_OPTIONS.map((o) => {
+                  {outfitOptions.map((o) => {
                     const active = selectedOutfit === o.value
                     return (
                       <button
@@ -567,7 +718,7 @@ export default function CharacterPage() {
                 label="헤어 스타일"
                 value={hair}
                 onChange={setHair}
-                options={HAIR_OPTIONS}
+                options={hairOptions}
                 disabled={isGenerating}
               />
 
@@ -611,7 +762,7 @@ export default function CharacterPage() {
                     주얼리 (복수 선택 가능)
                   </label>
                   <div className="flex flex-wrap gap-2">
-                    {JEWELRY_OPTIONS.map((j) => {
+                    {jewelryOptions.map((j) => {
                       const active = jewelry.includes(j.value)
                       return (
                         <button

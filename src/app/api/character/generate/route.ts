@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
-import OpenAI from "openai"
 import fs from "fs"
 import path from "path"
+import { WavespeedImageAdapter } from "@/lib/wavespeed"
 
 // ── Prompt builders ───────────────────────────────────────────────
 
@@ -26,14 +26,21 @@ function buildAccessoryClause(acc: {
   return parts.length ? parts.join(", ") + "." : ""
 }
 
+type Gender = "female" | "male"
+
+function subjectFor(gender: Gender): string {
+  return gender === "male" ? "Korean man in his late 20s" : "Korean woman in her late 20s"
+}
+
 function buildFrontPrompt(
   appearance: string,
   outfit: string,
   hair: string,
-  accClause: string
+  accClause: string,
+  gender: Gender
 ): string {
   return (
-    `Photorealistic full-body portrait of a Korean woman in her late 20s. ` +
+    `Photorealistic full-body portrait of a ${subjectFor(gender)}. ` +
     `Appearance: ${appearance}. ` +
     `Hair: ${hair}. ` +
     `Outfit: ${outfit}. ` +
@@ -44,9 +51,9 @@ function buildFrontPrompt(
   )
 }
 
-function buildSidePrompt(outfit: string, hair: string, accClause: string): string {
+function buildSidePrompt(outfit: string, hair: string, accClause: string, gender: Gender): string {
   return (
-    `The exact same Korean woman — same face, same ${hair} hairstyle, same ${outfit} outfit` +
+    `The exact same ${subjectFor(gender)} — same face, same ${hair} hairstyle, same ${outfit} outfit` +
     (accClause ? `, ${accClause}` : ``) +
     ` — side profile view, facing left 90 degrees. ` +
     `White seamless studio background, sharp soft lighting, 4K detail. ` +
@@ -55,50 +62,15 @@ function buildSidePrompt(outfit: string, hair: string, accClause: string): strin
   )
 }
 
-function buildBackPrompt(outfit: string, hair: string, accClause: string): string {
+function buildBackPrompt(outfit: string, hair: string, accClause: string, gender: Gender): string {
   return (
-    `The exact same Korean woman — same ${hair} hairstyle, same ${outfit} outfit` +
+    `The exact same ${subjectFor(gender)} — same ${hair} hairstyle, same ${outfit} outfit` +
     (accClause ? `, ${accClause}` : ``) +
     ` — back view, facing completely away from camera. ` +
     `White seamless studio background, sharp soft lighting, 4K detail. ` +
     `Keep hairstyle and outfit identical to the reference image. ` +
     FULL_BODY_SUFFIX
   )
-}
-
-// ── Image generation helpers ──────────────────────────────────────
-
-async function generateImage(client: OpenAI, prompt: string): Promise<Buffer> {
-  const response = await client.images.generate({
-    model: "gpt-image-1",
-    prompt,
-    size: "1024x1536",
-    quality: "high",
-    n: 1,
-  })
-  const b64 = response.data?.[0]?.b64_json
-  if (!b64) throw new Error("No image data returned")
-  return Buffer.from(b64, "base64")
-}
-
-async function generateImageFromRef(
-  client: OpenAI,
-  prompt: string,
-  refBuffer: Buffer
-): Promise<Buffer> {
-  const { toFile } = await import("openai")
-  const refFile = await toFile(refBuffer, "reference.png", { type: "image/png" })
-  const response = await client.images.edit({
-    model: "gpt-image-1",
-    image: refFile,
-    prompt,
-    size: "1024x1536",
-    quality: "high",
-    n: 1,
-  })
-  const b64 = response.data?.[0]?.b64_json
-  if (!b64) throw new Error("No image data returned from edit")
-  return Buffer.from(b64, "base64")
 }
 
 // ── Route handler ─────────────────────────────────────────────────
@@ -116,13 +88,14 @@ interface RequestBody {
   outfit?: string
   accessories?: AccessoriesBody
   hair?: string
+  gender?: Gender
 }
 
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.OPENAI_API_KEY
+  const apiKey = process.env.WAVESPEED_API_KEY
   if (!apiKey) {
     return NextResponse.json(
-      { success: false, error: "OPENAI_API_KEY not configured" },
+      { success: false, error: "WAVESPEED_API_KEY not configured" },
       { status: 500 }
     )
   }
@@ -134,10 +107,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: "Invalid JSON" }, { status: 400 })
   }
 
-  const appearance = body.appearance?.trim() || "Korean idol-style beauty with fair porcelain skin, defined double eyelids, high nose bridge, small oval face, slim elegant proportions. 한국인 여성 몸매좋고 비율좋은 연예인상의 이쁜 외모"
+  const gender: Gender = body.gender === "male" ? "male" : "female"
+
+  const defaultAppearance =
+    gender === "male"
+      ? "Korean idol-style handsome man with fair clear skin, defined double eyelids, sharp jawline, tall slim proportions. 한국인 남성 비율좋고 잘생긴 연예인상의 외모"
+      : "Korean idol-style beauty with fair porcelain skin, defined double eyelids, high nose bridge, small oval face, slim elegant proportions. 한국인 여성 몸매좋고 비율좋은 연예인상의 이쁜 외모"
+  const defaultHair =
+    gender === "male" ? "short black cropped hair" : "long wavy dark hair flowing past shoulders"
+
+  const appearance = body.appearance?.trim() || defaultAppearance
 
   const outfit     = body.outfit?.trim()     || "casual travel outfit, comfortable t-shirt and jeans"
-  const hair       = body.hair?.trim()       || "long wavy dark hair flowing past shoulders"
+  const hair       = body.hair?.trim()       || defaultHair
 
   const acc: Required<AccessoriesBody> & { jewelry: string[] } = {
     headwear: body.accessories?.headwear || "",
@@ -148,23 +130,23 @@ export async function POST(req: NextRequest) {
   }
   const accClause = buildAccessoryClause(acc)
 
-  const client = new OpenAI({ apiKey })
+  const adapter = new WavespeedImageAdapter(apiKey)
+  // 앞/측/뒷면 3장에 동일한 seed를 사용해 같은 캐릭터 외모를 유지한다.
+  const seed = Math.floor(Math.random() * 1_000_000)
 
   try {
-    const frontBuf = await generateImage(
-      client,
-      buildFrontPrompt(appearance, outfit, hair, accClause)
-    )
-    const sideBuf = await generateImageFromRef(
-      client,
-      buildSidePrompt(outfit, hair, accClause),
-      frontBuf
-    )
-    const backBuf = await generateImageFromRef(
-      client,
-      buildBackPrompt(outfit, hair, accClause),
-      frontBuf
-    )
+    const frontBuf = await adapter.generate({
+      prompt: buildFrontPrompt(appearance, outfit, hair, accClause, gender),
+      seed,
+    })
+    const sideBuf = await adapter.generate({
+      prompt: buildSidePrompt(outfit, hair, accClause, gender),
+      seed,
+    })
+    const backBuf = await adapter.generate({
+      prompt: buildBackPrompt(outfit, hair, accClause, gender),
+      seed,
+    })
 
     const id  = Date.now().toString()
     const dir = path.join(process.cwd(), "public", "character-seeds", id)
