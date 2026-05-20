@@ -4,16 +4,14 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
   LayoutDashboard,
-  User,
   Tv2,
-  TrendingUp,
-  Upload,
+  User,
   Wand2,
-  Clapperboard,
-  MapPin,
-  Layers,
-  SlidersHorizontal,
-  Zap,
+  Captions,
+  TrendingUp,
+  Send,
+  History,
+  ListChecks,
   DollarSign,
   ScrollText,
   Settings,
@@ -30,24 +28,47 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>
 }
 
-const mainNavItems: NavItem[] = [
-  { label: "대시보드",    href: "/dashboard",   icon: LayoutDashboard },
-  { label: "캐릭터 설정", href: "/character",   icon: User },
-  { label: "채널 관리",   href: "/channels",    icon: Tv2 },
-  { label: "경쟁사 분석", href: "/competitor",  icon: TrendingUp },
-  { label: "멀티 업로드", href: "/upload",      icon: Upload },
-  { label: "시나리오 생성",href: "/scenario",   icon: Wand2 },
-  { label: "영상 제작",   href: "/video",       icon: Clapperboard },
-  { label: "실제 공간",   href: "/space",       icon: MapPin },
-  { label: "Adobe 편집",  href: "/adobe",       icon: Layers },
-  { label: "모드 설정",   href: "/mode",        icon: SlidersHorizontal },
-  { label: "자동화",      href: "/automation",  icon: Zap },
+interface NavGroup {
+  header?: string
+  items: NavItem[]
+}
+
+// 작업 2.5-1 · 채널 컨테이너 모델 IA
+const navGroups: NavGroup[] = [
+  {
+    items: [
+      { label: "대시보드", href: "/dashboard", icon: LayoutDashboard },
+      { label: "채널", href: "/channels", icon: Tv2 },
+    ],
+  },
+  {
+    header: "공통 자산",
+    items: [
+      { label: "캐릭터 라이브러리", href: "/character", icon: User },
+      { label: "시나리오 보관함", href: "/scenario", icon: Wand2 },
+      { label: "자막 스타일", href: "/subtitle-style", icon: Captions },
+    ],
+  },
+  {
+    header: "도구",
+    items: [
+      { label: "경쟁사 분석", href: "/competitor", icon: TrendingUp },
+      { label: "멀티 플랫폼 발행", href: "/upload", icon: Send },
+    ],
+  },
+  {
+    header: "보관함",
+    items: [
+      { label: "작업 히스토리", href: "/history", icon: History },
+      { label: "발행 큐", href: "/publish-queue", icon: ListChecks },
+    ],
+  },
 ]
 
 const bottomNavItems: NavItem[] = [
-  { label: "비용 추적", href: "/costs",    icon: DollarSign },
-  { label: "로그",      href: "/logs",     icon: ScrollText },
-  { label: "설정",      href: "/settings", icon: Settings },
+  { label: "비용 추적", href: "/costs", icon: DollarSign },
+  { label: "로그", href: "/logs", icon: ScrollText },
+  { label: "설정", href: "/settings", icon: Settings },
 ]
 
 function NavItemLink({ item, pathname }: { item: NavItem; pathname: string }) {
@@ -96,8 +117,18 @@ export function Sidebar() {
       {/* Main Navigation */}
       <ScrollArea className="flex-1 px-3 py-4">
         <nav className="flex flex-col gap-1">
-          {mainNavItems.map((item) => (
-            <NavItemLink key={item.href} item={item} pathname={pathname} />
+          {navGroups.map((group, gi) => (
+            <div key={group.header ?? `group-${gi}`} className="flex flex-col gap-1">
+              {gi > 0 && <Separator className="my-2" />}
+              {group.header && (
+                <p className="px-3 pb-1 pt-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  {group.header}
+                </p>
+              )}
+              {group.items.map((item) => (
+                <NavItemLink key={item.href} item={item} pathname={pathname} />
+              ))}
+            </div>
           ))}
         </nav>
       </ScrollArea>
