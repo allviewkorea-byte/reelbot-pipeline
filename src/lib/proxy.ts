@@ -1,6 +1,16 @@
 import { NextResponse } from "next/server"
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000"
+// "localhost"는 Node fetch(undici)가 IPv6(::1)로 먼저 해석할 수 있는데,
+// uvicorn은 IPv4(0.0.0.0)에만 바인딩되므로 ::1 연결이 무한 대기하다
+// undici 기본 headersTimeout(5분) 후에야 끊기는 문제가 있다.
+// 환경변수에 localhost가 들어와도 IPv4 루프백으로 정규화한다.
+const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000").replace(
+  "://localhost",
+  "://127.0.0.1",
+)
+
+// 프록시 요청 timeout — 백엔드 미응답 시 5분 대기 대신 빠르게 503 반환.
+const REQUEST_TIMEOUT_MS = 8000
 
 // FastAPI 백엔드로 요청을 그대로 전달하는 공통 proxy 헬퍼.
 export async function proxyJson(
@@ -13,6 +23,7 @@ export async function proxyJson(
       cache: "no-store",
       headers: { "Content-Type": "application/json" },
       body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     })
     const data = await res.json()
     return NextResponse.json(data, { status: res.status })
