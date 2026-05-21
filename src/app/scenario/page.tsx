@@ -2,7 +2,7 @@
 
 import { Suspense, useState, useEffect, useCallback, useMemo } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { RefreshCw, Pencil, Check, X, ChevronDown, ChevronUp, ArrowRight, Loader2, Sparkles, Hash, TrendingUp } from "lucide-react"
+import { RefreshCw, Pencil, Check, X, ChevronDown, ChevronUp, ArrowRight, Loader2, Sparkles, Hash, TrendingUp, Save } from "lucide-react"
 import { useChannels } from "@/components/channels/ChannelProvider"
 import {
   fetchInsights,
@@ -31,7 +31,7 @@ const META = {
   mode: "B 하이브리드",
 }
 
-const INITIAL_SCENES = [
+const INITIAL_SCENES_RAW = [
   { id: "S01", title: "오프닝 — 새벽 왓아룬 전경 (훅)",         sec: 10, desc: "충격적 새벽빛 전경으로 시청자 시선 즉시 고정" },
   { id: "S02", title: "입구 도착 — 캐릭터 인사",                 sec: 10, desc: "카메라 향해 밝게 인사, 오늘 일정 간단히 소개" },
   { id: "S03", title: "계단 올라가며 역사 설명",                  sec: 10, desc: "왓아룬 79m 탑 계단, 아유타야 시대 역사 나레이션" },
@@ -58,6 +58,13 @@ const INITIAL_SCENES = [
   { id: "S24", title: "아웃트로 — 구독·좋아요 CTA",             sec: 10, desc: "카메라 향해 구독 부탁, 다음 여행지 티저 공개" },
 ]
 
+// 기본 씬에는 script/durationSec 가 없으므로 빈 값으로 보정한다.
+const INITIAL_SCENES: Scene[] = INITIAL_SCENES_RAW.map((s) => ({
+  ...s,
+  script: "",
+  durationSec: s.sec,
+}))
+
 // ── 파라미터 옵션 ───────────────────────────────────────────────────
 const CATEGORIES = [
   "여행", "음식·맛집", "라이프스타일", "패션·뷰티", "교육·정보",
@@ -79,6 +86,15 @@ function recommendSceneCount(min: number): number {
 }
 
 const SCENARIO_STORE_KEY = "reelbot.scenarios.v1"
+// 현재 작업 중인 시나리오 초안(씬 스크립트 + 본문 편집)을 reload 후에도 유지.
+const SCENARIO_DRAFT_KEY = "reelbot.scenarioDraft.v1"
+
+interface ScenarioDraft {
+  scenes?: Scene[]
+  metaTitle?: string | null
+  metaDescription?: string | null
+  metaTags?: string[] | null
+}
 
 // ── Chip ────────────────────────────────────────────────────────────
 function Chip({
@@ -108,22 +124,47 @@ function Chip({
   )
 }
 
+type Scene = { id: string; title: string; sec: number; desc: string; script: string; durationSec: number }
+
+// 한국어 발화 기준 1초당 약 4~5자 → 권장 글자수 범위.
+function recommendedCharRange(durationSec: number): [number, number] {
+  return [Math.round(durationSec * 4), Math.round(durationSec * 5)]
+}
+
 function SceneRow({
   scene,
-  onSave,
+  expanded,
+  regenerating,
+  onToggleScript,
+  onSaveMeta,
+  onSaveScript,
+  onRegenerate,
 }: {
-  scene: { id: string; title: string; sec: number; desc: string }
-  onSave: (id: string, title: string, desc: string) => void
+  scene: Scene
+  expanded: boolean
+  regenerating: boolean
+  onToggleScript: (id: string) => void
+  onSaveMeta: (id: string, title: string, desc: string) => void
+  onSaveScript: (id: string, script: string) => void
+  onRegenerate: (scene: Scene) => void
 }) {
   const [editing, setEditing] = useState(false)
   const [draftTitle, setDraftTitle] = useState(scene.title)
   const [draftDesc, setDraftDesc] = useState(scene.desc)
+  // scene.script 가 외부(재생성)로 바뀌면 부모가 key 를 갱신해 이 컴포넌트를
+  // 리마운트하므로, 로컬 초안은 마운트 시점의 script 로 안전하게 초기화된다.
+  const [draftScript, setDraftScript] = useState(scene.script)
 
-  function handleSave() {
-    onSave(scene.id, draftTitle, draftDesc)
+  const [minChars, maxChars] = recommendedCharRange(scene.durationSec)
+  const len = draftScript.length
+  const outOfRange = len > 0 && (len < minChars || len > maxChars)
+  const dirty = draftScript !== scene.script
+
+  function handleSaveMeta() {
+    onSaveMeta(scene.id, draftTitle, draftDesc)
     setEditing(false)
   }
-  function handleCancel() {
+  function handleCancelMeta() {
     setDraftTitle(scene.title)
     setDraftDesc(scene.desc)
     setEditing(false)
@@ -143,11 +184,11 @@ function SceneRow({
               onChange={(e) => setDraftTitle(e.target.value)}
               className="flex-1 rounded border border-primary/40 bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
             />
-            <span className="shrink-0 text-[10px] text-muted-foreground">{scene.sec}초</span>
-            <button onClick={handleSave} className="rounded p-1 text-emerald-400 hover:bg-emerald-500/10">
+            <span className="shrink-0 text-[10px] text-muted-foreground">{scene.durationSec}초</span>
+            <button onClick={handleSaveMeta} className="rounded p-1 text-emerald-400 hover:bg-emerald-500/10">
               <Check className="h-3.5 w-3.5" />
             </button>
-            <button onClick={handleCancel} className="rounded p-1 text-muted-foreground hover:bg-secondary/60">
+            <button onClick={handleCancelMeta} className="rounded p-1 text-muted-foreground hover:bg-secondary/60">
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
@@ -168,7 +209,9 @@ function SceneRow({
             <p className="text-xs font-medium text-foreground">{scene.title}</p>
             <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{scene.desc}</p>
           </div>
-          <span className="mt-0.5 shrink-0 text-[10px] text-muted-foreground/60">{scene.sec}초</span>
+          <span className="mt-0.5 shrink-0 rounded-full bg-secondary/60 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+            {scene.durationSec}초
+          </span>
           <button
             onClick={() => setEditing(true)}
             className="mt-0.5 shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
@@ -177,11 +220,60 @@ function SceneRow({
           </button>
         </div>
       )}
+
+      {/* 스크립트 펼치기 토글 */}
+      {!editing && (
+        <div className="mt-2 pl-12">
+          <button
+            onClick={() => onToggleScript(scene.id)}
+            className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+          >
+            {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            스크립트 {expanded ? "접기" : "펼치기"}
+            {!expanded && scene.script && <span className="text-muted-foreground/50">· {scene.script.length}자</span>}
+          </button>
+
+          {expanded && (
+            <div className="mt-2 flex flex-col gap-2">
+              <textarea
+                value={draftScript}
+                onChange={(e) => setDraftScript(e.target.value)}
+                rows={3}
+                placeholder="이 씬에서 읽을 내레이션 텍스트…"
+                className="w-full resize-y rounded-lg border border-border bg-card px-3 py-2 text-xs leading-relaxed text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <div className="flex items-center justify-between gap-2">
+                <span className={`text-[11px] ${outOfRange ? "text-amber-500" : "text-muted-foreground"}`}>
+                  {len}자 / 권장 {minChars}~{maxChars}자
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => onRegenerate(scene)}
+                    disabled={regenerating}
+                    className="flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[11px] font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                  >
+                    {regenerating
+                      ? <Loader2 className="h-3 w-3 animate-spin" />
+                      : <RefreshCw className="h-3 w-3" />}
+                    재생성
+                  </button>
+                  <button
+                    onClick={() => onSaveScript(scene.id, draftScript)}
+                    disabled={!dirty}
+                    className="flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1 text-[11px] font-semibold text-white transition-colors hover:bg-emerald-700 disabled:opacity-40"
+                  >
+                    <Save className="h-3 w-3" />
+                    저장
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
-
-type Scene = { id: string; title: string; sec: number; desc: string }
 
 function ScenarioPageInner() {
   const router = useRouter()
@@ -209,6 +301,17 @@ function ScenarioPageInner() {
   const [scenes, setScenes] = useState<Scene[]>(INITIAL_SCENES)
   const [expanded, setExpanded] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const [expandedScripts, setExpandedScripts] = useState<Record<string, boolean>>({})
+  const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
+
+  // 시나리오 본문(제목/설명/해시태그) 인라인 편집 오버라이드.
+  const [metaTitle, setMetaTitle] = useState<string | null>(null)
+  const [metaDescription, setMetaDescription] = useState<string | null>(null)
+  const [metaTags, setMetaTags] = useState<string[] | null>(null)
+  const [editingMeta, setEditingMeta] = useState(false)
+  const [metaTitleDraft, setMetaTitleDraft] = useState("")
+  const [metaDescDraft, setMetaDescDraft] = useState("")
+  const [metaTagsDraft, setMetaTagsDraft] = useState("")
 
   // 트렌드 연동 상태
   const [activeInsight, setActiveInsight] = useState<TrendInsight | null>(null)
@@ -243,6 +346,29 @@ function ScenarioPageInner() {
         setLibraryNames(names)
       })
       .catch(() => { /* 무시 */ })
+  }, [])
+
+  // 이전에 편집/저장한 시나리오 초안을 reload 후 복원. setState 는 마이크로태스크로
+  // 미뤄 이펙트 본문에서 동기 setState 가 발생하지 않도록 한다.
+  useEffect(() => {
+    Promise.resolve().then(() => {
+      let raw: string | null
+      try {
+        raw = sessionStorage.getItem(SCENARIO_DRAFT_KEY)
+      } catch {
+        return
+      }
+      if (!raw) return
+      try {
+        const draft = JSON.parse(raw) as ScenarioDraft
+        if (Array.isArray(draft.scenes) && draft.scenes.length) setScenes(draft.scenes)
+        if (typeof draft.metaTitle === "string") setMetaTitle(draft.metaTitle)
+        if (typeof draft.metaDescription === "string") setMetaDescription(draft.metaDescription)
+        if (Array.isArray(draft.metaTags)) setMetaTags(draft.metaTags)
+      } catch {
+        /* 손상된 초안 무시 */
+      }
+    })
   }, [])
 
   // 경쟁사 분석 등에서 넘어온 파라미터 자동 채우기
@@ -329,6 +455,40 @@ function ScenarioPageInner() {
       ? selectedTitle
       : titleCandidates[0] ?? null
 
+  // 본문 편집 표시값: 편집 오버라이드 > 트렌드 자동 생성값.
+  const displayTitle = metaTitle ?? effectiveTitle ?? ""
+  const displayDescription = metaDescription ?? generatedDescription
+  const displayTags = metaTags ?? hashtags
+
+  function startEditMeta() {
+    setMetaTitleDraft(displayTitle)
+    setMetaDescDraft(displayDescription)
+    setMetaTagsDraft(displayTags.map((t) => t.replace(/^#/, "")).join(", "))
+    setEditingMeta(true)
+  }
+
+  function saveMeta() {
+    const nextTitle = metaTitleDraft.trim() || null
+    const nextDesc = metaDescDraft.trim() || null
+    const nextTags = metaTagsDraft
+      .split(/[,\n]/)
+      .map((t) => t.trim().replace(/^#/, ""))
+      .filter(Boolean)
+    setMetaTitle(nextTitle)
+    setMetaDescription(nextDesc)
+    setMetaTags(nextTags.length ? nextTags : null)
+    setEditingMeta(false)
+    persistDraft({
+      metaTitle: nextTitle,
+      metaDescription: nextDesc,
+      metaTags: nextTags.length ? nextTags : null,
+    })
+  }
+
+  function cancelEditMeta() {
+    setEditingMeta(false)
+  }
+
   function handleSelectTitle(title: string) {
     setSelectedTitle(title)
     // 향후 학습용 선택 로그 저장
@@ -383,6 +543,25 @@ function ScenarioPageInner() {
     [category, tone, format, durationMin, sceneCount, modelCount, topic, selectedModels]
   )
 
+  // 작업 중인 초안(씬 + 본문 편집)을 sessionStorage 에 저장.
+  const persistDraft = useCallback(
+    (patch: Partial<ScenarioDraft>) => {
+      try {
+        const next: ScenarioDraft = {
+          scenes,
+          metaTitle,
+          metaDescription,
+          metaTags,
+          ...patch,
+        }
+        sessionStorage.setItem(SCENARIO_DRAFT_KEY, JSON.stringify(next))
+      } catch {
+        /* 저장 실패는 무시 */
+      }
+    },
+    [scenes, metaTitle, metaDescription, metaTags],
+  )
+
   async function handleRegenerate() {
     setGenerating(true)
     try {
@@ -412,9 +591,12 @@ function ScenarioPageInner() {
       })
       const data = await res.json()
       if (!res.ok || !data.success) throw new Error(data.error || "생성 실패")
-      setScenes(data.scenes)
+      const generated = data.scenes as Scene[]
+      setScenes(generated)
       setExpanded(false)
-      persistScenario(data.scenes)
+      setExpandedScripts({})
+      persistScenario(generated)
+      persistDraft({ scenes: generated })
     } catch (err) {
       console.error(err)
       alert("시나리오 생성에 실패했습니다. 다시 시도해주세요.")
@@ -423,22 +605,85 @@ function ScenarioPageInner() {
     }
   }
 
-  function handleSave(id: string, title: string, desc: string) {
-    setScenes((prev) => prev.map((s) => (s.id === id ? { ...s, title, desc } : s)))
+  function toggleScript(id: string) {
+    setExpandedScripts((prev) => ({ ...prev, [id]: !prev[id] }))
+  }
+
+  function handleSaveMeta(id: string, title: string, desc: string) {
+    setScenes((prev) => {
+      const next = prev.map((s) => (s.id === id ? { ...s, title, desc } : s))
+      persistDraft({ scenes: next })
+      return next
+    })
+  }
+
+  function handleSaveScript(id: string, script: string) {
+    setScenes((prev) => {
+      const next = prev.map((s) => (s.id === id ? { ...s, script } : s))
+      persistDraft({ scenes: next })
+      return next
+    })
+  }
+
+  // 씬 단위 스크립트 재생성. 트렌드/캐릭터/채널 컨텍스트가 있으면 함께 전달한다.
+  async function handleRegenerateScene(scene: Scene) {
+    setRegeneratingId(scene.id)
+    try {
+      const index = scenes.findIndex((s) => s.id === scene.id)
+      const res = await fetch("/api/scenario/script/regenerate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scene: { title: scene.title, description: scene.desc },
+          sceneIndex: index < 0 ? 0 : index,
+          totalScenes: scenes.length,
+          format: format === "short" ? "shorts" : "longform",
+          targetLengthSec: scene.durationSec,
+          trendContext: activeInsight
+            ? {
+                powerWords: activeInsight.powerWords.map((p) => p.word),
+                titleCandidates,
+                category: activeInsight.category,
+              }
+            : undefined,
+          characterContext: selectedModels[0]
+            ? { name: selectedModels[0], tone }
+            : undefined,
+          channelContext: firstChannel
+            ? { stack: firstChannel.stack.contentType, track: firstChannel.stack.track }
+            : undefined,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.script) throw new Error(data.error || "재생성 실패")
+      setScenes((prev) => {
+        const next = prev.map((s) =>
+          s.id === scene.id
+            ? { ...s, script: data.script, durationSec: data.durationSec ?? s.durationSec }
+            : s,
+        )
+        persistDraft({ scenes: next })
+        return next
+      })
+    } catch (err) {
+      console.error(err)
+      alert("스크립트 재생성에 실패했습니다. 다시 시도해주세요.")
+    } finally {
+      setRegeneratingId(null)
+    }
   }
 
   // 시나리오에서 정한 소재/길이/형식/캐릭터/씬과 트렌드 분석 결과(제목 후보·
   // 설명·해시태그)를 영상 제작 동선으로 넘긴다.
   function handleMakeVideo() {
-    saveScenarioHandoff({
-      topic,
-      duration: durationMin * 60,
-      format: format === "short" ? "shorts" : "long",
-      channelId: firstChannel?.id,
-      characterIds: selectedModels,
-      titleCandidates: titleCandidates.length ? titleCandidates : undefined,
-      description: generatedDescription || undefined,
-      hashtags: activeInsight
+    // 본문 편집 오버라이드를 우선 반영한다.
+    const effectiveCandidates = metaTitle
+      ? [metaTitle, ...titleCandidates.filter((t) => t !== metaTitle)]
+      : titleCandidates
+    const effectiveDescription = metaDescription ?? generatedDescription
+    const effectiveHashtags = metaTags
+      ? { primary: metaTags }
+      : activeInsight
         ? {
             primary: activeInsight.tagsByCategory.primary,
             variation: activeInsight.tagsByCategory.variants,
@@ -446,9 +691,24 @@ function ScenarioPageInner() {
             broad: activeInsight.tagsByCategory.broad,
             detail: activeInsight.tagsByCategory.niche,
           }
-        : undefined,
+        : undefined
+
+    saveScenarioHandoff({
+      topic,
+      duration: durationMin * 60,
+      format: format === "short" ? "shorts" : "long",
+      channelId: firstChannel?.id,
+      characterIds: selectedModels,
+      titleCandidates: effectiveCandidates.length ? effectiveCandidates : undefined,
+      description: effectiveDescription || undefined,
+      hashtags: effectiveHashtags,
       trendId: searchParams.get("trendId") ?? undefined,
-      scenes: scenes.map((s) => ({ title: s.title, summary: s.desc })),
+      scenes: scenes.map((s) => ({
+        title: s.title,
+        description: s.desc,
+        script: s.script,
+        durationSec: s.durationSec,
+      })),
     })
     router.push("/video")
   }
@@ -650,10 +910,66 @@ function ScenarioPageInner() {
                   <TrendingUp className="h-4 w-4 text-primary" />
                   트렌드 인사이트 적용
                 </h2>
-                <span className="rounded-full bg-secondary/60 px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                  {activeInsight.category} · {FORMAT_LABEL[activeInsight.format]}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="rounded-full bg-secondary/60 px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                    {activeInsight.category} · {FORMAT_LABEL[activeInsight.format]}
+                  </span>
+                  {!editingMeta && (
+                    <button
+                      onClick={startEditMeta}
+                      className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      <Pencil className="h-3 w-3" /> 본문 편집
+                    </button>
+                  )}
+                </div>
               </div>
+
+              {/* 시나리오 본문(제목/설명/해시태그) 인라인 편집 */}
+              {editingMeta && (
+                <div className="flex flex-col gap-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-muted-foreground">제목</label>
+                    <input
+                      value={metaTitleDraft}
+                      onChange={(e) => setMetaTitleDraft(e.target.value)}
+                      className="w-full rounded-lg border border-border bg-card px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-muted-foreground">설명</label>
+                    <textarea
+                      value={metaDescDraft}
+                      onChange={(e) => setMetaDescDraft(e.target.value)}
+                      rows={3}
+                      className="w-full resize-y rounded-lg border border-border bg-card px-3 py-2 text-xs leading-relaxed text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-muted-foreground">해시태그 (쉼표로 구분)</label>
+                    <textarea
+                      value={metaTagsDraft}
+                      onChange={(e) => setMetaTagsDraft(e.target.value)}
+                      rows={2}
+                      className="w-full resize-y rounded-lg border border-border bg-card px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                  </div>
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      onClick={cancelEditMeta}
+                      className="rounded-md border border-border px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      취소
+                    </button>
+                    <button
+                      onClick={saveMeta}
+                      className="flex items-center gap-1 rounded-md bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white transition-colors hover:bg-emerald-700"
+                    >
+                      <Save className="h-3 w-3" /> 저장
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* 제목 후보 A/B */}
               <div>
@@ -694,7 +1010,7 @@ function ScenarioPageInner() {
                   설명 자동 생성 <span className="text-muted-foreground/60">(첫 150자: 키워드 + 후크)</span>
                 </p>
                 <p className="rounded-lg border border-border bg-background px-3 py-2 text-xs leading-relaxed text-foreground">
-                  {generatedDescription || "—"}
+                  {displayDescription || "—"}
                 </p>
               </div>
 
@@ -705,7 +1021,16 @@ function ScenarioPageInner() {
                   해시태그 5분류 조합
                 </p>
                 <div className="flex flex-col gap-2">
-                  {([
+                  {metaTags && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {metaTags.map((t) => (
+                        <span key={t} className="rounded-md bg-secondary/50 px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                          #{t.replace(/^#/, "")}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {!metaTags && ([
                     ["주요", activeInsight.tagsByCategory.primary],
                     ["변형", activeInsight.tagsByCategory.variants],
                     ["경쟁", activeInsight.tagsByCategory.competitor],
@@ -767,8 +1092,16 @@ function ScenarioPageInner() {
             </div>
             <div className="divide-y-0">
               {visibleScenes.map((scene) => (
-                <div key={scene.id} className="group">
-                  <SceneRow scene={scene} onSave={handleSave} />
+                <div key={`${scene.id}:${scene.script}`} className="group">
+                  <SceneRow
+                    scene={scene}
+                    expanded={!!expandedScripts[scene.id]}
+                    regenerating={regeneratingId === scene.id}
+                    onToggleScript={toggleScript}
+                    onSaveMeta={handleSaveMeta}
+                    onSaveScript={handleSaveScript}
+                    onRegenerate={handleRegenerateScene}
+                  />
                 </div>
               ))}
             </div>
