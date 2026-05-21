@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { RefreshCw, Pencil, Check, X, ChevronDown, ChevronUp, ArrowRight, Loader2 } from "lucide-react"
 import { useChannels } from "@/components/channels/ChannelProvider"
+import { saveScenarioHandoff } from "@/lib/scenario-handoff"
 
 // 기존 여행 기본값 (100% 보존)
 const META = {
@@ -318,6 +319,19 @@ export default function ScenarioPage() {
     setScenes((prev) => prev.map((s) => (s.id === id ? { ...s, title, desc } : s)))
   }
 
+  // 시나리오에서 정한 소재/길이/형식/캐릭터/씬을 영상 제작 동선으로 넘긴다.
+  function handleMakeVideo() {
+    saveScenarioHandoff({
+      topic,
+      duration: durationMin * 60,
+      format: format === "short" ? "shorts" : "long",
+      channelId: firstChannel?.id,
+      characterIds: selectedModels,
+      scenes: scenes.map((s) => ({ title: s.title, summary: s.desc })),
+    })
+    router.push("/video")
+  }
+
   const modelOptions = Array.from(new Set([...selectedModels, ...libraryNames]))
 
   return (
@@ -540,7 +554,7 @@ export default function ScenarioPage() {
           <span className="text-sm text-muted-foreground">{durationLabel}</span>
         </div>
         <button
-          onClick={() => router.push("/video")}
+          onClick={handleMakeVideo}
           className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/20 transition-opacity hover:opacity-90"
         >
           이 시나리오로 영상 만들기
