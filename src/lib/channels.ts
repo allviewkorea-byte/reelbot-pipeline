@@ -1,3 +1,5 @@
+import type { TrendSettings } from "@/types/trend"
+
 export type Platform = "youtube" | "instagram" | "tiktok" | "naverclip"
 export type ContentType = "long" | "short"
 export type Track = "auto" | "semi" | "adobe"
@@ -82,6 +84,8 @@ export interface StackConfig {
   ratioOverride: boolean
   // 완전 자동: 콘티 검토 없이 영상 자동 진행. 기본값 false(콘티 확인 후 사용자가 영상 시작).
   fullAuto: boolean
+  // 트렌드 자동 분석 설정 (옵션 — 미설정 채널은 비활성으로 간주).
+  trendSettings?: TrendSettings
 }
 
 export interface Channel {

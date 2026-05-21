@@ -9,6 +9,7 @@ import {
   Trash2,
   Copy,
   X,
+  Plus,
   Users,
   Video,
   DollarSign,
@@ -18,9 +19,18 @@ import {
   Camera,
   Scissors,
   Clapperboard,
+  Loader2,
+  RefreshCw,
 } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useChannels } from "@/components/channels/ChannelProvider"
+import {
+  triggerAnalyze,
+  saveTrendSettings,
+  TREND_CATEGORIES,
+  FORMAT_LABEL,
+} from "@/lib/trends"
+import type { TrendSettings, VideoFormat } from "@/types/trend"
 import {
   PLATFORM_LABELS,
   PLATFORM_BADGE,
@@ -45,6 +55,14 @@ const TRACKS: Array<{ id: Track; label: string; desc: string; icon: React.Compon
   { id: "adobe", label: TRACK_LABELS.adobe, desc: "어도비 편집 워크플로로 정교하게 다듬기", icon: Scissors },
 ]
 
+const DEFAULT_TREND_SETTINGS: TrendSettings = {
+  enabled: false,
+  keywords: [],
+  categories: [],
+  formats: ["shorts", "long"],
+  schedule: "daily",
+}
+
 function recentVideos(name: string, count: number) {
   const titles = ["오프닝 인트로", "메인 스팟 소개", "현지 음식 체험", "야경 브이로그", "마무리 아웃트로"]
   const n = Math.min(count, 5)
@@ -64,6 +82,8 @@ export default function ChannelDetailPage() {
 
   const [draft, setDraft] = useState<StackConfig | null>(channel ? channel.stack : null)
   const [showClone, setShowClone] = useState(false)
+  const [keywordInput, setKeywordInput] = useState("")
+  const [trendBusy, setTrendBusy] = useState(false)
 
   useEffect(() => {
     if (channel) setDraft(channel.stack)
@@ -122,8 +142,77 @@ export default function ChannelDetailPage() {
     })
   }
 
+  const trend: TrendSettings = { ...DEFAULT_TREND_SETTINGS, ...(draft.trendSettings ?? {}) }
+
+  function patchTrend(p: Partial<TrendSettings>) {
+    setDraft((d) => {
+      if (!d) return d
+      const cur = { ...DEFAULT_TREND_SETTINGS, ...(d.trendSettings ?? {}) }
+      return { ...d, trendSettings: { ...cur, ...p } }
+    })
+  }
+
+  function addKeyword() {
+    const kw = keywordInput.trim()
+    if (!kw) return
+    if (!trend.keywords.includes(kw)) patchTrend({ keywords: [...trend.keywords, kw] })
+    setKeywordInput("")
+  }
+
+  function removeKeyword(kw: string) {
+    patchTrend({ keywords: trend.keywords.filter((k) => k !== kw) })
+  }
+
+  function toggleTrendCategory(cat: string) {
+    const has = trend.categories.includes(cat)
+    patchTrend({
+      categories: has ? trend.categories.filter((c) => c !== cat) : [...trend.categories, cat],
+    })
+  }
+
+  function toggleTrendFormat(fmt: VideoFormat) {
+    const has = trend.formats.includes(fmt)
+    const next = has ? trend.formats.filter((f) => f !== fmt) : [...trend.formats, fmt]
+    patchTrend({ formats: next.length ? next : trend.formats })
+  }
+
+  async function runAnalyzeNow() {
+    if (!trend.keywords.length || !trend.categories.length) {
+      toast.error("분석 키워드와 카테고리를 먼저 지정해주세요")
+      return
+    }
+    setTrendBusy(true)
+    try {
+      // 최신 설정을 먼저 백엔드에 저장한 뒤 분석을 트리거.
+      await saveTrendSettings(channel!.id, trend)
+      const { jobId } = await triggerAnalyze({
+        channelId: channel!.id,
+        keywords: trend.keywords,
+        categories: trend.categories,
+        formats: trend.formats,
+      })
+      for (let i = 0; i < 150; i++) {
+        await new Promise((r) => setTimeout(r, 2000))
+        const res = await fetch(`/api/jobs/${jobId}/status`, { cache: "no-store" })
+        const data = await res.json()
+        if (data.status === "completed") break
+        if (data.status === "failed") throw new Error(data.error || "분석 실패")
+      }
+      const analyzedAt = new Date().toISOString()
+      patchTrend({ lastAnalyzedAt: analyzedAt })
+      updateStack(channel!.id, { trendSettings: { ...trend, lastAnalyzedAt: analyzedAt } })
+      toast.success("트렌드 분석을 완료했습니다")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "분석에 실패했습니다")
+    } finally {
+      setTrendBusy(false)
+    }
+  }
+
   function save() {
     updateStack(channel!.id, draft!)
+    // 트렌드 설정은 스케줄러가 참조하도록 백엔드에도 동기화 (실패해도 로컬 저장은 유지).
+    saveTrendSettings(channel!.id, { ...DEFAULT_TREND_SETTINGS, ...(draft!.trendSettings ?? {}) }).catch(() => {})
     toast.success("스택 설정을 저장했습니다")
   }
 
@@ -430,6 +519,112 @@ export default function ChannelDetailPage() {
                   </label>
                 )
               })}
+            </div>
+          </div>
+
+          {/* 트렌드 분석 설정 */}
+          <div className="rounded-xl border border-border bg-card p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-foreground">트렌드 분석 설정</h2>
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={trend.enabled}
+                  onChange={(e) => patchTrend({ enabled: e.target.checked })}
+                  className="h-4 w-4 accent-emerald-600"
+                />
+                자동 분석
+              </label>
+            </div>
+
+            {/* 분석 키워드 (멀티 태그) */}
+            <div className="mb-4">
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">분석 키워드</label>
+              <div className="flex gap-2">
+                <input
+                  value={keywordInput}
+                  onChange={(e) => setKeywordInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault()
+                      addKeyword()
+                    }
+                  }}
+                  placeholder="예: 방콕 여행, 태국 맛집"
+                  className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
+                />
+                <button
+                  onClick={addKeyword}
+                  className="flex items-center gap-1 rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-primary/5"
+                >
+                  <Plus className="h-4 w-4" />추가
+                </button>
+              </div>
+              {trend.keywords.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {trend.keywords.map((kw) => (
+                    <span
+                      key={kw}
+                      className="flex items-center gap-1 rounded-full bg-primary/15 px-2.5 py-1 text-xs text-primary"
+                    >
+                      {kw}
+                      <button onClick={() => removeKeyword(kw)} aria-label={`${kw} 삭제`}>
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* 분석 카테고리 (체크박스 그룹) */}
+            <div className="mb-4">
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">분석할 카테고리</label>
+              <div className="flex flex-wrap gap-3">
+                {TREND_CATEGORIES.map((cat) => (
+                  <label key={cat} className="flex cursor-pointer items-center gap-2 text-sm text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={trend.categories.includes(cat)}
+                      onChange={() => toggleTrendCategory(cat)}
+                      className="h-4 w-4 accent-[var(--primary)]"
+                    />
+                    {cat}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* 분석 형식 (쇼츠/롱폼) */}
+            <div className="mb-4">
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">분석할 형식</label>
+              <div className="flex flex-wrap gap-3">
+                {(["shorts", "long"] as VideoFormat[]).map((fmt) => (
+                  <label key={fmt} className="flex cursor-pointer items-center gap-2 text-sm text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={trend.formats.includes(fmt)}
+                      onChange={() => toggleTrendFormat(fmt)}
+                      className="h-4 w-4 accent-[var(--primary)]"
+                    />
+                    {FORMAT_LABEL[fmt]}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground">
+                마지막 분석: {trend.lastAnalyzedAt ? new Date(trend.lastAnalyzedAt).toLocaleString("ko-KR") : "—"}
+              </p>
+              <button
+                onClick={runAnalyzeNow}
+                disabled={trendBusy}
+                className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+              >
+                {trendBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                {trendBusy ? "분석 중…" : "지금 분석 실행"}
+              </button>
             </div>
           </div>
 
