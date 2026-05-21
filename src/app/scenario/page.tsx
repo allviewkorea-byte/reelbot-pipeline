@@ -14,6 +14,7 @@ import {
   FORMAT_LABEL,
 } from "@/lib/trends"
 import type { TrendInsight, VideoFormat } from "@/types/trend"
+import { saveScenarioHandoff } from "@/lib/scenario-handoff"
 
 // 시나리오 페이지의 형식("long"|"short")과 트렌드 형식("long"|"shorts") 매핑.
 function toTrendFormat(f: "long" | "short"): VideoFormat {
@@ -426,6 +427,32 @@ function ScenarioPageInner() {
     setScenes((prev) => prev.map((s) => (s.id === id ? { ...s, title, desc } : s)))
   }
 
+  // 시나리오에서 정한 소재/길이/형식/캐릭터/씬과 트렌드 분석 결과(제목 후보·
+  // 설명·해시태그)를 영상 제작 동선으로 넘긴다.
+  function handleMakeVideo() {
+    saveScenarioHandoff({
+      topic,
+      duration: durationMin * 60,
+      format: format === "short" ? "shorts" : "long",
+      channelId: firstChannel?.id,
+      characterIds: selectedModels,
+      titleCandidates: titleCandidates.length ? titleCandidates : undefined,
+      description: generatedDescription || undefined,
+      hashtags: activeInsight
+        ? {
+            primary: activeInsight.tagsByCategory.primary,
+            variation: activeInsight.tagsByCategory.variants,
+            competitor: activeInsight.tagsByCategory.competitor,
+            broad: activeInsight.tagsByCategory.broad,
+            detail: activeInsight.tagsByCategory.niche,
+          }
+        : undefined,
+      trendId: searchParams.get("trendId") ?? undefined,
+      scenes: scenes.map((s) => ({ title: s.title, summary: s.desc })),
+    })
+    router.push("/video")
+  }
+
   const modelOptions = Array.from(new Set([...selectedModels, ...libraryNames]))
 
   return (
@@ -770,7 +797,7 @@ function ScenarioPageInner() {
           <span className="text-sm text-muted-foreground">{durationLabel}</span>
         </div>
         <button
-          onClick={() => router.push("/video")}
+          onClick={handleMakeVideo}
           className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/20 transition-opacity hover:opacity-90"
         >
           이 시나리오로 영상 만들기

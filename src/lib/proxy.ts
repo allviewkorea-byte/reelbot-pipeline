@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { TIMEOUT } from "./api-timeout"
 
 // "localhost"는 Node fetch(undici)가 IPv6(::1)로 먼저 해석할 수 있는데,
 // uvicorn은 IPv4(0.0.0.0)에만 바인딩되므로 ::1 연결이 무한 대기하다
@@ -9,13 +10,12 @@ const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000
   "://127.0.0.1",
 )
 
-// 프록시 요청 timeout — 백엔드 미응답 시 5분 대기 대신 빠르게 503 반환.
-const REQUEST_TIMEOUT_MS = 8000
-
 // FastAPI 백엔드로 요청을 그대로 전달하는 공통 proxy 헬퍼.
+// timeoutMs 미지정 시 일반 조회/저장 기준(QUICK, 30초)을 적용한다. 콘티/영상 등
+// 오래 걸리는 작업은 호출부에서 TIMEOUT.HEAVY / VERY_HEAVY 를 넘겨야 한다.
 export async function proxyJson(
   path: string,
-  init: { method: "GET" | "POST" | "PUT"; body?: unknown },
+  init: { method: "GET" | "POST" | "PUT"; body?: unknown; timeoutMs?: number },
 ): Promise<NextResponse> {
   try {
     const res = await fetch(`${API_BASE}${path}`, {
@@ -23,7 +23,7 @@ export async function proxyJson(
       cache: "no-store",
       headers: { "Content-Type": "application/json" },
       body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(init.timeoutMs ?? TIMEOUT.QUICK),
     })
     const data = await res.json()
     return NextResponse.json(data, { status: res.status })
