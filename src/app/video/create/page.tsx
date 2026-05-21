@@ -12,6 +12,7 @@ import { ProgressTracker } from "@/components/video/ProgressTracker"
 import { ResultViewer } from "@/components/video/ResultViewer"
 import type { SceneStatus } from "@/components/video/SceneCard"
 import { useChannels } from "@/components/channels/ChannelProvider"
+import { loadScenarioHandoff } from "@/lib/scenario-handoff"
 import {
   STORYBOARD_MODELS,
   VIDEO_MODELS,
@@ -41,6 +42,7 @@ export default function VideoCreatePage() {
   const [country, setCountry] = useState("")
   const [durationMin, setDurationMin] = useState(2)
   const [preparingScenario, setPreparingScenario] = useState(false)
+  const [isFromScenario, setIsFromScenario] = useState(false)
 
   const [scenes, setScenes] = useState<Scene[]>([])
   const [statuses, setStatuses] = useState<Record<string, SceneStatus>>({})
@@ -51,6 +53,15 @@ export default function VideoCreatePage() {
   useEffect(() => {
     const cid = new URLSearchParams(window.location.search).get("channel")
     setChannelId(cid)
+  }, [])
+
+  // 시나리오 페이지에서 넘어온 입력값으로 폼 자동 채움.
+  useEffect(() => {
+    const handoff = loadScenarioHandoff()
+    if (!handoff) return
+    if (handoff.topic) setCountry(handoff.topic)
+    if (handoff.duration > 0) setDurationMin(Math.max(1, Math.round(handoff.duration / 60)))
+    setIsFromScenario(true)
   }, [])
   const channel = channelId ? getChannel(channelId) : undefined
 
@@ -204,6 +215,11 @@ export default function VideoCreatePage() {
       <div className="container mx-auto w-full max-w-5xl px-6 py-8">
         {effectivePhase === "input" && (
           <div className="mx-auto flex max-w-md flex-col gap-5 rounded-xl border border-border bg-card p-6">
+            {isFromScenario && (
+              <div className="rounded-md border border-primary/30 bg-primary/10 px-3 py-2 text-sm text-primary">
+                💡 시나리오에서 자동 설정됨 — 필요시 수정 가능
+              </div>
+            )}
             {channel && (
               <div className="flex items-center justify-between rounded-lg border border-border/60 bg-background/40 px-3 py-2 text-xs">
                 <span className="text-muted-foreground">채널</span>
