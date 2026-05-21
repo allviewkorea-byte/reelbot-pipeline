@@ -1,9 +1,26 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
-import { useRouter } from "next/navigation"
-import { RefreshCw, Pencil, Check, X, ChevronDown, ChevronUp, ArrowRight, Loader2 } from "lucide-react"
+import { Suspense, useState, useEffect, useCallback, useMemo } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
+import { RefreshCw, Pencil, Check, X, ChevronDown, ChevronUp, ArrowRight, Loader2, Sparkles, Hash, TrendingUp } from "lucide-react"
 import { useChannels } from "@/components/channels/ChannelProvider"
+import {
+  fetchInsights,
+  parseTrendId,
+  buildTitleCandidates,
+  buildDescription,
+  combineHashtags,
+  recommendDurationMin,
+  FORMAT_LABEL,
+} from "@/lib/trends"
+import type { TrendInsight, VideoFormat } from "@/types/trend"
+
+// 시나리오 페이지의 형식("long"|"short")과 트렌드 형식("long"|"shorts") 매핑.
+function toTrendFormat(f: "long" | "short"): VideoFormat {
+  return f === "short" ? "shorts" : "long"
+}
+
+const TITLE_LOG_KEY = "reelbot.titleSelections.v1"
 
 // 기존 여행 기본값 (100% 보존)
 const META = {
@@ -165,8 +182,9 @@ function SceneRow({
 
 type Scene = { id: string; title: string; sec: number; desc: string }
 
-export default function ScenarioPage() {
+function ScenarioPageInner() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { channels } = useChannels()
   const firstChannel = channels[0]
 
@@ -191,8 +209,27 @@ export default function ScenarioPage() {
   const [expanded, setExpanded] = useState(false)
   const [generating, setGenerating] = useState(false)
 
+  // 트렌드 연동 상태
+  const [activeInsight, setActiveInsight] = useState<TrendInsight | null>(null)
+  const [selectedTitle, setSelectedTitle] = useState<string | null>(null)
+  const [trendLoading, setTrendLoading] = useState(false)
+
   const visibleScenes = expanded ? scenes : scenes.slice(0, 4)
   const durationLabel = `${durationMin}분`
+
+  // 트렌드 데이터 기반 자동 생성 결과
+  const titleCandidates = useMemo(
+    () => (activeInsight ? buildTitleCandidates(activeInsight, topic) : []),
+    [activeInsight, topic],
+  )
+  const generatedDescription = useMemo(
+    () => (activeInsight ? buildDescription(activeInsight, topic) : ""),
+    [activeInsight, topic],
+  )
+  const hashtags = useMemo(
+    () => (activeInsight ? combineHashtags(activeInsight) : []),
+    [activeInsight],
+  )
 
   // 캐릭터 라이브러리에서 모델 목록 로드
   useEffect(() => {
@@ -238,6 +275,77 @@ export default function ScenarioPage() {
       sessionStorage.removeItem("reelbot:scenarioParams")
     }
   }, [])
+
+  // 트렌드 연동 채널 (trendId 파라미터 또는 첫 채널)
+  const [trendChannelId, setTrendChannelId] = useState("")
+
+  // ?trendId= 파라미터 처리 — 카테고리·형식 자동 선택
+  useEffect(() => {
+    const tid = searchParams.get("trendId")
+    if (!tid) return
+    const parsed = parseTrendId(tid)
+    if (!parsed) return
+    setTrendChannelId(parsed.channelId)
+    if (CATEGORIES.includes(parsed.category)) setCategory(parsed.category)
+    setFormat(parsed.format === "shorts" ? "short" : "long")
+  }, [searchParams])
+
+  // 카테고리 + 형식 선택 시 해당 트렌드 데이터 자동 로드 + 길이/씬 수 자동 적용
+  useEffect(() => {
+    const cid = trendChannelId || firstChannel?.id
+    if (!cid) return
+    let cancelled = false
+    setTrendLoading(true)
+    fetchInsights(cid, category, toTrendFormat(format))
+      .then((list) => {
+        if (cancelled) return
+        const found = list[0] ?? null
+        setActiveInsight(found)
+        setSelectedTitle(null)
+        if (found) {
+          const recMin = recommendDurationMin(found)
+          setDurationMin(recMin)
+          setCustomDuration(!DURATIONS.some((d) => d.min === recMin))
+          const rec = recommendSceneCount(recMin)
+          setSceneCount(rec)
+          setCustomScene(!SCENE_PRESETS.includes(rec))
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setActiveInsight(null)
+      })
+      .finally(() => {
+        if (!cancelled) setTrendLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [category, format, trendChannelId, firstChannel?.id])
+
+  // 선택값이 없거나 후보 목록에 없으면 첫 후보를 기본 선택으로 사용 (effect 불필요).
+  const effectiveTitle =
+    selectedTitle && titleCandidates.includes(selectedTitle)
+      ? selectedTitle
+      : titleCandidates[0] ?? null
+
+  function handleSelectTitle(title: string) {
+    setSelectedTitle(title)
+    // 향후 학습용 선택 로그 저장
+    try {
+      const raw = localStorage.getItem(TITLE_LOG_KEY)
+      const list = raw ? (JSON.parse(raw) as unknown[]) : []
+      list.push({
+        at: new Date().toISOString(),
+        channelId: trendChannelId || firstChannel?.id || "",
+        category,
+        format: toTrendFormat(format),
+        title,
+      })
+      localStorage.setItem(TITLE_LOG_KEY, JSON.stringify(list))
+    } catch {
+      /* 저장 실패는 무시 */
+    }
+  }
 
   function handleDurationSelect(min: number) {
     setCustomDuration(false)
@@ -501,6 +609,128 @@ export default function ScenarioPage() {
             ))}
           </div>
 
+          {/* 트렌드 인사이트 적용 결과 */}
+          {trendLoading && !activeInsight && (
+            <div className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-3 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> 트렌드 데이터를 불러오는 중…
+            </div>
+          )}
+
+          {activeInsight && (
+            <div className="flex flex-col gap-4 rounded-xl border border-primary/30 bg-card p-5">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+                  <TrendingUp className="h-4 w-4 text-primary" />
+                  트렌드 인사이트 적용
+                </h2>
+                <span className="rounded-full bg-secondary/60 px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                  {activeInsight.category} · {FORMAT_LABEL[activeInsight.format]}
+                </span>
+              </div>
+
+              {/* 제목 후보 A/B */}
+              <div>
+                <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  제목 후보 <span className="text-muted-foreground/60">(Power Words 자동 삽입 · 클릭해 선택)</span>
+                </p>
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                  {titleCandidates.map((title) => {
+                    const active = effectiveTitle === title
+                    return (
+                      <button
+                        key={title}
+                        onClick={() => handleSelectTitle(title)}
+                        className={`flex items-start gap-2 rounded-lg border p-3 text-left text-xs transition-all ${
+                          active
+                            ? "border-primary/50 bg-primary/10 text-foreground"
+                            : "border-border bg-background text-muted-foreground hover:border-primary/30 hover:text-foreground"
+                        }`}
+                      >
+                        <span
+                          className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 ${
+                            active ? "border-primary" : "border-muted-foreground/40"
+                          }`}
+                        >
+                          {active && <span className="h-2 w-2 rounded-full bg-primary" />}
+                        </span>
+                        <span className="flex-1">{title}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* 설명 자동 생성 */}
+              <div>
+                <p className="mb-1.5 text-xs font-medium text-muted-foreground">
+                  설명 자동 생성 <span className="text-muted-foreground/60">(첫 150자: 키워드 + 후크)</span>
+                </p>
+                <p className="rounded-lg border border-border bg-background px-3 py-2 text-xs leading-relaxed text-foreground">
+                  {generatedDescription || "—"}
+                </p>
+              </div>
+
+              {/* 해시태그 5분류 조합 */}
+              <div>
+                <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <Hash className="h-3.5 w-3.5" />
+                  해시태그 5분류 조합
+                </p>
+                <div className="flex flex-col gap-2">
+                  {([
+                    ["주요", activeInsight.tagsByCategory.primary],
+                    ["변형", activeInsight.tagsByCategory.variants],
+                    ["경쟁", activeInsight.tagsByCategory.competitor],
+                    ["광범위", activeInsight.tagsByCategory.broad],
+                    ["세부", activeInsight.tagsByCategory.niche],
+                  ] as [string, string[]][]).map(([label, tags]) =>
+                    tags.length ? (
+                      <div key={label} className="flex flex-wrap items-center gap-1.5">
+                        <span className="w-12 shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+                          {label}
+                        </span>
+                        {tags.slice(0, 6).map((t) => (
+                          <span
+                            key={t}
+                            className="rounded-md bg-secondary/50 px-1.5 py-0.5 text-[11px] text-muted-foreground"
+                          >
+                            #{t.replace(/^#/, "")}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null,
+                  )}
+                  {hashtags.length === 0 && (
+                    <span className="text-[11px] text-muted-foreground/60">태그 데이터 없음</span>
+                  )}
+                </div>
+              </div>
+
+              {/* 형식별 길이/씬 자동 결정 */}
+              <div className="grid grid-cols-3 gap-2 rounded-lg border border-border/60 bg-background/40 p-3 text-center">
+                <div>
+                  <p className="text-[10px] text-muted-foreground">권장 영상 길이</p>
+                  <p className="mt-0.5 text-xs font-semibold text-foreground" style={{ fontFamily: "var(--font-geist-mono)" }}>
+                    {activeInsight.avgVideoLengthSec ? `${Math.round(activeInsight.avgVideoLengthSec)}초` : `${durationMin}분`}
+                  </p>
+                </div>
+                <div className="border-x border-border/60">
+                  <p className="text-[10px] text-muted-foreground">씬 수</p>
+                  <p className="mt-0.5 text-xs font-semibold text-foreground" style={{ fontFamily: "var(--font-geist-mono)" }}>
+                    {sceneCount}개
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-muted-foreground">씬당 길이</p>
+                  <p className="mt-0.5 text-xs font-semibold text-foreground" style={{ fontFamily: "var(--font-geist-mono)" }}>
+                    {Math.max(3, Math.round((durationMin * 60) / sceneCount))}초
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="flex items-center justify-between border-b border-border px-4 py-3">
               <h2 className="text-sm font-semibold text-foreground">씬 목록</h2>
@@ -548,5 +778,19 @@ export default function ScenarioPage() {
         </button>
       </div>
     </div>
+  )
+}
+
+export default function ScenarioPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
+          불러오는 중…
+        </div>
+      }
+    >
+      <ScenarioPageInner />
+    </Suspense>
   )
 }

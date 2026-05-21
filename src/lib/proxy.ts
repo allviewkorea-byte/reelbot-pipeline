@@ -5,7 +5,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000"
 // FastAPI 백엔드로 요청을 그대로 전달하는 공통 proxy 헬퍼.
 export async function proxyJson(
   path: string,
-  init: { method: "GET" | "POST"; body?: unknown },
+  init: { method: "GET" | "POST" | "PUT"; body?: unknown },
 ): Promise<NextResponse> {
   try {
     const res = await fetch(`${API_BASE}${path}`, {

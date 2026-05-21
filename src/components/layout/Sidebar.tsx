@@ -9,6 +9,7 @@ import {
   Wand2,
   Captions,
   TrendingUp,
+  LineChart,
   Send,
   History,
   ListChecks,
@@ -53,6 +54,7 @@ const navGroups: NavGroup[] = [
     header: "도구",
     items: [
       { label: "경쟁사 분석", href: "/competitor", icon: TrendingUp },
+      { label: "트렌드", href: "/trends", icon: LineChart },
       { label: "멀티 플랫폼 발행", href: "/upload", icon: Send },
     ],
   },
