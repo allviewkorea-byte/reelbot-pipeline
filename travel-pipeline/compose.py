@@ -1,3 +1,4 @@
+import os
 import subprocess
 from pathlib import Path
 from config import Config, BangkokSpot
@@ -46,7 +47,7 @@ def add_subtitles_overlay(
     out_path = Path(config.videos_dir) / f"{spot.id}_subtitled.mp4"
 
     # Windows 한국어 폰트 경로 직접 지정
-    font_path = "C:/Windows/Fonts/malgun.ttf"
+    font_path = os.environ.get("SUBTITLE_FONT_PATH", "C:/Windows/Fonts/malgun.ttf")
     title_text = spot.name_en  # 한국어 대신 영어 사용 (인코딩 문제 방지)
 
     subtitle_filter = (
