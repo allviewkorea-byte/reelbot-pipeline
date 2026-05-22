@@ -31,7 +31,10 @@ app = FastAPI(title="ReelBot Pipeline API", version="1.0.0", lifespan=lifespan)
 # Next.js dev server(3000)에서 호출 허용
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "https://reelbot-pipeline.vercel.app",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
