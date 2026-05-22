@@ -292,13 +292,15 @@ export default function ChannelDetailPage() {
         />
       )}
 
-      <Tabs defaultValue="overview" className="w-full">
-        <TabsList>
-          <TabsTrigger value="overview">개요</TabsTrigger>
-          <TabsTrigger value="stack">스택 설정</TabsTrigger>
-          <TabsTrigger value="workflow">워크플로</TabsTrigger>
-          <TabsTrigger value="history">히스토리</TabsTrigger>
-        </TabsList>
+      <Tabs defaultValue="overview" className="w-full flex-col" data-horizontal>
+        <div className="max-w-full overflow-x-auto">
+          <TabsList>
+            <TabsTrigger value="overview">개요</TabsTrigger>
+            <TabsTrigger value="stack">스택 설정</TabsTrigger>
+            <TabsTrigger value="workflow">워크플로</TabsTrigger>
+            <TabsTrigger value="history">히스토리</TabsTrigger>
+          </TabsList>
+        </div>
 
         {/* 탭 1: 개요 */}
         <TabsContent value="overview" className="mt-4 flex flex-col gap-4">
