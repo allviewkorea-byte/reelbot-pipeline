@@ -12,7 +12,7 @@ import { ProgressTracker } from "@/components/video/ProgressTracker"
 import { ResultViewer } from "@/components/video/ResultViewer"
 import type { SceneStatus } from "@/components/video/SceneCard"
 import { useChannels } from "@/components/channels/ChannelProvider"
-import { loadScenarioHandoff } from "@/lib/scenario-handoff"
+import { loadScenarioHandoff, type ScenarioHandoffScene } from "@/lib/scenario-handoff"
 import {
   STORYBOARD_MODELS,
   VIDEO_MODELS,
@@ -43,6 +43,8 @@ export default function VideoCreatePage() {
   const [durationMin, setDurationMin] = useState(2)
   const [preparingScenario, setPreparingScenario] = useState(false)
   const [isFromScenario, setIsFromScenario] = useState(false)
+  // 시나리오에서 넘어온 씬(스크립트 + 예상 길이) 미리보기용.
+  const [handoffScenes, setHandoffScenes] = useState<ScenarioHandoffScene[]>([])
 
   const [scenes, setScenes] = useState<Scene[]>([])
   const [statuses, setStatuses] = useState<Record<string, SceneStatus>>({})
@@ -62,6 +64,15 @@ export default function VideoCreatePage() {
     if (handoff.topic) setCountry(handoff.topic)
     if (handoff.duration > 0) setDurationMin(Math.max(1, Math.round(handoff.duration / 60)))
     setIsFromScenario(true)
+  }, [])
+
+  // 넘어온 씬(스크립트/예상 길이)을 미리보기용으로 로드. setState 는 마이크로태스크로
+  // 미뤄 이펙트 본문의 동기 setState 를 피한다.
+  useEffect(() => {
+    Promise.resolve().then(() => {
+      const handoff = loadScenarioHandoff()
+      if (handoff?.scenes?.length) setHandoffScenes(handoff.scenes)
+    })
   }, [])
   const channel = channelId ? getChannel(channelId) : undefined
 
@@ -84,6 +95,9 @@ export default function VideoCreatePage() {
   const contiCost = storyboardCost(storyboardModel, sceneCount)
   const videoEst = videoCost(videoModel, totalSeconds)
 
+  // 시나리오에서 넘어온 씬들의 예상 발화 길이 합계 (Σ durationSec).
+  const handoffTotalSec = handoffScenes.reduce((sum, s) => sum + (s.durationSec || 0), 0)
+
   // ── 콘티 생성: 시나리오 → 씬 리스트 → 콘티 이미지 ──
   const handleStartStoryboard = useCallback(async () => {
     if (!country.trim()) {
@@ -103,9 +117,17 @@ export default function VideoCreatePage() {
         Object.fromEntries(sc.map((s) => [String(s.scene_id), "pending" as SceneStatus])),
       )
       setPhase("storyboard")
+      // 시나리오에서 넘어온 script 를 인덱스 기준으로 합쳐 백엔드에 함께 전달(보관용).
+      const scenesForStoryboard = handoffScenes.length
+        ? sc.map((s, i) =>
+            handoffScenes[i]?.script
+              ? { ...s, script: handoffScenes[i].script, narration: s.narration ?? handoffScenes[i].script }
+              : s,
+          )
+        : sc
       await storyboard.generate({
         scenario: res.scenario ?? "",
-        scenes: sc,
+        scenes: scenesForStoryboard,
         storyboard_model: storyboardModel,
       })
     } catch (e) {
@@ -113,7 +135,7 @@ export default function VideoCreatePage() {
     } finally {
       setPreparingScenario(false)
     }
-  }, [country, durationMin, storyboard, storyboardModel])
+  }, [country, durationMin, storyboard, storyboardModel, handoffScenes])
 
   const handleApprove = useCallback((sceneId: string) => {
     setStatuses((prev) => ({
@@ -287,6 +309,35 @@ export default function VideoCreatePage() {
               <Wand2 className="h-4 w-4" />
               {preparingScenario ? "시나리오 생성 중…" : "콘티 생성"}
             </Button>
+          </div>
+        )}
+
+        {effectivePhase === "input" && handoffScenes.length > 0 && (
+          <div className="mx-auto mt-5 flex max-w-md flex-col gap-3 rounded-xl border border-border bg-card p-5">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-foreground">시나리오 씬 ({handoffScenes.length}개)</h2>
+              <span className="rounded-full bg-secondary/60 px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+                총 {handoffTotalSec}초
+              </span>
+            </div>
+            <div className="flex flex-col divide-y divide-border/50">
+              {handoffScenes.map((s, i) => (
+                <div key={i} className="flex items-start gap-3 py-2.5">
+                  <span className="mt-0.5 w-6 shrink-0 text-xs font-bold text-muted-foreground" style={{ fontFamily: "var(--font-geist-mono)" }}>
+                    {String(i + 1).padStart(2, "0")}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-medium text-foreground">{s.title}</p>
+                    {s.script && (
+                      <p className="mt-0.5 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
+                        {s.script}
+                      </p>
+                    )}
+                  </div>
+                  <span className="mt-0.5 shrink-0 text-[10px] text-muted-foreground/60">{s.durationSec}초</span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

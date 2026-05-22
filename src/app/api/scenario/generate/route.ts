@@ -1,7 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
+import { TIMEOUT } from '@/lib/api-timeout'
 
 const openai = new OpenAI()
+
+// 씬마다 TTS용 내레이션(script)을 함께 생성하기 위한 공통 지시.
+// 첫/중간/끝 위치에 따라 후크/메인/CTA 톤을 모델이 알아서 분기하도록 한다.
+const NARRATION_GUIDE = `
+내레이션(script) 작성 규칙:
+- 씬마다 실제로 읽을 자연스러운 한국어 내레이션을 "script" 필드에 작성
+- 첫 씬: 3초 안에 시선을 사로잡는 강력한 후크
+- 중간 씬: 핵심 메시지를 자연스러운 흐름으로 전달
+- 마지막 씬: 구독/좋아요/저장을 자연스럽게 유도하는 CTA
+- 한국어 발화 속도는 1초당 약 4~5자. script 분량을 해당 씬 길이(sec)에 맞춤
+- "durationSec"에는 그 script의 예상 발화 길이(초)를 정수로 기입`
 
 // 카테고리별 씬 구성 템플릿. "여행"은 기존 동선 중심 방식을 그대로 유지한다.
 const CATEGORY_TEMPLATES: Record<string, { role: string; structure: string }> = {
@@ -23,8 +35,9 @@ function buildTravelPrompt(args: {
   spots: string
   duration: string
   mode: string
+  characterTone?: string
 }): string {
-  const { sceneCount, channel, spots, duration, mode } = args
+  const { sceneCount, channel, spots, duration, mode, characterTone } = args
   return `당신은 유튜브 여행 채널 시나리오 전문 작가입니다.
 아래 조건으로 ${sceneCount}개 씬의 시나리오를 만들어주세요.
 
@@ -39,9 +52,11 @@ function buildTravelPrompt(args: {
 - 여행지를 순서대로 자연스럽게 이동
 - 먹방/체험/감탄/이동 씬 다양하게 배치
 - 마지막 씬은 구독/좋아요 CTA 아웃트로
+${characterTone ? `- 출연자 톤: ${characterTone} (이 톤으로 내레이션 작성)` : ""}
+${NARRATION_GUIDE}
 
 반드시 아래 JSON 형식만 응답 (마크다운, 설명 없이):
-{"scenes":[{"id":"S01","title":"씬 제목 — 부제","sec":10,"desc":"씬 핵심 설명 30자 이내"}]}`
+{"scenes":[{"id":"S01","title":"씬 제목 — 부제","sec":10,"desc":"씬 핵심 설명 30자 이내","script":"실제 내레이션 텍스트(한국어)","durationSec":10}]}`
 }
 
 // 범용 카테고리 시나리오 프롬프트
@@ -56,6 +71,7 @@ function buildGenericPrompt(args: {
 }): string {
   const { category, sceneCount, secPerScene, topic, tone, format, modelCount } = args
   const tpl = CATEGORY_TEMPLATES[category] ?? CATEGORY_TEMPLATES["일상"]
+  const isShorts = /숏폼|short/i.test(format)
   return `당신은 유튜브 ${tpl.role} 채널 시나리오 전문 작가입니다.
 아래 조건으로 ${sceneCount}개 씬의 시나리오를 만들어주세요.
 
@@ -73,9 +89,11 @@ function buildGenericPrompt(args: {
 - "${tone}" 감정·톤을 영상 전체에 일관되게 유지
 - 위 "구성 방식"의 흐름을 따라 씬을 배치
 - 마지막 씬은 구독/좋아요 CTA 아웃트로
+- ${isShorts ? "숏폼이므로 임팩트 있게 짧고 강하게" : "롱폼이므로 충분히 자세하게"}
+${NARRATION_GUIDE}
 
 반드시 아래 JSON 형식만 응답 (마크다운, 설명 없이):
-{"scenes":[{"id":"S01","title":"씬 제목 — 부제","sec":${secPerScene},"desc":"씬 핵심 설명 30자 이내"}]}`
+{"scenes":[{"id":"S01","title":"씬 제목 — 부제","sec":${secPerScene},"desc":"씬 핵심 설명 30자 이내","script":"실제 내레이션 텍스트(한국어)","durationSec":${secPerScene}}]}`
 }
 
 function parseSceneCount(raw: unknown, duration?: string): number {
@@ -101,6 +119,7 @@ export async function POST(request: NextRequest) {
       durationMin,
       sceneCount: sceneCountRaw,
       modelCount,
+      models,
       // 레거시 여행 필드 (하위 호환)
       channel,
       spots,
@@ -110,6 +129,9 @@ export async function POST(request: NextRequest) {
 
     const sceneCount = parseSceneCount(sceneCountRaw, duration)
     const isTravel = !category || category === "여행"
+    const characterTone = Array.isArray(models) && models.length
+      ? models.join(", ")
+      : undefined
 
     let prompt: string
     if (isTravel) {
@@ -120,6 +142,7 @@ export async function POST(request: NextRequest) {
         spots: spots || topic || "주요 명소",
         duration: duration ?? `${parseDurationMin(durationMin, duration)}분`,
         mode: mode ?? "B 하이브리드",
+        characterTone,
       })
     } else {
       const minutes = parseDurationMin(durationMin, duration)
@@ -139,14 +162,25 @@ export async function POST(request: NextRequest) {
       model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
-    })
+    }, { timeout: TIMEOUT.QUICK })
 
     const content = response.choices[0].message.content ?? '{}'
     const data = JSON.parse(content)
 
     if (!Array.isArray(data.scenes)) throw new Error('Invalid response format')
 
-    return NextResponse.json({ success: true, scenes: data.scenes })
+    // script/durationSec 누락 시 안전한 기본값으로 보정한다.
+    const scenes = data.scenes.map((s: Record<string, unknown>) => {
+      const sec = typeof s.sec === 'number' ? s.sec : 10
+      const durationSec = typeof s.durationSec === 'number' ? s.durationSec : sec
+      return {
+        ...s,
+        script: typeof s.script === 'string' ? s.script : '',
+        durationSec,
+      }
+    })
+
+    return NextResponse.json({ success: true, scenes })
   } catch (error) {
     console.error('Scenario generation error:', error)
     return NextResponse.json(

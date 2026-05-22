@@ -1,5 +1,12 @@
 // 시나리오 → 영상 제작/콘티 생성 페이지로 입력값을 넘기기 위한 핸드오프 헬퍼.
 // sessionStorage 에 임시 저장하고, 도착 페이지에서 폼을 자동으로 채운다.
+export interface ScenarioHandoffScene {
+  title: string
+  description: string
+  script: string // TTS용 내레이션 텍스트
+  durationSec: number // 예상 발화 길이 (초)
+}
+
 export interface ScenarioHandoff {
   scenarioId?: string
   topic: string // 소재
@@ -16,7 +23,7 @@ export interface ScenarioHandoff {
     broad?: string[]
     detail?: string[]
   }
-  scenes?: Array<{ title: string; summary: string }>
+  scenes?: ScenarioHandoffScene[]
   trendId?: string
   createdAt: number
 }
