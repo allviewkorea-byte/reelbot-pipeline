@@ -34,44 +34,47 @@ interface NavGroup {
   items: NavItem[]
 }
 
-// 작업 2.5-1 · 채널 컨테이너 모델 IA
+// 영상 제작 흐름순 IA (분석 → 제작 → 발행 → 운영)
 const navGroups: NavGroup[] = [
   {
     items: [
       { label: "대시보드", href: "/dashboard", icon: LayoutDashboard },
-      { label: "채널", href: "/channels", icon: Tv2 },
     ],
   },
   {
-    header: "공통 자산",
+    header: "분석",
     items: [
+      { label: "트렌드 분석", href: "/trends", icon: LineChart },
+      { label: "경쟁사 분석", href: "/competitor", icon: TrendingUp },
+    ],
+  },
+  {
+    header: "제작",
+    items: [
+      { label: "채널", href: "/channels", icon: Tv2 },
       { label: "캐릭터 라이브러리", href: "/character", icon: User },
       { label: "시나리오 보관함", href: "/scenario", icon: Wand2 },
       { label: "자막 스타일", href: "/subtitle-style", icon: Captions },
     ],
   },
   {
-    header: "도구",
+    header: "발행",
     items: [
-      { label: "경쟁사 분석", href: "/competitor", icon: TrendingUp },
-      { label: "트렌드", href: "/trends", icon: LineChart },
       { label: "멀티 플랫폼 발행", href: "/upload", icon: Send },
-    ],
-  },
-  {
-    header: "보관함",
-    items: [
-      { label: "작업 히스토리", href: "/history", icon: History },
       { label: "발행 큐", href: "/publish-queue", icon: ListChecks },
     ],
   },
 ]
 
-const bottomNavItems: NavItem[] = [
-  { label: "비용 추적", href: "/costs", icon: DollarSign },
-  { label: "로그", href: "/logs", icon: ScrollText },
-  { label: "설정", href: "/settings", icon: Settings },
-]
+const bottomNavGroup: NavGroup = {
+  header: "운영",
+  items: [
+    { label: "작업 히스토리", href: "/history", icon: History },
+    { label: "비용 추적", href: "/costs", icon: DollarSign },
+    { label: "로그", href: "/logs", icon: ScrollText },
+    { label: "설정", href: "/settings", icon: Settings },
+  ],
+}
 
 function NavItemLink({ item, pathname }: { item: NavItem; pathname: string }) {
   const isActive =
@@ -138,8 +141,13 @@ export function Sidebar() {
       {/* Bottom Navigation */}
       <div className="px-3 pb-4">
         <Separator className="mb-4" />
+        {bottomNavGroup.header && (
+          <p className="px-3 pb-1 pt-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            {bottomNavGroup.header}
+          </p>
+        )}
         <nav className="flex flex-col gap-1">
-          {bottomNavItems.map((item) => (
+          {bottomNavGroup.items.map((item) => (
             <NavItemLink key={item.href} item={item} pathname={pathname} />
           ))}
         </nav>
