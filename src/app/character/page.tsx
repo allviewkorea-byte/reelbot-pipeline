@@ -16,8 +16,10 @@ import {
   Clapperboard,
   Upload,
   X,
+  ZoomIn,
 } from "lucide-react"
 import { toast } from "sonner"
+import { ImageLightbox } from "@/components/character/ImageLightbox"
 
 // ── Gender ────────────────────────────────────────────────────────
 type Gender = "female" | "male"
@@ -391,6 +393,9 @@ export default function CharacterPage() {
   // Library state
   const [library,    setLibrary]    = useState<Character[]>([])
   const [libLoading, setLibLoading] = useState(true)
+
+  // Lightbox (이미지 확대 보기)
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null)
 
   const isGenerating = step !== "idle" && step !== "done" && step !== "error"
 
@@ -834,7 +839,8 @@ export default function CharacterPage() {
                       <img
                         src={generated[key]}
                         alt={label}
-                        className="aspect-[2/3] w-full object-contain bg-secondary/20"
+                        onClick={() => setLightbox({ src: generated[key], alt: label })}
+                        className="aspect-[2/3] w-full cursor-zoom-in object-contain bg-secondary/20 transition-opacity hover:opacity-90"
                         onError={(e) => {
                           const el = e.currentTarget
                           el.style.display = "none"
@@ -1029,7 +1035,8 @@ export default function CharacterPage() {
                 <img
                   src={char.images.front}
                   alt={char.name}
-                  className="aspect-[3/4] w-full object-cover bg-secondary/20"
+                  onClick={() => setLightbox({ src: char.images.front, alt: char.name })}
+                  className="aspect-[3/4] w-full cursor-zoom-in object-cover bg-secondary/20"
                   onError={(e) => {
                     const el = e.currentTarget
                     el.style.display = "none"
@@ -1048,6 +1055,13 @@ export default function CharacterPage() {
 
                 {/* Hover overlay */}
                 <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-xl bg-black/80 opacity-0 backdrop-blur-sm transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100">
+                  <button
+                    onClick={() => setLightbox({ src: char.images.front, alt: char.name })}
+                    className="flex w-36 items-center justify-center gap-1.5 rounded-lg bg-secondary px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary/80"
+                  >
+                    <ZoomIn className="h-3.5 w-3.5" />
+                    확대보기
+                  </button>
                   <button
                     onClick={() => handleLoad(char)}
                     className="flex w-36 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90"
@@ -1075,6 +1089,13 @@ export default function CharacterPage() {
           </div>
         )}
       </div>
+
+      {/* 이미지 확대 라이트박스 */}
+      <ImageLightbox
+        src={lightbox?.src ?? null}
+        alt={lightbox?.alt}
+        onClose={() => setLightbox(null)}
+      />
     </div>
   )
 }
