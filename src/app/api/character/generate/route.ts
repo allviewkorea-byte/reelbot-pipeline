@@ -9,6 +9,12 @@ const FULL_BODY_SUFFIX =
   `Subject fits entirely within the frame with generous margin at top and bottom. ` +
   `Standing pose, every body part visible, do not crop any part of the body.`
 
+// 단일 인물 강제 — 측면에서 인물이 2명 그려지는 아티팩트를 막는다.
+const SOLO_SUBJECT_CLAUSE =
+  `Exactly one person only, a single solo subject, only one figure in the entire frame. ` +
+  `No other people, no duplicate of the person, no twins, no split screen, ` +
+  `no side-by-side comparison, no reflection, no mirror image.`
+
 function buildAccessoryClause(acc: {
   headwear: string
   eyewear: string
@@ -31,7 +37,9 @@ function subjectFor(gender: Gender): string {
   return gender === "male" ? "Korean man in his late 20s" : "Korean woman in her late 20s"
 }
 
-function buildFrontPrompt(
+// 3면이 동일 인물·동일 의상으로 나오도록, 외모/헤어/의상/액세서리 묘사를
+// 세 프롬프트에 글자 그대로 동일하게 넣는다. 면별로 달라지는 건 시점 문구뿐이다.
+function buildCharacterBlock(
   appearance: string,
   outfit: string,
   hair: string,
@@ -43,31 +51,57 @@ function buildFrontPrompt(
     `Appearance: ${appearance}. ` +
     `Hair: ${hair}. ` +
     `Outfit: ${outfit}. ` +
-    (accClause ? `Accessories: ${accClause} ` : ``) +
+    (accClause ? `Accessories: ${accClause} ` : ``)
+  )
+}
+
+const STUDIO_SUFFIX = `White seamless studio background, sharp soft lighting, 4K detail. `
+
+function buildFrontPrompt(
+  appearance: string,
+  outfit: string,
+  hair: string,
+  accClause: string,
+  gender: Gender
+): string {
+  return (
+    buildCharacterBlock(appearance, outfit, hair, accClause, gender) +
     `Front view, facing the camera directly, neutral expression, slight smile. ` +
-    `White seamless studio background, sharp soft lighting, 4K detail. ` +
+    STUDIO_SUFFIX +
+    SOLO_SUBJECT_CLAUSE + ` ` +
     FULL_BODY_SUFFIX
   )
 }
 
-function buildSidePrompt(outfit: string, hair: string, accClause: string, gender: Gender): string {
+function buildSidePrompt(
+  appearance: string,
+  outfit: string,
+  hair: string,
+  accClause: string,
+  gender: Gender
+): string {
   return (
-    `The exact same ${subjectFor(gender)} — same face, same ${hair} hairstyle, same ${outfit} outfit` +
-    (accClause ? `, ${accClause}` : ``) +
-    ` — side profile view, facing left 90 degrees. ` +
-    `White seamless studio background, sharp soft lighting, 4K detail. ` +
-    `Keep face and outfit identical to the reference image. ` +
+    buildCharacterBlock(appearance, outfit, hair, accClause, gender) +
+    `Side profile view, the person turned to face left at 90 degrees, neutral expression. ` +
+    STUDIO_SUFFIX +
+    SOLO_SUBJECT_CLAUSE + ` ` +
     FULL_BODY_SUFFIX
   )
 }
 
-function buildBackPrompt(outfit: string, hair: string, accClause: string, gender: Gender): string {
+function buildBackPrompt(
+  appearance: string,
+  outfit: string,
+  hair: string,
+  accClause: string,
+  gender: Gender
+): string {
   return (
-    `The exact same ${subjectFor(gender)} — same ${hair} hairstyle, same ${outfit} outfit` +
-    (accClause ? `, ${accClause}` : ``) +
-    ` — back view, facing completely away from camera. ` +
-    `White seamless studio background, sharp soft lighting, 4K detail. ` +
-    `Keep hairstyle and outfit identical to the reference image. ` +
+    buildCharacterBlock(appearance, outfit, hair, accClause, gender) +
+    `Back view, the person facing completely away from the camera, ` +
+    `back of the head and body visible, face not visible. ` +
+    STUDIO_SUFFIX +
+    SOLO_SUBJECT_CLAUSE + ` ` +
     FULL_BODY_SUFFIX
   )
 }
@@ -139,11 +173,11 @@ export async function POST(req: NextRequest) {
       seed,
     })
     const sideBuf = await adapter.generate({
-      prompt: buildSidePrompt(outfit, hair, accClause, gender),
+      prompt: buildSidePrompt(appearance, outfit, hair, accClause, gender),
       seed,
     })
     const backBuf = await adapter.generate({
-      prompt: buildBackPrompt(outfit, hair, accClause, gender),
+      prompt: buildBackPrompt(appearance, outfit, hair, accClause, gender),
       seed,
     })
 
