@@ -153,18 +153,17 @@ const JEWELRY_OPTIONS_BY_GENDER: Record<Gender, Option[]> = {
 }
 
 // ── 외모 자동 추천 풀 ───────────────────────────────────────────────
-// 각 풀에서 하나씩 조합 → 수백 가지 조합 (요구사항 최소 10가지 충족)
-const APPEARANCE_POOLS: Record<Gender, { age: string[]; hair: string[]; eyes: string[]; feature: string[]; vibe: string[] }> = {
+// 헤어/의상/악세서리는 전용 드롭다운이 단일 출처이므로 여기에 넣지 않는다.
+// (외모 자유텍스트엔 전용 컨트롤이 없는 속성 — 나이대/눈/피부·메이크업/분위기만)
+const APPEARANCE_POOLS: Record<Gender, { age: string[]; eyes: string[]; feature: string[]; vibe: string[] }> = {
   female: {
     age:     ["20대 초반 한국 여성", "20대 중반 한국 여성", "20대 후반 한국 여성", "30대 초반 한국 여성"],
-    hair:    ["긴 갈색 웨이브 헤어", "긴 흑발 생머리", "단발 보브 헤어", "밝은 갈색 레이어드 헤어", "포니테일로 묶은 머리"],
     eyes:    ["크고 맑은 눈", "또렷한 쌍꺼풀 눈", "밝은 눈", "차분한 눈매"],
     feature: ["자연스러운 메이크업", "화사한 피부 톤", "은은한 메이크업", "도자기 같은 피부"],
     vibe:    ["청순한 분위기", "세련된 도시적 분위기", "사랑스러운 분위기", "지적인 분위기", "발랄한 분위기"],
   },
   male: {
     age:     ["20대 초반 한국 남성", "20대 중반 한국 남성", "20대 후반 한국 남성", "30대 초반 한국 남성"],
-    hair:    ["짧은 검은 헤어", "투블럭 헤어", "단정하게 빗어넘긴 헤어", "자연스러운 웨이브 헤어", "버즈컷"],
     eyes:    ["선명한 이목구비", "또렷한 눈매", "부드러운 인상", "강인한 눈빛"],
     feature: ["깔끔한 피부", "또렷한 턱선", "균형 잡힌 얼굴형"],
     vibe:    ["단정한 캐주얼 스타일", "세련된 도시적 분위기", "훈훈한 분위기", "지적인 분위기", "활기찬 분위기"],
@@ -177,7 +176,7 @@ function pickRandom<T>(arr: T[]): T {
 
 function randomAppearance(gender: Gender): string {
   const p = APPEARANCE_POOLS[gender]
-  return [pickRandom(p.age), pickRandom(p.hair), pickRandom(p.eyes), pickRandom(p.feature), pickRandom(p.vibe)].join(", ")
+  return [pickRandom(p.age), pickRandom(p.eyes), pickRandom(p.feature), pickRandom(p.vibe)].join(", ")
 }
 
 // ── Types ─────────────────────────────────────────────────────────
