@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import fs from "fs"
-import path from "path"
 import { WavespeedImageAdapter } from "@/lib/wavespeed"
+import { uploadCharacterImage } from "@/lib/supabase"
 
 // ── Prompt builders ───────────────────────────────────────────────
 
@@ -148,21 +147,18 @@ export async function POST(req: NextRequest) {
       seed,
     })
 
-    const id  = Date.now().toString()
-    const dir = path.join(process.cwd(), "public", "character-seeds", id)
-    fs.mkdirSync(dir, { recursive: true })
-    fs.writeFileSync(path.join(dir, "front.png"), frontBuf)
-    fs.writeFileSync(path.join(dir, "side.png"),  sideBuf)
-    fs.writeFileSync(path.join(dir, "back.png"),  backBuf)
+    const id = Date.now().toString()
+    // Vercel 런타임 파일시스템은 읽기 전용이므로 Supabase Storage에 업로드한다.
+    const [front, side, back] = await Promise.all([
+      uploadCharacterImage(`${id}/front.png`, frontBuf),
+      uploadCharacterImage(`${id}/side.png`,  sideBuf),
+      uploadCharacterImage(`${id}/back.png`,  backBuf),
+    ])
 
     return NextResponse.json({
       success: true,
       id,
-      images: {
-        front: `/character-seeds/${id}/front.png`,
-        side:  `/character-seeds/${id}/side.png`,
-        back:  `/character-seeds/${id}/back.png`,
-      },
+      images: { front, side, back },
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error"

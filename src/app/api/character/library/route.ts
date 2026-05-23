@@ -1,17 +1,33 @@
 import { NextResponse } from "next/server"
-import fs from "fs/promises"
-import path from "path"
+import { getSupabaseAdmin, CHARACTER_TABLE } from "@/lib/supabase"
 
-const LIBRARY_PATH = path.join(process.cwd(), "public", "character-library.json")
+interface CharacterRow {
+  id: string
+  name: string
+  created_at: string
+  config: unknown
+  images: unknown
+}
 
 export async function GET() {
   try {
-    const raw = await fs.readFile(LIBRARY_PATH, "utf-8")
-    const lib = JSON.parse(raw) as { characters: { createdAt: string }[] }
-    lib.characters.sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    )
-    return NextResponse.json({ characters: lib.characters })
+    const supabase = getSupabaseAdmin()
+    const { data, error } = await supabase
+      .from(CHARACTER_TABLE)
+      .select("id, name, created_at, config, images")
+      .order("created_at", { ascending: false })
+    if (error) {
+      return NextResponse.json({ characters: [] })
+    }
+
+    const characters = (data as CharacterRow[]).map((row) => ({
+      id: row.id,
+      name: row.name,
+      createdAt: row.created_at,
+      config: row.config,
+      images: row.images,
+    }))
+    return NextResponse.json({ characters })
   } catch {
     return NextResponse.json({ characters: [] })
   }
