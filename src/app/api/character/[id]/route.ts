@@ -1,25 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import fs from "fs/promises"
-import path from "path"
-
-const LIBRARY_PATH = path.join(process.cwd(), "public", "character-library.json")
-
-interface Library {
-  characters: { id: string }[]
-}
-
-async function readLibrary(): Promise<Library> {
-  try {
-    const raw = await fs.readFile(LIBRARY_PATH, "utf-8")
-    return JSON.parse(raw) as Library
-  } catch {
-    return { characters: [] }
-  }
-}
-
-async function writeLibrary(lib: Library): Promise<void> {
-  await fs.writeFile(LIBRARY_PATH, JSON.stringify(lib, null, 2), "utf-8")
-}
+import { getSupabaseAdmin, CHARACTER_TABLE, CHARACTER_BUCKET } from "@/lib/supabase"
 
 export async function DELETE(
   _req: NextRequest,
@@ -27,23 +7,24 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params
+    const supabase = getSupabaseAdmin()
 
-    const lib = await readLibrary()
-    const before = lib.characters.length
-    lib.characters = lib.characters.filter((c) => c.id !== id)
-
-    if (lib.characters.length === before) {
+    const { data, error } = await supabase
+      .from(CHARACTER_TABLE)
+      .delete()
+      .eq("id", id)
+      .select("id")
+    if (error) {
+      return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+    }
+    if (!data || data.length === 0) {
       return NextResponse.json({ success: false, error: "캐릭터를 찾을 수 없어요" }, { status: 404 })
     }
 
-    await writeLibrary(lib)
-
-    const seedDir = path.join(process.cwd(), "public", "character-seeds", id)
-    try {
-      await fs.rm(seedDir, { recursive: true, force: true })
-    } catch {
-      // 폴더가 없어도 메타데이터 삭제는 성공으로 처리
-    }
+    // Storage 이미지도 정리한다. 실패해도 메타데이터 삭제는 성공으로 처리.
+    await supabase.storage
+      .from(CHARACTER_BUCKET)
+      .remove([`${id}/front.png`, `${id}/side.png`, `${id}/back.png`])
 
     return NextResponse.json({ success: true })
   } catch (err) {
