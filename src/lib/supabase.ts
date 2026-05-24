@@ -1,9 +1,17 @@
 // 서버 전용 Supabase 클라이언트.
 // secret key로 동작하므로 절대 클라이언트 번들에 노출되면 안 된다 (NEXT_PUBLIC_ 금지).
 import { createClient, type SupabaseClient } from "@supabase/supabase-js"
+import {
+  DEFAULT_CHANNELS,
+  channelToRow,
+  rowToChannel,
+  type Channel,
+  type ChannelRow,
+} from "./channels"
 
 export const CHARACTER_BUCKET = "character-seeds"
 export const CHARACTER_TABLE = "characters"
+export const CHANNELS_TABLE = "channels"
 
 let cached: SupabaseClient | null = null
 
@@ -37,4 +45,42 @@ export async function uploadCharacterImage(
   }
   const { data } = supabase.storage.from(CHARACTER_BUCKET).getPublicUrl(objectPath)
   return data.publicUrl
+}
+
+// ── 채널 영속화 (Postgres `channels` 테이블) ─────────────────────────
+
+async function upsertChannels(channels: Channel[]): Promise<void> {
+  const supabase = getSupabaseAdmin()
+  const { error } = await supabase
+    .from(CHANNELS_TABLE)
+    .upsert(channels.map(channelToRow), { onConflict: "id" })
+  if (error) throw new Error(`채널 저장 실패: ${error.message}`)
+}
+
+// 채널 목록 조회. 테이블이 비어 있으면(최초 1회) 기본 채널을 멱등(id 고정)으로
+// 시드한 뒤 반환해 기존 데모 데이터를 보존한다.
+export async function listChannels(): Promise<Channel[]> {
+  const supabase = getSupabaseAdmin()
+  const { data, error } = await supabase
+    .from(CHANNELS_TABLE)
+    .select("*")
+    .order("created_at", { ascending: true })
+  if (error) throw new Error(`채널 목록 조회 실패: ${error.message}`)
+
+  const rows = (data ?? []) as ChannelRow[]
+  if (rows.length === 0) {
+    await upsertChannels(DEFAULT_CHANNELS)
+    return DEFAULT_CHANNELS
+  }
+  return rows.map(rowToChannel)
+}
+
+export async function upsertChannel(channel: Channel): Promise<void> {
+  await upsertChannels([channel])
+}
+
+export async function deleteChannelRow(id: string): Promise<void> {
+  const supabase = getSupabaseAdmin()
+  const { error } = await supabase.from(CHANNELS_TABLE).delete().eq("id", id)
+  if (error) throw new Error(`채널 삭제 실패: ${error.message}`)
 }

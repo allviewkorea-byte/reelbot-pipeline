@@ -281,8 +281,8 @@ export default function ChannelDetailPage() {
         <CloneModal
           defaultName={`${channel.name} 복사본`}
           onClose={() => setShowClone(false)}
-          onConfirm={(newName) => {
-            const newId = cloneChannel(channel.id, newName)
+          onConfirm={async (newName) => {
+            const newId = await cloneChannel(channel.id, newName)
             setShowClone(false)
             if (newId) {
               toast.success("채널을 복제했습니다")
