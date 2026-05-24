@@ -1188,13 +1188,22 @@ function ScenarioPageInner() {
           <span className="text-muted-foreground">/</span>
           <span className="text-sm text-muted-foreground">{durationLabel}</span>
         </div>
-        <button
-          onClick={handleMakeVideo}
-          className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/20 transition-opacity hover:opacity-90"
-        >
-          이 시나리오로 영상 만들기
-          <ArrowRight className="h-4 w-4" />
-        </button>
+        <div className="flex flex-col items-end gap-1.5">
+          {scenesStale && (
+            <span className="text-[11px] font-medium text-amber-600 dark:text-amber-400">
+              설정이 바뀌었습니다 — 시나리오를 다시 생성한 뒤 진행하세요
+            </span>
+          )}
+          <button
+            onClick={handleMakeVideo}
+            disabled={scenesStale}
+            title={scenesStale ? "설정이 바뀌었습니다 — 시나리오를 다시 생성한 뒤 진행하세요" : undefined}
+            className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/20 transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none disabled:hover:opacity-40"
+          >
+            이 시나리오로 영상 만들기
+            <ArrowRight className="h-4 w-4" />
+          </button>
+        </div>
       </div>
     </div>
   )
