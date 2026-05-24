@@ -1,8 +1,9 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Loader2, RefreshCw, Sparkles, Eye, ThumbsUp, MessageSquare, ExternalLink } from "lucide-react"
+import { Loader2, RefreshCw, Sparkles, Eye, ThumbsUp, MessageSquare, ExternalLink, Wand2, Hash, Clock, Save } from "lucide-react"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { TrendItem, YoutubeCategory, VideoFormatKind } from "@/lib/youtube"
 
@@ -12,6 +13,27 @@ interface Analysis {
   formatTraits: string[]
   scenarioHints: string[]
 }
+
+interface ScenarioSuggestion {
+  titles: string[]
+  description: string
+  hashtags: {
+    category: string[]
+    topic: string[]
+    emotion: string[]
+    target: string[]
+    trend: string[]
+  }
+  duration: { format: VideoFormatKind; minutes: number }
+}
+
+const HASHTAG_GROUPS: { key: keyof ScenarioSuggestion["hashtags"]; label: string }[] = [
+  { key: "category", label: "카테고리" },
+  { key: "topic", label: "주제" },
+  { key: "emotion", label: "감성" },
+  { key: "target", label: "타겟" },
+  { key: "trend", label: "트렌드" },
+]
 
 interface TrendData {
   shorts: TrendItem[]
@@ -114,6 +136,7 @@ function InsightBlock({ title, items }: { title: string; items: string[] }) {
 }
 
 export default function TrendsPage() {
+  const router = useRouter()
   const [categories, setCategories] = useState<YoutubeCategory[]>([])
   const [categoryId, setCategoryId] = useState<string>("")
   const [format, setFormat] = useState<VideoFormatKind>("shorts")
@@ -124,10 +147,16 @@ export default function TrendsPage() {
   const [analyzing, setAnalyzing] = useState(false)
   const [analysis, setAnalysis] = useState<Analysis | null>(null)
 
+  const [suggesting, setSuggesting] = useState(false)
+  const [suggestion, setSuggestion] = useState<ScenarioSuggestion | null>(null)
+  const [selectedTitle, setSelectedTitle] = useState<string | null>(null)
+
   const loadTrends = useCallback(async (cid: string, withCategories: boolean) => {
     setLoading(true)
     setError("")
     setAnalysis(null)
+    setSuggestion(null)
+    setSelectedTitle(null)
     try {
       const params = new URLSearchParams({ region: "KR" })
       if (cid) params.set("category", cid)
@@ -161,6 +190,7 @@ export default function TrendsPage() {
   }
 
   const currentItems = data[format]
+  const categoryTitle = categories.find((c) => c.id === categoryId)?.title ?? "전체"
 
   async function analyze() {
     if (!currentItems.length) {
@@ -168,13 +198,15 @@ export default function TrendsPage() {
       return
     }
     setAnalyzing(true)
+    setSuggestion(null)
+    setSelectedTitle(null)
     try {
       const res = await fetch("/api/trends/youtube/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           items: currentItems,
-          category: categories.find((c) => c.id === categoryId)?.title ?? "전체",
+          category: categoryTitle,
           format,
         }),
       })
@@ -187,6 +219,55 @@ export default function TrendsPage() {
     } finally {
       setAnalyzing(false)
     }
+  }
+
+  // AI 인사이트 → 시나리오 초안 생성.
+  async function makeScenario() {
+    if (!analysis) return
+    setSuggesting(true)
+    setSuggestion(null)
+    setSelectedTitle(null)
+    try {
+      const res = await fetch("/api/trends/scenario", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ insights: analysis, category: categoryTitle, format }),
+      })
+      const json = await res.json()
+      if (!res.ok || !json.success) throw new Error(json.error || "시나리오 생성에 실패했습니다")
+      const next = json.suggestion as ScenarioSuggestion
+      setSuggestion(next)
+      setSelectedTitle(next.titles[0] ?? null)
+      toast.success("시나리오 초안을 만들었습니다")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "시나리오 생성에 실패했습니다")
+    } finally {
+      setSuggesting(false)
+    }
+  }
+
+  // 시나리오 초안을 기존 핸드오프 패턴(sessionStorage)으로 /scenario 생성 폼에 전달.
+  function saveToScenario() {
+    if (!suggestion) return
+    const title = selectedTitle || suggestion.titles[0] || ""
+    const fmt = suggestion.duration.format === "shorts" ? "short" : "long"
+    const minutes = Math.max(1, Math.round(suggestion.duration.minutes))
+    const params = {
+      category: categoryTitle,
+      tone: "밝고 경쾌",
+      format: fmt,
+      durationMin: minutes,
+      sceneCount: Math.max(6, minutes * 6),
+      modelCount: "1인",
+      topic: title,
+    }
+    try {
+      sessionStorage.setItem("reelbot:scenarioParams", JSON.stringify(params))
+    } catch {
+      /* sessionStorage 사용 불가 시에도 이동은 진행 */
+    }
+    toast.success("시나리오 보관함으로 전달했습니다")
+    router.push("/scenario")
   }
 
   return (
@@ -255,7 +336,7 @@ export default function TrendsPage() {
             <Sparkles className="h-4 w-4 text-primary" />
             <h2 className="text-sm font-semibold text-foreground">AI 인사이트</h2>
             <span className="rounded-full bg-secondary/60 px-2 py-0.5 text-xs text-muted-foreground">
-              {FORMAT_LABEL[format]} · {categories.find((c) => c.id === categoryId)?.title ?? "전체"}
+              {FORMAT_LABEL[format]} · {categoryTitle}
             </span>
           </div>
           {analysis.summary && <p className="text-sm text-muted-foreground">{analysis.summary}</p>}
@@ -263,6 +344,114 @@ export default function TrendsPage() {
             <InsightBlock title="공통 주제" items={analysis.commonThemes} />
             <InsightBlock title="포맷 특징" items={analysis.formatTraits} />
             <InsightBlock title="시나리오 힌트" items={analysis.scenarioHints} />
+          </div>
+          {/* 인사이트 → 시나리오 초안 생성 */}
+          <div className="flex justify-end border-t border-primary/20 pt-3">
+            <button
+              onClick={makeScenario}
+              disabled={suggesting}
+              className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {suggesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+              {suggesting ? "생성 중…" : "시나리오 만들기"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 시나리오 초안 패널 */}
+      {suggestion && (
+        <div className="flex flex-col gap-5 rounded-xl border border-emerald-600/30 bg-card p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+              <Wand2 className="h-4 w-4 text-emerald-500" />
+              시나리오 초안
+            </h2>
+            <span className="flex items-center gap-1 rounded-full bg-secondary/60 px-2 py-0.5 text-xs font-medium text-muted-foreground">
+              <Clock className="h-3 w-3" />
+              {FORMAT_LABEL[suggestion.duration.format]} · 약 {suggestion.duration.minutes}분
+            </span>
+          </div>
+
+          {/* 제목 후보 — 클릭해 선택 */}
+          <div>
+            <p className="mb-2 text-xs font-medium text-muted-foreground">
+              제목 후보 <span className="text-muted-foreground/60">(클릭해 선택)</span>
+            </p>
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+              {suggestion.titles.map((title) => {
+                const active = selectedTitle === title
+                return (
+                  <button
+                    key={title}
+                    onClick={() => setSelectedTitle(title)}
+                    className={`flex items-start gap-2 rounded-lg border p-3 text-left text-xs transition-all ${
+                      active
+                        ? "border-primary/50 bg-primary/10 text-foreground"
+                        : "border-border bg-background text-muted-foreground hover:border-primary/30 hover:text-foreground"
+                    }`}
+                  >
+                    <span
+                      className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 ${
+                        active ? "border-primary" : "border-muted-foreground/40"
+                      }`}
+                    >
+                      {active && <span className="h-2 w-2 rounded-full bg-primary" />}
+                    </span>
+                    <span className="flex-1">{title}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* 설명 미리보기 */}
+          <div>
+            <p className="mb-1.5 text-xs font-medium text-muted-foreground">
+              설명 미리보기 <span className="text-muted-foreground/60">(첫 150자: 후크 → 핵심 → CTA)</span>
+            </p>
+            <p className="rounded-lg border border-border bg-background px-3 py-2 text-xs leading-relaxed text-foreground">
+              {suggestion.description || "—"}
+            </p>
+          </div>
+
+          {/* 해시태그 5분류 */}
+          <div>
+            <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              <Hash className="h-3.5 w-3.5" /> 해시태그 5분류
+            </p>
+            <div className="flex flex-col gap-2">
+              {HASHTAG_GROUPS.map(({ key, label }) => {
+                const tags = suggestion.hashtags[key]
+                if (!tags.length) return null
+                return (
+                  <div key={key} className="flex flex-wrap items-center gap-1.5">
+                    <span className="w-12 shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+                      {label}
+                    </span>
+                    {tags.map((t) => (
+                      <span
+                        key={t}
+                        className="rounded-md bg-secondary/50 px-1.5 py-0.5 text-[11px] text-muted-foreground"
+                      >
+                        #{t.replace(/^#/, "")}
+                      </span>
+                    ))}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* 보관함 저장 */}
+          <div className="flex justify-end border-t border-border pt-3">
+            <button
+              onClick={saveToScenario}
+              className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-700"
+            >
+              <Save className="h-4 w-4" />
+              시나리오 보관함에 저장
+            </button>
           </div>
         </div>
       )}
