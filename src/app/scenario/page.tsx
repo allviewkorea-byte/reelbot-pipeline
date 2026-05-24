@@ -85,6 +85,32 @@ function recommendSceneCount(min: number): number {
   return Math.max(6, min * 6)
 }
 
+// 씬 목록 생성에 영향을 주는 입력들의 시그니처.
+// 이 값이 마지막 생성 시점과 달라지면 현재 씬 목록은 옛 설정 기준이라
+// 무효(stale)로 간주하고, 흐리게 + 재생성 안내를 노출한다.
+interface ScenarioParams {
+  category: string
+  topic: string
+  tone: string
+  format: "long" | "short"
+  durationMin: number
+  sceneCount: number
+  modelCount: string
+  models: string[]
+}
+function paramSignature(p: ScenarioParams): string {
+  return JSON.stringify({
+    category: p.category,
+    topic: p.topic,
+    tone: p.tone,
+    format: p.format,
+    durationMin: p.durationMin,
+    sceneCount: p.sceneCount,
+    modelCount: p.modelCount,
+    models: [...p.models].sort(),
+  })
+}
+
 const SCENARIO_STORE_KEY = "reelbot.scenarios.v1"
 // 현재 작업 중인 시나리오 초안(씬 스크립트 + 본문 편집)을 reload 후에도 유지.
 const SCENARIO_DRAFT_KEY = "reelbot.scenarioDraft.v1"
@@ -303,6 +329,28 @@ function ScenarioPageInner() {
   const [generating, setGenerating] = useState(false)
   const [expandedScripts, setExpandedScripts] = useState<Record<string, boolean>>({})
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
+
+  // 현재 입력 시그니처와, 마지막으로 씬 목록을 생성한 시점의 시그니처.
+  // 둘이 다르면 씬 목록이 옛 설정 기준이므로 무효(stale).
+  const paramSig = useMemo(
+    () =>
+      paramSignature({ category, topic, tone, format, durationMin, sceneCount, modelCount, models: selectedModels }),
+    [category, topic, tone, format, durationMin, sceneCount, modelCount, selectedModels],
+  )
+  // 초기 씬 목록(INITIAL_SCENES)은 초기 입력값으로 생성된 것으로 본다.
+  const [generatedSig, setGeneratedSig] = useState(() =>
+    paramSignature({
+      category: "여행",
+      topic: META.spots,
+      tone: "밝고 경쾌",
+      format: firstChannel?.stack.contentType === "short" ? "short" : "long",
+      durationMin: 4,
+      sceneCount: 24,
+      modelCount: "1인",
+      models: firstChannel?.stack.characters ?? [],
+    }),
+  )
+  const scenesStale = generatedSig !== paramSig
 
   // 시나리오 본문(제목/설명/해시태그) 인라인 편집 오버라이드.
   const [metaTitle, setMetaTitle] = useState<string | null>(null)
@@ -593,6 +641,7 @@ function ScenarioPageInner() {
       if (!res.ok || !data.success) throw new Error(data.error || "생성 실패")
       const generated = data.scenes as Scene[]
       setScenes(generated)
+      setGeneratedSig(paramSig)
       setExpanded(false)
       setExpandedScripts({})
       persistScenario(generated)
@@ -1090,7 +1139,17 @@ function ScenarioPageInner() {
                 {scenes.length}개 장면
               </span>
             </div>
-            <div className="divide-y-0">
+
+            {/* 입력이 마지막 생성 시점과 달라지면 씬 목록은 옛 설정 기준이므로
+                흐리게 + 재생성 안내. (씬 생성은 비용이 드는 LLM 호출이라 자동 재생성 대신 무효화) */}
+            {scenesStale && (
+              <div className="flex items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-xs font-medium text-amber-600 dark:text-amber-400">
+                <RefreshCw className="h-3.5 w-3.5 shrink-0" />
+                설정이 바뀌었습니다 — 아래 씬 목록은 이전 설정 기준입니다. &lsquo;시나리오 생성&rsquo;을 다시 눌러주세요.
+              </div>
+            )}
+
+            <div className={`divide-y-0 transition-opacity ${scenesStale ? "pointer-events-none opacity-40" : ""}`}>
               {visibleScenes.map((scene) => (
                 <div key={`${scene.id}:${scene.script}`} className="group">
                   <SceneRow
@@ -1124,7 +1183,7 @@ function ScenarioPageInner() {
       <div className="shrink-0 flex items-center justify-between border-t border-border bg-card/50 px-6 py-4">
         <div className="flex items-center gap-2">
           <span className="text-sm font-bold text-foreground" style={{ fontFamily: "var(--font-geist-mono)" }}>
-            총 {scenes.length}장면
+            총 {sceneCount}장면
           </span>
           <span className="text-muted-foreground">/</span>
           <span className="text-sm text-muted-foreground">{durationLabel}</span>
