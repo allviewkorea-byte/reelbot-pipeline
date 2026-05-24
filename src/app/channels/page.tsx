@@ -115,17 +115,24 @@ function CreateChannelModal({ onClose }: { onClose: () => void }) {
   // 작업 2.5-5 · 플랫폼 + 콘텐츠 유형 → 비율 자동
   const ratio = getDefaultRatio(platform, contentType)
   const showContentType = platform === "youtube"
+  const [creating, setCreating] = useState(false)
 
-  function submit() {
+  async function submit() {
     const trimmed = name.trim()
-    if (!trimmed) return
-    const id = createChannel({
-      name: trimmed,
-      platform,
-      contentType: showContentType ? contentType : "short",
-    })
-    onClose()
-    router.push(`/channels/${id}`)
+    if (!trimmed || creating) return
+    setCreating(true)
+    try {
+      const id = await createChannel({
+        name: trimmed,
+        platform,
+        contentType: showContentType ? contentType : "short",
+      })
+      onClose()
+      router.push(`/channels/${id}`)
+    } catch {
+      // createChannel 내부에서 토스트 표시 + 롤백 처리됨
+      setCreating(false)
+    }
   }
 
   return (
@@ -202,10 +209,10 @@ function CreateChannelModal({ onClose }: { onClose: () => void }) {
           </button>
           <button
             onClick={submit}
-            disabled={!name.trim()}
+            disabled={!name.trim() || creating}
             className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
           >
-            만들기
+            {creating ? "만드는 중..." : "만들기"}
           </button>
         </div>
       </div>

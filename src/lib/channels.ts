@@ -199,3 +199,24 @@ export const DEFAULT_CHANNELS: Channel[] = [
 export const PLATFORM_ORDER: Platform[] = ["youtube", "instagram", "tiktok", "naverclip"]
 
 export const CHARACTER_OPTIONS = ["지수", "하은", "준혁", "서연"]
+
+// ── Supabase 행(row) 매핑 ───────────────────────────────────────────
+// 고정 컬럼은 최소화(id, platform, name, created_at)하고, 나머지 메타·스택 설정은
+// data(jsonb) 한 컬럼에 담는다. 향후 YouTube 연동 필드(채널 ID, OAuth 토큰, API
+// 동기 통계 등)는 data 안에 흡수해 스키마 변경 없이 확장한다.
+export interface ChannelRow {
+  id: string
+  platform: Platform
+  name: string
+  data: Omit<Channel, "id" | "platform" | "name">
+  created_at?: string
+}
+
+export function channelToRow(channel: Channel): ChannelRow {
+  const { id, platform, name, ...rest } = channel
+  return { id, platform, name, data: rest }
+}
+
+export function rowToChannel(row: ChannelRow): Channel {
+  return { id: row.id, name: row.name, platform: row.platform, ...row.data }
+}
