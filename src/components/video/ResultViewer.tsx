@@ -4,7 +4,7 @@ import { Download, Plus, CheckCircle2, FileVideo } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000"
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000"
 
 function resolveSrc(pathOrUrl?: string | null): string | null {
   if (!pathOrUrl) return null
