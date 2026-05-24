@@ -73,9 +73,20 @@ function recentVideos(name: string, count: number) {
   }))
 }
 
+// 클라이언트 useParams 는 동적 세그먼트를 percent-encoded 상태로 돌려준다
+// (서버 route handler 와 달리 디코딩하지 않음). 채널 id 가 비ASCII(한글)면 인코딩된
+// 값이 state 의 디코딩된 id 와 불일치해 getChannel 이 실패하므로 여기서 복원한다.
+function decodeChannelId(raw: string): string {
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
+}
+
 export default function ChannelDetailPage() {
   const params = useParams<{ id: string }>()
-  const id = params.id
+  const id = decodeChannelId(params.id)
   const router = useRouter()
   const { getChannel, updateStack, deleteChannel, cloneChannel, hydrated } = useChannels()
   const channel = getChannel(id)
