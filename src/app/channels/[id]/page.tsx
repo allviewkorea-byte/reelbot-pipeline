@@ -21,11 +21,13 @@ import {
   Clapperboard,
   Loader2,
   RefreshCw,
+  Sparkles,
+  Wand2,
 } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useChannels } from "@/components/channels/ChannelProvider"
+import type { TrendItem } from "@/lib/youtube"
 import {
-  triggerAnalyze,
   saveTrendSettings,
   TREND_CATEGORIES,
   FORMAT_LABEL,
@@ -63,6 +65,32 @@ const DEFAULT_TREND_SETTINGS: TrendSettings = {
   schedule: "daily",
 }
 
+// /api/trends/youtube/analyze 의 GPT 인사이트 응답 형태. (/trends 페이지와 동일 스키마)
+interface TrendInsight {
+  summary: string
+  commonThemes: string[]
+  formatTraits: string[]
+  scenarioHints: string[]
+}
+
+// /trends 페이지의 인사이트 블록 스타일을 그대로 재사용.
+function InsightBlock({ title, items }: { title: string; items: string[] }) {
+  if (!items.length) return null
+  return (
+    <div className="flex flex-col gap-1.5">
+      <p className="text-xs font-semibold text-foreground">{title}</p>
+      <ul className="flex flex-col gap-1">
+        {items.map((t, i) => (
+          <li key={i} className="flex gap-1.5 text-xs text-muted-foreground">
+            <span className="text-primary">•</span>
+            <span>{t}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 function recentVideos(name: string, count: number) {
   const titles = ["오프닝 인트로", "메인 스팟 소개", "현지 음식 체험", "야경 브이로그", "마무리 아웃트로"]
   const n = Math.min(count, 5)
@@ -95,6 +123,8 @@ export default function ChannelDetailPage() {
   const [showClone, setShowClone] = useState(false)
   const [keywordInput, setKeywordInput] = useState("")
   const [trendBusy, setTrendBusy] = useState(false)
+  const [insight, setInsight] = useState<TrendInsight | null>(null)
+  const [insightError, setInsightError] = useState("")
 
   useEffect(() => {
     if (channel) setDraft(channel.stack)
@@ -187,37 +217,73 @@ export default function ChannelDetailPage() {
     patchTrend({ formats: next.length ? next : trend.formats })
   }
 
+  // 분석에 사용할 형식: 채널이 선택한 형식 중 쇼츠 우선, 없으면 롱폼.
+  const primaryFormat: VideoFormat = trend.formats.includes("shorts") ? "shorts" : "long"
+
   async function runAnalyzeNow() {
     if (!trend.keywords.length || !trend.categories.length) {
       toast.error("분석 키워드와 카테고리를 먼저 지정해주세요")
       return
     }
     setTrendBusy(true)
+    setInsightError("")
     try {
-      // 최신 설정을 먼저 백엔드에 저장한 뒤 분석을 트리거.
-      await saveTrendSettings(channel!.id, trend)
-      const { jobId } = await triggerAnalyze({
-        channelId: channel!.id,
-        keywords: trend.keywords,
-        categories: trend.categories,
-        formats: trend.formats,
-      })
-      for (let i = 0; i < 150; i++) {
-        await new Promise((r) => setTimeout(r, 2000))
-        const res = await fetch(`/api/jobs/${jobId}/status`, { cache: "no-store" })
-        const data = await res.json()
-        if (data.status === "completed") break
-        if (data.status === "failed") throw new Error(data.error || "분석 실패")
+      // 최신 설정을 먼저 백엔드에 저장(스케줄러 동기화). 실패해도 인라인 분석은 계속.
+      await saveTrendSettings(channel!.id, trend).catch(() => {})
+
+      // 1) YouTube 인기 영상 로드 (지역 KR).
+      const trendsRes = await fetch("/api/trends/youtube?region=KR", { cache: "no-store" })
+      const trendsJson = await trendsRes.json()
+      if (!trendsRes.ok || !trendsJson.success) {
+        throw new Error(trendsJson.error || "트렌드 데이터를 불러오지 못했습니다")
       }
+      const pool: TrendItem[] =
+        primaryFormat === "shorts" ? trendsJson.items.shorts : trendsJson.items.longform
+      const items: TrendItem[] = pool.length ? pool : trendsJson.items.shorts.concat(trendsJson.items.longform)
+      if (!items.length) throw new Error("분석할 인기 영상 데이터가 없습니다")
+
+      // 2) GPT 인사이트 분석. category 라벨에 채널 키워드·카테고리를 담아 맥락 제공.
+      const categoryLabel = `${trend.categories.join(", ")} (키워드: ${trend.keywords.join(", ")})`
+      const analyzeRes = await fetch("/api/trends/youtube/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items, category: categoryLabel, format: primaryFormat }),
+      })
+      const analyzeJson = await analyzeRes.json()
+      if (!analyzeRes.ok || !analyzeJson.success) {
+        throw new Error(analyzeJson.error || "AI 분석에 실패했습니다")
+      }
+
+      // 3) 인사이트 패널 표시 + 마지막 분석 시각 기록.
+      setInsight(analyzeJson.analysis)
       const analyzedAt = new Date().toISOString()
       patchTrend({ lastAnalyzedAt: analyzedAt })
       updateStack(channel!.id, { trendSettings: { ...trend, lastAnalyzedAt: analyzedAt } })
       toast.success("트렌드 분석을 완료했습니다")
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "분석에 실패했습니다")
+      const msg = err instanceof Error ? err.message : "분석에 실패했습니다"
+      setInsightError(msg)
+      toast.error(msg)
     } finally {
       setTrendBusy(false)
     }
+  }
+
+  // 인사이트로 시나리오 만들기 → /scenario 로 주제·형식을 넘겨 폼 자동 채움.
+  function createScenarioFromInsight() {
+    try {
+      sessionStorage.setItem(
+        "reelbot:scenarioParams",
+        JSON.stringify({
+          topic: trend.keywords.join(", "),
+          category: trend.categories[0],
+          format: primaryFormat === "shorts" ? "short" : "long",
+        }),
+      )
+    } catch {
+      /* 저장 실패해도 이동은 진행 */
+    }
+    router.push("/scenario")
   }
 
   function save() {
@@ -639,6 +705,50 @@ export default function ChannelDetailPage() {
                 {trendBusy ? "분석 중…" : "지금 분석 실행"}
               </button>
             </div>
+
+            {/* 분석 진행/에러 상태 */}
+            {trendBusy && (
+              <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" /> 인기 영상을 분석하는 중…
+              </div>
+            )}
+            {!trendBusy && insightError && (
+              <div className="mt-4 rounded-lg border border-dashed border-border p-4 text-center text-sm text-muted-foreground">
+                <p className="text-foreground">{insightError}</p>
+                <button onClick={runAnalyzeNow} className="mt-1 text-xs text-primary hover:underline">
+                  다시 시도
+                </button>
+              </div>
+            )}
+
+            {/* AI 인사이트 패널 (/trends 스타일 재사용) */}
+            {!trendBusy && insight && (
+              <div className="mt-4 flex flex-col gap-4 rounded-xl border border-primary/30 bg-primary/5 p-5">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-primary" />
+                  <h3 className="text-sm font-semibold text-foreground">AI 인사이트</h3>
+                  <span className="rounded-full bg-secondary/60 px-2 py-0.5 text-xs text-muted-foreground">
+                    {FORMAT_LABEL[primaryFormat]} · {trend.categories.join(", ")}
+                  </span>
+                </div>
+                {insight.summary && (
+                  <p className="text-sm text-muted-foreground">{insight.summary}</p>
+                )}
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                  <InsightBlock title="공통 주제" items={insight.commonThemes} />
+                  <InsightBlock title="포맷 특징" items={insight.formatTraits} />
+                  <InsightBlock title="시나리오 힌트" items={insight.scenarioHints} />
+                </div>
+                <div className="flex justify-end">
+                  <button
+                    onClick={createScenarioFromInsight}
+                    className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+                  >
+                    <Wand2 className="h-4 w-4" />이 인사이트로 시나리오 만들기
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="flex justify-end">
