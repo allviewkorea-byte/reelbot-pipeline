@@ -746,7 +746,10 @@ function ScenarioPageInner() {
       topic,
       duration: durationMin * 60,
       format: format === "short" ? "shorts" : "long",
-      channelId: firstChannel?.id,
+      // 작업 중인 채널(트렌드 연동 채널) 우선. 없을 때만 첫 채널로 폴백.
+      // 이 channelId 로 /video/create 가 채널 스택(영상 모델 등)을 복원하므로,
+      // firstChannel 로 고정하면 다른 채널의 videoModel(kling-v1)이 잘못 반영된다.
+      channelId: trendChannelId || firstChannel?.id,
       characterIds: selectedModels,
       titleCandidates: effectiveCandidates.length ? effectiveCandidates : undefined,
       description: effectiveDescription || undefined,
