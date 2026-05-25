@@ -29,7 +29,7 @@ const DURATION_OPTIONS = [
   { label: "4분 (24씬)", min: 4, scenes: 24 },
 ]
 
-const DEFAULT_STORYBOARD_MODEL = "gpt-image-1"
+const DEFAULT_STORYBOARD_MODEL = "sketch"
 const DEFAULT_VIDEO_MODEL = "kling-v1"
 const ASSUMED_SEC_PER_SCENE = 5
 

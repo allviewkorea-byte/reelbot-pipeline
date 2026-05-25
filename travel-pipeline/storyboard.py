@@ -2,8 +2,8 @@
 콘티(스토리보드) 이미지 생성 모듈.
 
 영상을 만들기 전에 씬별로 정지 이미지를 먼저 만들어서 사용자가 시각 검증할 수 있게 한다.
-- 모델: gpt-image-1, 1024x1536, quality "high"
-- 캐릭터 일관성: character_image_path를 reference로 전달 (images.edit API)
+- 모델: WaveSpeed 스케치(z-image/turbo), 9:16 — 흑백 연필 스케치 톤
+- 스타일: storyboard sketch / pencil drawing / black and white 를 프롬프트로 강제
 - 캐시: 동일 (scene + character + extra) 조합이면 기존 PNG 재사용
 """
 
@@ -58,17 +58,18 @@ def _build_prompt(scene: dict, extra_instructions: str | None = None) -> str:
     camera = scene.get("camera", "").strip()
     location = scene.get("location", "").strip()
 
+    # 콘티는 흑백 연필 스케치 톤으로 강제한다. (z-image/turbo 는 negative prompt 를
+    # 보장하지 않으므로 'black and white / pencil' 을 positive 프롬프트로 명시해 컬러·사진풍을 배제)
     parts = [
-        "Cinematic storyboard frame, single still image (not a video frame sequence).",
-        "Maintain the exact same character identity, face, hair, and outfit as in the reference image.",
-        "Photorealistic, vertical 9:16 composition, sharp focus, natural lighting.",
+        "Storyboard sketch, pencil drawing, black and white, cinematic frame.",
+        "Single still image, vertical 9:16 composition, clean linework, no color.",
     ]
     if camera:
         parts.append(f"Camera: {camera}.")
     if location:
         parts.append(f"Location: {location}.")
     if description:
-        parts.append(f"Action / scene: {description}")
+        parts.append(f"Scene: {description}")
     if extra_instructions:
         parts.append(f"Additional direction: {extra_instructions}")
     return " ".join(parts)
@@ -128,13 +129,13 @@ def generate_storyboard(
     model: str = "default",
 ) -> list[dict]:
     """
-    각 씬에 대해 gpt-image-1으로 콘티 이미지 1장씩 생성.
+    각 씬에 대해 WaveSpeed 스케치 모델로 콘티 이미지 1장씩 생성.
 
     Args:
         scenes: [{"scene_id": 1, "description": "...", "camera": "wide shot", "location": "..."}, ...]
         character_image_path: 캐릭터 reference 이미지 경로 (없으면 reference 없이 생성)
         output_dir: 출력 폴더 (예: output/storyboard/{job_id}/)
-        config: Config 인스턴스 (없으면 새로 생성). OPENAI_API_KEY 필요.
+        config: Config 인스턴스 (없으면 새로 생성). WAVESPEED_API_KEY 필요(없으면 gpt-image fallback).
         progress_callback: callable(scene_index, total, message) 형태. 진행률 보고용.
 
     Returns:

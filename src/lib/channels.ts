@@ -35,8 +35,7 @@ export const TRACK_BADGE: Record<Track, string> = {
 export const SCENARIO_TONES = ["여행", "일상", "분석", "정성", "리뷰"] as const
 
 export const STORYBOARD_MODELS = [
-  { value: "gpt-image-1", label: "gpt-image-1 (기본, $0.25/장)", disabled: false },
-  { value: "z-image-turbo", label: "Z-Image Turbo (저렴, $0.01/장, WaveSpeed)", disabled: false },
+  { value: "sketch", label: "스케치 콘티 (저렴, $0.005/장, WaveSpeed)", disabled: false },
 ] as const
 
 export const VIDEO_MODELS = [
@@ -46,8 +45,7 @@ export const VIDEO_MODELS = [
 
 // 콘티/영상 비용 추정 (USD) — Phase 3 어댑터 단가와 일치.
 export const STORYBOARD_MODEL_COST: Record<string, number> = {
-  "gpt-image-1": 0.25,
-  "z-image-turbo": 0.01,
+  sketch: 0.005,
 }
 
 // 영상은 초당 단가 추정. kling-v1(기존 KIE)은 별도 추정 없음(0으로 표기).
@@ -57,7 +55,7 @@ export const VIDEO_MODEL_COST_PER_SEC: Record<string, number> = {
 }
 
 export function storyboardCost(model: string, sceneCount: number): number {
-  return (STORYBOARD_MODEL_COST[model] ?? STORYBOARD_MODEL_COST["gpt-image-1"]) * sceneCount
+  return (STORYBOARD_MODEL_COST[model] ?? STORYBOARD_MODEL_COST["sketch"]) * sceneCount
 }
 
 export function videoCost(model: string, totalSeconds: number): number {
@@ -129,7 +127,7 @@ export const DEFAULT_CHANNELS: Channel[] = [
       track: "auto",
       characters: ["지수"],
       scenarioTone: "여행",
-      storyboardModel: "gpt-image-1",
+      storyboardModel: "sketch",
       videoModel: "kling-v1",
       subtitleStyle: "basic",
       publishTargets: ["youtube"],
@@ -156,7 +154,7 @@ export const DEFAULT_CHANNELS: Channel[] = [
       track: "semi",
       characters: ["하은"],
       scenarioTone: "일상",
-      storyboardModel: "gpt-image-1",
+      storyboardModel: "sketch",
       videoModel: "kling-v1",
       subtitleStyle: "caption",
       publishTargets: ["instagram"],
@@ -183,7 +181,7 @@ export const DEFAULT_CHANNELS: Channel[] = [
       track: "adobe",
       characters: ["지수"],
       scenarioTone: "정성",
-      storyboardModel: "gpt-image-1",
+      storyboardModel: "sketch",
       videoModel: "kling-v1",
       subtitleStyle: "subtitle",
       publishTargets: ["youtube"],

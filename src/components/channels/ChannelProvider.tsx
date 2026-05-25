@@ -109,7 +109,7 @@ export function ChannelProvider({ children }: { children: React.ReactNode }) {
           track: "auto",
           characters: character ? [character] : ["지수"],
           scenarioTone: "여행",
-          storyboardModel: "gpt-image-1",
+          storyboardModel: "sketch",
           videoModel: "kling-v1",
           subtitleStyle: "basic",
           publishTargets: [platform],
