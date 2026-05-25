@@ -38,6 +38,18 @@ def _to_public_url(image_path: Path, output_root: str) -> str | None:
     return f"{_PUBLIC_BASE_URL}/{_STATIC_MOUNT}/{rel.as_posix()}"
 
 
+def _preview_url(source_url: str | None, image_path: Path, output_root: str) -> str | None:
+    """브라우저 미리보기용 URL. 외부 접근 가능한 CDN URL(source_url)을 우선 쓰고,
+    없을 때만 /static 마운트 경유 로컬 URL로 폴백한다.
+
+    배포(Railway)에서는 PUBLIC_BASE_URL 미설정·로컬 파일 휘발성 때문에 /static
+    경로가 깨지므로, WaveSpeed CDN URL을 직접 전달하는 것이 안정적이다.
+    """
+    if source_url:
+        return source_url
+    return _to_public_url(image_path, output_root)
+
+
 def _scene_cache_key(scene: dict, character_image_path: str, extra: str | None) -> str:
     payload = json.dumps(
         {
@@ -80,8 +92,8 @@ def _generate_image(
     prompt: str,
     character_image_path: str | None,
     output_path: Path,
-) -> None:
-    """선택된 어댑터로 콘티 이미지 1장 생성 후 output_path에 저장."""
+):
+    """선택된 어댑터로 콘티 이미지 1장 생성 후 output_path에 저장. 결과 객체 반환."""
     references = None
     if character_image_path:
         references = [character_image_path]
@@ -91,18 +103,20 @@ def _generate_image(
         aspect_ratio="9:16",
         output_path=str(output_path),
     )
-    asyncio.run(adapter.generate(request))
+    return asyncio.run(adapter.generate(request))
 
 
 def _scene_filename(scene_id: int | str) -> str:
     return f"scene_{scene_id}.png"
 
 
-def _write_meta(image_path: Path, prompt: str, cache_key: str) -> None:
+def _write_meta(
+    image_path: Path, prompt: str, cache_key: str, source_url: str | None = None
+) -> None:
     meta_path = image_path.with_suffix(".json")
     meta_path.write_text(
         json.dumps(
-            {"prompt": prompt, "cache_key": cache_key},
+            {"prompt": prompt, "cache_key": cache_key, "source_url": source_url},
             ensure_ascii=False,
             indent=2,
         ),
@@ -141,7 +155,7 @@ def generate_storyboard(
     Returns:
         [{"scene_id": ..., "image_path": "...", "image_url": "...", "prompt": "...", "cached": bool}, ...]
         image_path: 서버 파일시스템 경로(영상 생성 단계에서 reference로 사용)
-        image_url: 브라우저 접근용 절대 URL(/static 마운트 경유)
+        image_url: 브라우저 접근용 URL. WaveSpeed CDN URL 우선, 없으면 /static 마운트 경유.
     """
     if config is None:
         config = Config()
@@ -160,6 +174,7 @@ def generate_storyboard(
         image_path = out_dir / _scene_filename(scene_id)
 
         cached = False
+        source_url: str | None = None
         existing_meta = _read_meta(image_path)
         if (
             image_path.exists()
@@ -167,6 +182,7 @@ def generate_storyboard(
             and existing_meta.get("cache_key") == cache_key
         ):
             cached = True
+            source_url = existing_meta.get("source_url")
             if progress_callback:
                 progress_callback(idx, total, f"씬 {scene_id} 캐시 사용")
             print(f"  [storyboard] ({idx}/{total}) 씬 {scene_id} 캐시 재사용")
@@ -174,14 +190,15 @@ def generate_storyboard(
             if progress_callback:
                 progress_callback(idx, total, f"씬 {scene_id} 콘티 생성 중...")
             print(f"  [storyboard] ({idx}/{total}) 씬 {scene_id} 콘티 생성 중 (모델: {adapter.name})")
-            _generate_image(adapter, prompt, character_image_path, image_path)
-            _write_meta(image_path, prompt, cache_key)
+            result = _generate_image(adapter, prompt, character_image_path, image_path)
+            source_url = getattr(result, "source_url", None)
+            _write_meta(image_path, prompt, cache_key, source_url)
             print(f"  [storyboard] 저장: {image_path}")
 
         results.append({
             "scene_id": scene_id,
             "image_path": str(image_path),
-            "image_url": _to_public_url(image_path, config.output_dir),
+            "image_url": _preview_url(source_url, image_path, config.output_dir),
             "prompt": prompt,
             "cached": cached,
         })
@@ -214,14 +231,15 @@ def regenerate_single_scene(
     cache_key = _scene_cache_key(scene, character_image_path, extra_instructions)
 
     print(f"  [storyboard] 씬 {scene.get('scene_id')} 재생성 중 (모델: {adapter.name})")
-    _generate_image(adapter, prompt, character_image_path, out_path)
-    _write_meta(out_path, prompt, cache_key)
+    result = _generate_image(adapter, prompt, character_image_path, out_path)
+    source_url = getattr(result, "source_url", None)
+    _write_meta(out_path, prompt, cache_key, source_url)
     print(f"  [storyboard] 재생성 저장: {out_path}")
 
     return {
         "scene_id": scene.get("scene_id"),
         "image_path": str(out_path),
-        "image_url": _to_public_url(out_path, config.output_dir),
+        "image_url": _preview_url(source_url, out_path, config.output_dir),
         "prompt": prompt,
         "cached": False,
     }

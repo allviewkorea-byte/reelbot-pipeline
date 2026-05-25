@@ -27,6 +27,7 @@ class ImageGenerationResult:
     cost_usd: float
     model_used: str
     raw_response: dict
+    source_url: Optional[str] = None  # 호스팅 원본 URL(예: WaveSpeed CDN). 로컬 생성이면 None.
 
 
 class ImageModelAdapter(ABC):
