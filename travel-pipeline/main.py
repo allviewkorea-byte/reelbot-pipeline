@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 import argparse
 import json
+import shutil
 import sys
 import traceback
 from pathlib import Path
@@ -227,13 +228,30 @@ def generate_video_from_storyboard(
     _report(int(len(scenes) / total_steps * 100), "최종 영상 합성 중...")
     final_video = _concat_clips(clip_paths, out_dir, config)
 
-    _report(100, "완료")
-    return {
+    result = {
         "mode": "kie",
         "final_video": str(final_video),
         "clips": [str(p) for p in clip_paths],
         "scenario_mode": scenario_mode,
     }
+
+    # Railway 휘발성 디스크 대응: 완성 영상을 Supabase Storage에 올려 영구 공개 URL을
+    # result.video_url 로 반환한다. 업로드 성공 시 로컬 mp4 는 삭제(디스크 절약).
+    # SUPABASE 미설정/업로드 실패 시엔 로컬 파일을 유지하고 video_url 을 생략한다.
+    from adapters import supabase_storage
+
+    if supabase_storage.is_available():
+        try:
+            _report(100, "영상 업로드 중...")
+            video_url = supabase_storage.upload_video(str(final_video), out_dir.name)
+            result["video_url"] = video_url
+            shutil.rmtree(clips_dir, ignore_errors=True)
+            final_video.unlink(missing_ok=True)
+        except Exception as e:
+            print(f"  [video] Supabase 업로드 실패 — 로컬 파일 유지: {e}")
+
+    _report(100, "완료")
+    return result
 
 
 def _merge_clip_audio(clip: Path, audio: Path, scene_id, config: Config, out_dir: Path) -> Path:
