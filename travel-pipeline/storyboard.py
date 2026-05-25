@@ -70,20 +70,24 @@ def _build_prompt(scene: dict, extra_instructions: str | None = None) -> str:
     camera = scene.get("camera", "").strip()
     location = scene.get("location", "").strip()
 
-    # 콘티는 흑백 연필 스케치 톤으로 강제한다. (z-image/turbo 는 negative prompt 를
-    # 보장하지 않으므로 'black and white / pencil' 을 positive 프롬프트로 명시해 컬러·사진풍을 배제)
+    # 콘티는 항상 흑백 연필 스케치로 강제한다. 씬 설명(description)에 '황금빛 노을',
+    # '노란 툭툭' 같은 색 표현이 섞이면 z-image/turbo 가 일부 씬을 컬러로 렌더해 스타일이
+    # 들쭉날쭉해진다. 색 배제 지시를 맨 앞·맨 뒤에 모두 넣어 모든 씬에 일관 적용한다.
     parts = [
-        "Storyboard sketch, pencil drawing, black and white, cinematic frame.",
-        "Single still image, vertical 9:16 composition, clean linework, no color.",
+        "Monochrome black and white pencil storyboard sketch, grayscale, no color.",
+        "Cinematic frame, single still image, vertical 9:16 composition, clean pencil linework.",
     ]
     if camera:
         parts.append(f"Camera: {camera}.")
     if location:
         parts.append(f"Location: {location}.")
     if description:
-        parts.append(f"Scene: {description}")
+        # 설명에 색 표현이 있어도 흑백 연필 스케치로만 그리도록 명시.
+        parts.append(f"Scene to draw as a black-and-white pencil sketch: {description}")
     if extra_instructions:
         parts.append(f"Additional direction: {extra_instructions}")
+    # 모든 씬에 동일하게 적용되는 마무리 색 배제 지시 (마지막 = 강한 우선순위).
+    parts.append("monochrome, black and white only, pencil sketch, no color")
     return " ".join(parts)
 
 
