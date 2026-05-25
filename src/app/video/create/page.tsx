@@ -53,8 +53,15 @@ export default function VideoCreatePage() {
   const { getChannel } = useChannels()
   const [channelId, setChannelId] = useState<string | null>(null)
   useEffect(() => {
+    // 채널 워크플로로 진입하면 ?channel= 가 우선. 시나리오에서 진입하면 URL 에
+    // 채널이 없으므로 핸드오프에 담겨온 channelId 로 폴백해 채널 스택을 적용한다.
     const cid = new URLSearchParams(window.location.search).get("channel")
-    setChannelId(cid)
+    if (cid) {
+      setChannelId(cid)
+      return
+    }
+    const handoff = loadScenarioHandoff()
+    if (handoff?.channelId) setChannelId(handoff.channelId)
   }, [])
 
   // 시나리오 페이지에서 넘어온 입력값으로 폼 자동 채움.
