@@ -226,3 +226,27 @@ reelbot-pipeline/
 ### 다음 예정 작업
 - 트렌드 분석 모듈 B안: YouTube Data API v3 + GPT 분석 + 시나리오 자동 연결
 - 어도비 편집 워크플로 (트랙 C): Premiere MCP 연동
+
+---
+
+## 인프라 현황 (2026-05-25 기준)
+
+### 배포 구성
+- 프론트엔드: Vercel (reelbot-pipeline.vercel.app) — main 브랜치 자동 배포
+- 백엔드: Railway `adventurous-renewal` 프로젝트
+  - 레포: allviewkorea-byte/reelbot-pipeline
+  - Root Directory: travel-pipeline
+  - URL: https://reelbot-pipeline-production-94d0.up.railway.app
+  - 상태: Online (FastAPI /health 200 응답 확인)
+- Vercel 환경변수: NEXT_PUBLIC_API_BASE_URL 설정 완료
+
+### 완료된 PR (최신순)
+- PR #25: 하드코딩 localhost 수정 (ResultViewer, SceneCard)
+- PR #24: 시나리오 자동 연결 (트렌드 → /scenario)
+- PR #23: 트렌드 분석 (YouTube Data API v3 + GPT)
+- PR #11 이전: 사이드바 IA, 채널 Supabase, 한글 URL 인코딩 등
+
+### 백엔드 블로커 #5 현황
+- Railway 배포 완료, URL 노출됨, Vercel 연결됨
+- Railway Variables에 OPENAI_API_KEY 등 환경변수 설정 필요 여부 미확인
+- 로컬 개발 시: cd travel-pipeline && py -m uvicorn api.server:app --reload --port 8000
