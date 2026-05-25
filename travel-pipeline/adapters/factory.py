@@ -37,5 +37,12 @@ def get_video_adapter(model: str = "default") -> VideoModelAdapter:
         # WaveSpeed 의 최신 Kling 마스터 모델. (v3 실제 model ID는 WaveSpeed 문서 기준 갱신)
         adapter = WavespeedVideoAdapter(model_id="kwaivgi/kling-v2.1-master")
         if adapter.is_available():
+            print(f"  [adapter] 영상 모델: {adapter.name} (Kling v3, WaveSpeed)")
             return adapter
+        # kling-v3 을 선택했는데 WAVESPEED_API_KEY 가 없으면 조용히 v1 으로 떨어져
+        # "Kling v3 설정했는데 v1 으로 동작" 증상이 된다. 원인이 보이도록 경고를 남긴다.
+        print(
+            "  [adapter] ⚠ video_model='kling-v3' 인데 WAVESPEED_API_KEY 가 없어 "
+            "Kling v1 으로 폴백합니다. Railway 환경변수에 WAVESPEED_API_KEY 를 설정하세요."
+        )
     return KlingV1Adapter()
