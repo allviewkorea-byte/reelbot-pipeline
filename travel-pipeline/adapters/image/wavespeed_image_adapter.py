@@ -108,12 +108,15 @@ class WavespeedImageAdapter(ImageModelAdapter):
                 status = data.get("status")
                 if status == "completed":
                     image_url = data["outputs"][0]
+                    # CDN URL을 로컬에도 저장(영상 생성 단계 reference용)하되,
+                    # 브라우저 미리보기는 외부 접근 가능한 CDN URL을 직접 쓰도록 함께 반환.
                     saved = await download_to(client, image_url, request.output_path)
                     return ImageGenerationResult(
                         image_path=saved,
                         cost_usd=self.cost_per_image,
                         model_used=self.name,
                         raw_response=data,
+                        source_url=image_url,
                     )
                 if status == "failed":
                     raise RuntimeError(f"WaveSpeed task failed: {data.get('error', data)}")
