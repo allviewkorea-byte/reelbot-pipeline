@@ -34,8 +34,9 @@ def get_video_adapter(model: str = "default") -> VideoModelAdapter:
     if model == "kling-v3":
         from .video.wavespeed_video_adapter import WavespeedVideoAdapter
 
-        # WaveSpeed 의 최신 Kling 마스터 모델. (v3 실제 model ID는 WaveSpeed 문서 기준 갱신)
-        adapter = WavespeedVideoAdapter(model_id="kwaivgi/kling-v2.1-master")
+        # WaveSpeed 의 최신 Kling 마스터 모델. 어댑터가 reference 유무로 i2v/t2v
+        # 변형 경로를 자동 선택한다(bare 'kling-v2.1-master' 경로는 400).
+        adapter = WavespeedVideoAdapter(model_id="kwaivgi/kling-v2.1-i2v-master")
         if adapter.is_available():
             print(f"  [adapter] 영상 모델: {adapter.name} (Kling v3, WaveSpeed)")
             return adapter
