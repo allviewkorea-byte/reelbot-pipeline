@@ -1,7 +1,9 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Wand2, AlertTriangle, ArrowLeft, DollarSign } from "lucide-react"
+import { useRouter } from "next/navigation"
+import Link from "next/link"
+import { Wand2, AlertTriangle, ArrowLeft, DollarSign, Lock } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { useStoryboard } from "@/hooks/useStoryboard"
@@ -14,7 +16,6 @@ import type { SceneStatus } from "@/components/video/SceneCard"
 import { useChannels } from "@/components/channels/ChannelProvider"
 import { loadScenarioHandoff, type ScenarioHandoffScene } from "@/lib/scenario-handoff"
 import {
-  STORYBOARD_MODELS,
   VIDEO_MODELS,
   TRACK_LABELS,
   storyboardCost,
@@ -33,11 +34,17 @@ const DEFAULT_STORYBOARD_MODEL = "sketch"
 const DEFAULT_VIDEO_MODEL = "kling-v1"
 const ASSUMED_SEC_PER_SCENE = 5
 
+// 콘티는 채널에 저장된 storyboard_model 값과 무관하게 항상 WaveSpeed Z-Image Turbo
+// 로 생성된다(adapters/factory.get_image_adapter). 과거 채널에 'gpt-image-1' 등
+// 레거시 값이 저장돼 있어도 실제 사용 모델명으로 표시한다.
+const STORYBOARD_MODEL_LABEL = "Z-Image Turbo (WaveSpeed)"
+
 function modelLabel(list: ReadonlyArray<{ value: string; label: string }>, value: string): string {
   return list.find((m) => m.value === value)?.label ?? value
 }
 
 export default function VideoCreatePage() {
+  const router = useRouter()
   const [phase, setPhase] = useState<Phase>("input")
   const [country, setCountry] = useState("")
   const [durationMin, setDurationMin] = useState(2)
@@ -82,6 +89,18 @@ export default function VideoCreatePage() {
     })
   }, [])
   const channel = channelId ? getChannel(channelId) : undefined
+
+  // 이전 화면으로: 채널에서 진입 → 해당 채널 워크플로 탭, 시나리오에서 진입 → 보관함,
+  // 그 외 직접 진입 → 브라우저 히스토리.
+  const handleBack = useCallback(() => {
+    if (channelId) {
+      router.push(`/channels/${encodeURIComponent(channelId)}?tab=workflow`)
+    } else if (isFromScenario) {
+      router.push("/scenario")
+    } else {
+      router.back()
+    }
+  }, [channelId, isFromScenario, router])
 
   const storyboardModel = channel?.stack.storyboardModel ?? DEFAULT_STORYBOARD_MODEL
   const videoModel = channel?.stack.videoModel ?? DEFAULT_VIDEO_MODEL
@@ -289,13 +308,21 @@ export default function VideoCreatePage() {
 
             {/* 모델 + 비용 안내 (채널 스택에서 결정됨) */}
             <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-background/40 p-3">
-              <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
-                <DollarSign className="h-3.5 w-3.5 text-emerald-400" />
-                예상 비용
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                  <DollarSign className="h-3.5 w-3.5 text-emerald-400" />
+                  예상 비용
+                </div>
+                {channel && (
+                  <span className="flex items-center gap-1 rounded-full bg-secondary/60 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                    <Lock className="h-3 w-3" />
+                    채널 스택 설정 사용 중
+                  </span>
+                )}
               </div>
               <CostRow
                 label="콘티"
-                model={modelLabel(STORYBOARD_MODELS, storyboardModel)}
+                model={STORYBOARD_MODEL_LABEL}
                 detail={`${sceneCount}장 × $${storyboardCost(storyboardModel, 1).toFixed(2)}`}
                 cost={contiCost}
               />
@@ -305,7 +332,14 @@ export default function VideoCreatePage() {
                 detail={videoEst > 0 ? `${totalSeconds}초 추정` : "추정 단가 없음"}
                 cost={videoEst}
               />
-              {!channel && (
+              {channel ? (
+                <Link
+                  href={`/channels/${encodeURIComponent(channel.id)}?tab=stack`}
+                  className="mt-0.5 text-[10px] text-primary underline-offset-2 hover:underline"
+                >
+                  모델·트랙은 채널 스택 설정에서 변경할 수 있습니다 →
+                </Link>
+              ) : (
                 <p className="mt-0.5 text-[10px] text-muted-foreground">
                   채널을 통해 진입하면 채널 스택의 모델/트랙 설정이 적용됩니다.
                 </p>
@@ -359,7 +393,7 @@ export default function VideoCreatePage() {
             {storyboard.isGenerating ? (
               <ProgressTracker
                 jobStatus={storyboard.job}
-                title={`콘티 생성 중 · ${modelLabel(STORYBOARD_MODELS, storyboardModel)} · 예상 $${contiCost.toFixed(2)}`}
+                title={`콘티 생성 중 · ${STORYBOARD_MODEL_LABEL} · 예상 $${contiCost.toFixed(2)}`}
               />
             ) : autoAdvance ? (
               <ProgressTracker
@@ -403,6 +437,13 @@ export default function VideoCreatePage() {
             }}
           />
         )}
+
+        <div className="mt-8 flex justify-center">
+          <Button variant="ghost" size="sm" onClick={handleBack}>
+            <ArrowLeft className="h-4 w-4" />
+            {channelId ? "채널 워크플로로 돌아가기" : isFromScenario ? "시나리오 보관함으로" : "이전으로 돌아가기"}
+          </Button>
+        </div>
       </div>
     </div>
   )
