@@ -324,7 +324,9 @@ def _concat_clips(clip_paths: list[Path], out_dir: Path, config: Config) -> Path
     cmd = [
         "ffmpeg", "-y",
         "-f", "concat", "-safe", "0", "-i", str(concat_list),
-        "-c:v", "libx264", "-c:a", "aac", "-b:a", "192k",
+        # 재인코딩(libx264) 은 Railway 메모리 한도를 넘겨 OOM(SIGKILL, returncode=-9)
+        # 을 유발했다. WaveSpeed 클립은 동일 코덱/해상도라 스트림 복사로 이어붙인다.
+        "-c", "copy",
         "-movflags", "+faststart",
         str(out_path),
     ]
