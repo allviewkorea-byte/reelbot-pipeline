@@ -126,6 +126,17 @@ export default function ChannelDetailPage() {
   const [insight, setInsight] = useState<TrendInsight | null>(null)
   const [insightError, setInsightError] = useState("")
 
+  // ?tab= 으로 진입하면 해당 탭을 연다(예: 영상 제작 화면에서 워크플로 탭으로 복귀).
+  // 서버 렌더 hydration 불일치를 피하려고 마운트 후 적용하고, setState 는
+  // 마이크로태스크로 미뤄 이펙트 본문의 동기 setState 를 피한다.
+  const [tab, setTab] = useState("overview")
+  useEffect(() => {
+    Promise.resolve().then(() => {
+      const t = new URLSearchParams(window.location.search).get("tab")
+      if (t && ["overview", "stack", "workflow", "history"].includes(t)) setTab(t)
+    })
+  }, [])
+
   useEffect(() => {
     if (channel) setDraft(channel.stack)
     // 채널 변경 시 드래프트 동기화
@@ -369,7 +380,7 @@ export default function ChannelDetailPage() {
         />
       )}
 
-      <Tabs defaultValue="overview" className="w-full flex-col" data-horizontal>
+      <Tabs value={tab} onValueChange={setTab} className="w-full flex-col" data-horizontal>
         <div className="max-w-full overflow-x-auto">
           <TabsList>
             <TabsTrigger value="overview">개요</TabsTrigger>
