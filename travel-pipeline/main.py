@@ -235,27 +235,27 @@ def generate_video_from_storyboard(
         "scenario_mode": scenario_mode,
     }
 
-    # Railway 휘발성 디스크 대응: 완성 영상을 Supabase Storage에 올려 영구 공개 URL을
+    # Railway 휘발성 디스크 대응: 완성 영상을 R2에 올려 영구 공개 URL을
     # result.video_url 로 반환한다. 업로드 성공 시 로컬 mp4 는 삭제(디스크 절약).
-    # SUPABASE 미설정/업로드 실패 시엔 로컬 파일을 유지하고 video_url 을 생략한다.
-    from adapters import supabase_storage
+    # R2 미설정/업로드 실패 시엔 로컬 파일을 유지하고 video_url 을 생략한다.
+    from adapters import r2_storage
 
-    if supabase_storage.is_available():
+    if r2_storage.is_available():
         try:
             _report(100, "영상 업로드 중...")
-            video_url = supabase_storage.upload_video(str(final_video), out_dir.name)
+            video_url = r2_storage.upload_video(str(final_video), out_dir.name)
             result["video_url"] = video_url
-            print(f"  [video] Supabase 업로드 완료: {video_url}")
+            print(f"  [video] R2 업로드 완료: {video_url}")
             shutil.rmtree(clips_dir, ignore_errors=True)
             final_video.unlink(missing_ok=True)
         except Exception as e:
             # 조용히 넘어가지 않는다 — 전체 트레이스백을 남기고 result 에도 사유를 담는다.
             traceback.print_exc()
             result["upload_error"] = str(e)
-            print(f"  [video] Supabase 업로드 실패 — 로컬 파일 유지: {e}")
+            print(f"  [video] R2 업로드 실패 — 로컬 파일 유지: {e}")
     else:
         print(
-            "  [video] SUPABASE_URL / SUPABASE_SECRET_KEY 미설정 → Supabase 업로드 건너뜀. "
+            "  [video] R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_PUBLIC_BASE_URL 미설정 → R2 업로드 건너뜀. "
             "video_url 없이 로컬 파일만 유지합니다."
         )
 
