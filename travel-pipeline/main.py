@@ -291,11 +291,35 @@ def _concat_clips(clip_paths: list[Path], out_dir: Path, config: Config) -> Path
     """모든 클립을 하나로 이어붙임 (ffmpeg concat)."""
     import subprocess
 
+    # 존재하지 않거나 0바이트인 클립은 concat 입력에서 제외한다. concat_list 에
+    # 누락/빈 파일 경로가 들어가면 ffmpeg 가 0프레임을 읽어 0kB(time=N/A) 산출물을 낸다.
+    valid_paths: list[Path] = []
+    for p in clip_paths:
+        rp = p.resolve()
+        if not rp.exists():
+            print(f"  [video] ⚠ concat 제외 — 파일 없음: {rp}")
+            continue
+        size = rp.stat().st_size
+        if size == 0:
+            print(f"  [video] ⚠ concat 제외 — 0바이트: {rp}")
+            continue
+        print(f"  [video] concat 입력: {rp} ({size} bytes)")
+        valid_paths.append(rp)
+
+    if not valid_paths:
+        raise RuntimeError(
+            "최종 합성 실패: concat 가능한 클립이 없음 (모든 클립 누락/0바이트). "
+            f"clip_paths={[str(p) for p in clip_paths]}"
+        )
+
     concat_list = out_dir / "concat_list.txt"
     concat_list.write_text(
-        "".join(f"file '{p.resolve()}'\n" for p in clip_paths),
+        "".join(f"file '{p}'\n" for p in valid_paths),
         encoding="utf-8",
     )
+    print(f"  [video] concat_list.txt: {concat_list.resolve()}")
+    print(f"  [video] concat_list 내용:\n{concat_list.read_text(encoding='utf-8').rstrip()}")
+
     out_path = out_dir / "final.mp4"
     cmd = [
         "ffmpeg", "-y",
@@ -304,10 +328,21 @@ def _concat_clips(clip_paths: list[Path], out_dir: Path, config: Config) -> Path
         "-movflags", "+faststart",
         str(out_path),
     ]
+    print(f"  [video] ffmpeg concat 실행: {' '.join(cmd)}")
     result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.stderr:
+        print(f"  [video] ffmpeg stderr:\n{result.stderr}")
     if result.returncode != 0:
-        raise RuntimeError(f"최종 합성 실패: {result.stderr}")
+        raise RuntimeError(f"최종 합성 실패 (returncode={result.returncode}): {result.stderr}")
+    # ffmpeg 가 returncode 0 으로 끝나도 0kB 산출물이 나올 수 있어(입력 프레임 0)
+    # 명시적으로 산출물 크기를 검증한다.
+    if not out_path.exists() or out_path.stat().st_size == 0:
+        raise RuntimeError(
+            f"최종 합성 실패: 출력이 0바이트 — {out_path}. ffmpeg stderr:\n{result.stderr}"
+        )
+    print(f"  [video] 최종 합성 완료: {out_path.resolve()} ({out_path.stat().st_size} bytes)")
     return out_path
+
 
 
 def parse_args():
