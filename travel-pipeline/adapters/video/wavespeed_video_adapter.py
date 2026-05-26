@@ -33,6 +33,11 @@ _ALLOWED_DURATIONS = (5, 10)
 _ALLOWED_RATIOS = ("16:9", "9:16", "1:1")
 _DEFAULT_NEGATIVE_PROMPT = "blur, distort, and low quality"
 
+# 영상 생성 폴링 한도. Kling v3 는 생성에 수 분(최대 ~10분) 걸려
+# v1 기준 3분(180회) 한도로는 완료 전에 timeout 이 났다.
+_POLL_INTERVAL_SEC = 3
+_MAX_WAIT_SEC = 900  # 15분
+
 # WaveSpeed 모델별 초당 대략 단가 (USD). 문서 가격표 기준 추정.
 _PRICE_PER_SECOND = {
     _I2V_MODEL_ID: 0.28,
@@ -121,8 +126,8 @@ class WavespeedVideoAdapter(VideoModelAdapter):
                 raise
             task_id = submit.json()["data"]["id"]
 
-            for _ in range(180):  # max ~3min (Kling 영상 생성)
-                await asyncio.sleep(1)
+            for _ in range(_MAX_WAIT_SEC // _POLL_INTERVAL_SEC):
+                await asyncio.sleep(_POLL_INTERVAL_SEC)
                 poll = await client.get(
                     f"{self.BASE_URL}/predictions/{task_id}/result",
                     headers=headers,
