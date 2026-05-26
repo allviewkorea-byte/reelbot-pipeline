@@ -229,7 +229,7 @@ reelbot-pipeline/
 
 ---
 
-## 인프라 현황 (2026-05-25 기준)
+## 인프라 현황 (2026-05-26 기준)
 
 ### 배포 구성
 - 프론트엔드: Vercel (reelbot-pipeline.vercel.app) — main 브랜치 자동 배포
@@ -241,10 +241,35 @@ reelbot-pipeline/
 - Vercel 환경변수: NEXT_PUBLIC_API_BASE_URL 설정 완료
 
 ### 완료된 PR (최신순)
+- PR #40: ffmpeg concat OOM 수정 (-c copy 스트림 복사)
+- PR #39: ffmpeg concat 디버그 로그 추가
+- PR #37~#38: WaveSpeed 폴링 타임아웃 2시간으로 연장
+- PR #36: WaveSpeed Kling v3 엔드포인트 400 수정
+- PR #35: 영상 제작 화면 스택 표시 개선 + 뒤로가기 버튼
+- PR #34: 콘티 스케치 스타일 불일치 수정 + Supabase 에러 로그
+- PR #33: 채널 트렌드 인사이트 인라인 표시
+- PR #32: Supabase Storage 영상 업로드 연동 (재시도)
+- PR #31: Supabase Storage 영상 업로드 연동
+- PR #30: 콘티 모델 Z-Image Turbo 스케치 스타일 (gpt-image-1 제거)
+- PR #29: 스토리보드 CDN URL 수정
+- PR #28: PyJWT 의존성 추가
+- PR #27: 시나리오→영상 채널 핸드오프 수정
 - PR #25: 하드코딩 localhost 수정 (ResultViewer, SceneCard)
 - PR #24: 시나리오 자동 연결 (트렌드 → /scenario)
 - PR #23: 트렌드 분석 (YouTube Data API v3 + GPT)
 - PR #11 이전: 사이드바 IA, 채널 Supabase, 한글 URL 인코딩 등
+
+### 영상 파이프라인 동작 현황
+- Kling v3 + Character ID 정상 동작 확인됨
+- ffmpeg concat: -c copy(스트림 복사)로 Railway OOM(SIGKILL) 해결됨
+
+### 알려진 이슈
+- 🔴 Supabase Storage 413 (파일 크기 초과) → Cloudflare R2로 교체 예정
+
+### 다음 작업: Cloudflare R2 연동 (Supabase 413 대체)
+- R2 버킷 생성 + 7일 자동 삭제 Lifecycle 설정
+- supabase_storage.py → r2_storage.py 교체
+- Railway Variables에 R2 키 추가 필요
 
 ### 백엔드 블로커 #5 현황
 - Railway 배포 완료, URL 노출됨, Vercel 연결됨
