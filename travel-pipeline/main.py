@@ -245,10 +245,19 @@ def generate_video_from_storyboard(
             _report(100, "영상 업로드 중...")
             video_url = supabase_storage.upload_video(str(final_video), out_dir.name)
             result["video_url"] = video_url
+            print(f"  [video] Supabase 업로드 완료: {video_url}")
             shutil.rmtree(clips_dir, ignore_errors=True)
             final_video.unlink(missing_ok=True)
         except Exception as e:
+            # 조용히 넘어가지 않는다 — 전체 트레이스백을 남기고 result 에도 사유를 담는다.
+            traceback.print_exc()
+            result["upload_error"] = str(e)
             print(f"  [video] Supabase 업로드 실패 — 로컬 파일 유지: {e}")
+    else:
+        print(
+            "  [video] SUPABASE_URL / SUPABASE_SECRET_KEY 미설정 → Supabase 업로드 건너뜀. "
+            "video_url 없이 로컬 파일만 유지합니다."
+        )
 
     _report(100, "완료")
     return result
