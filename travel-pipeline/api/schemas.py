@@ -42,6 +42,25 @@ class VideoStartRequest(BaseModel):
     character_id: str | None = None
 
 
+class SayeonSplitRequest(BaseModel):
+    script: str  # 국문 사연 대본
+    num_scenes: int | None = None
+    character_anchor: str | None = None
+
+
+class SayeonScene(BaseModel):
+    index: int
+    narration: str   # 국문, TTS 낭독 (S3)
+    subtitle: str    # 국문, 화면 자막 (S4)
+    highlight: str   # subtitle 내 강조 핵심구 (S4)
+    image_prompt: str  # 영문, 배경·상황·동작·감정·구도 (S2)
+    motion: str      # zoom_in | zoom_out | pan_left | pan_right (S4)
+
+
+class SayeonSplitResponse(BaseModel):
+    scenes: list[SayeonScene]
+
+
 class CharacterSpec(BaseModel):
     """사연 캐릭터 명세 (캐릭터 라이브러리 설정 폼과 대응)."""
 

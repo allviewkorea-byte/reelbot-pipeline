@@ -1,5 +1,6 @@
 """사연(이미지 기반) 트랙 라우터.
 
+- POST /sayeon/split             사연 대본 → 씬 리스트(JSON) (PR-S1, 동기)
 - POST /sayeon/character-sheet   캐릭터 시트 생성·R2 저장 (PR-S2a)
 - POST /sayeon/scenes            시트 reference 로 씬 이미지 생성 (PR-S2b)
 
@@ -8,14 +9,36 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from api.jobs import job_manager
-from api.schemas import SayeonJobResponse, SayeonScenesRequest, SayeonSheetRequest
+from api.schemas import (
+    SayeonJobResponse,
+    SayeonScenesRequest,
+    SayeonSheetRequest,
+    SayeonSplitRequest,
+    SayeonSplitResponse,
+)
 from services.sayeon_character import generate_character_sheet
 from services.sayeon_scene import generate_scenes
+from services.sayeon_split import split_script
 
 router = APIRouter()
+
+
+@router.post("/split", response_model=SayeonSplitResponse)
+def split(req: SayeonSplitRequest):
+    """국문 사연 대본을 씬 리스트(JSON)로 분할한다. gpt-4o-mini 1회, 동기 응답."""
+    try:
+        return split_script(
+            req.script,
+            num_scenes=req.num_scenes,
+            character_anchor=req.character_anchor or "",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 def _run_sheet(job_id: str, channel_id: str, character: dict, sheet_model: str | None) -> None:
