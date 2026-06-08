@@ -8,7 +8,7 @@ from .base import (
     VideoGenerationResult,
     VideoModelAdapter,
 )
-from .factory import get_image_adapter, get_video_adapter
+from .factory import get_image_adapter, get_kontext_adapter, get_video_adapter
 
 __all__ = [
     "ImageGenerationRequest",
@@ -18,5 +18,6 @@ __all__ = [
     "VideoGenerationResult",
     "VideoModelAdapter",
     "get_image_adapter",
+    "get_kontext_adapter",
     "get_video_adapter",
 ]
