@@ -3,6 +3,7 @@
 - POST /sayeon/split             사연 대본 → 씬 리스트(JSON) (PR-S1, 동기)
 - POST /sayeon/character-sheet   캐릭터 시트 생성·R2 저장 (PR-S2a)
 - POST /sayeon/scenes            시트 reference 로 씬 이미지 생성 (PR-S2b)
+- POST /sayeon/tts               씬 narration → TTS 음성 + 타이밍 맵 (PR-S3)
 
 진행 상황은 기존 GET /jobs/{job_id}/status 로 폴링한다(공용 job_manager 사용).
 """
@@ -18,10 +19,12 @@ from api.schemas import (
     SayeonSheetRequest,
     SayeonSplitRequest,
     SayeonSplitResponse,
+    SayeonTtsRequest,
 )
 from services.sayeon_character import generate_character_sheet
 from services.sayeon_scene import generate_scenes
 from services.sayeon_split import split_script
+from services.sayeon_tts import generate_tts
 
 router = APIRouter()
 
@@ -113,4 +116,28 @@ def scenes(req: SayeonScenesRequest, background: BackgroundTasks):
         req.num_images,
         req.seed,
     )
+    return SayeonJobResponse(job_id=job.job_id, status=job.status.value)
+
+
+def _run_tts(
+    job_id: str, scenes: list[dict], voice_id: str | None, gap_sec: float
+) -> None:
+    job_manager.start_job(job_id)
+    try:
+        def cb(pct: int, msg: str) -> None:
+            job_manager.update_progress(job_id, pct, msg)
+
+        result = generate_tts(
+            job_id, scenes, voice_id=voice_id, gap_sec=gap_sec, progress_cb=cb
+        )
+        job_manager.complete_job(job_id, result)
+    except Exception as e:  # noqa: BLE001
+        job_manager.fail_job(job_id, str(e))
+
+
+@router.post("/tts", response_model=SayeonJobResponse)
+def tts(req: SayeonTtsRequest, background: BackgroundTasks):
+    """씬 narration 을 라인별 TTS 로 생성하고 합친 오디오 + 씬 타이밍 맵을 만든다."""
+    job = job_manager.create_job("sayeon_tts")
+    background.add_task(_run_tts, job.job_id, req.scenes, req.voice_id, req.gap_sec)
     return SayeonJobResponse(job_id=job.job_id, status=job.status.value)

@@ -122,6 +122,17 @@ def upload_image(
     return f"{base_url}/{object_key}"
 
 
+def upload_audio(file_path: str, job_id: str, filename: str = "narration.wav") -> str:
+    """나레이션 오디오를 R2(기본 videos 버킷)에 업로드하고 공개 URL 반환.
+
+    오브젝트 키: sayeon/audio/{job_id}/{filename}
+    영구 보존이 아니라 S4 합성이 소비하는 중간 산출물이므로 기본 버킷으로 충분하다.
+    """
+    object_key = f"sayeon/audio/{job_id}/{filename}"
+    content_type = "audio/wav" if filename.endswith(".wav") else "audio/mpeg"
+    return upload_image(file_path, object_key, content_type=content_type)
+
+
 def upload_character_sheet(file_path: str, channel_id: str) -> str:
     """캐릭터 시트(채널당 1회, 영구 보존)를 R2에 업로드.
 
