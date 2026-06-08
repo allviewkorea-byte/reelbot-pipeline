@@ -49,7 +49,7 @@ def _make_silence(dst: Path, seconds: float) -> None:
 def _duration(path: Path) -> float:
     out = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-         "-of", "default=nk=1:np=1", str(path)],
+         "-of", "default=nokey=1:noprint_wrappers=1", str(path)],
         check=True, capture_output=True, text=True,
     )
     return float(out.stdout.strip())
