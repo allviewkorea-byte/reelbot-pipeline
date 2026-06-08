@@ -42,6 +42,39 @@ class VideoStartRequest(BaseModel):
     character_id: str | None = None
 
 
+class CharacterSpec(BaseModel):
+    """사연 캐릭터 명세 (캐릭터 라이브러리 설정 폼과 대응)."""
+
+    gender: str = ""
+    age: str = ""
+    face: str = ""
+    hair: str = ""
+    outfit: str = ""
+    accessories: str = ""
+    signature: str = ""
+    extra: str = ""
+
+
+class SayeonSheetRequest(BaseModel):
+    channel_id: str
+    character: CharacterSpec
+    sheet_model: str | None = None
+
+
+class SayeonScenesRequest(BaseModel):
+    channel_id: str = ""
+    sheet_url: str  # PR-S2a 가 만든 캐릭터 시트 공개 URL (reference)
+    anchor: str = ""
+    scenes: list[dict]  # PR-S1 산출물: [{"index", "image_prompt", ...}]
+    num_images: int = 2
+    seed: int = -1
+
+
+class SayeonJobResponse(BaseModel):
+    job_id: str
+    status: str
+
+
 class JobStatusResponse(BaseModel):
     job_id: str
     status: str

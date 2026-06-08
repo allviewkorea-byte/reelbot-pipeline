@@ -28,6 +28,16 @@ def get_image_adapter(model: str = "default") -> ImageModelAdapter:
     return GptImageAdapter()
 
 
+def get_kontext_adapter() -> ImageModelAdapter:
+    """사연 트랙 씬 생성용 FLUX Kontext Pro Multi 어댑터.
+
+    캐릭터 시트(reference)를 받아 동일 인물·웹툰 스타일 씬을 생성한다. 콘티(스케치)
+    경로와 별개의 일관성 엔진이므로 get_image_adapter 와 분리해 노출한다."""
+    from .image.kontext_adapter import KontextImageAdapter
+
+    return KontextImageAdapter()
+
+
 def get_video_adapter(model: str = "default") -> VideoModelAdapter:
     """video_model 값에 따라 영상 어댑터 반환.
     값: 'default' / 'kling-v1' / 'kling-v3'. 키 없으면 fallback."""
