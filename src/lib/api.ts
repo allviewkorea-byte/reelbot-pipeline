@@ -219,6 +219,17 @@ export async function generateSayeon(
   })
 }
 
+// 랜덤 감성 사연 자동 작성 → 대본 칸 채우기용.
+export async function generateSayeonScript(params: {
+  topic?: string
+  character?: SayeonCharacterSpec | null
+}): Promise<{ script: string; title: string; topic: string }> {
+  return request("/api/sayeon/generate-script", {
+    method: "POST",
+    body: JSON.stringify(params),
+  })
+}
+
 // ── 사연 캐릭터 저장·재사용 ───────────────────────────────────────
 
 export interface SayeonCharacter {

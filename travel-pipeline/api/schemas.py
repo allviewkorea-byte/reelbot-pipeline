@@ -85,6 +85,17 @@ class SayeonGenerateRequest(BaseModel):
     thumbnail_scene_index: int | None = None  # 썸네일용 씬(없으면 기본 컷)
 
 
+class SayeonAutoScriptRequest(BaseModel):
+    topic: str | None = None              # 없으면 주제 풀에서 랜덤
+    character: CharacterSpec | None = None  # 화자 설정(gender/age 활용)
+
+
+class SayeonAutoScriptResponse(BaseModel):
+    script: str
+    title: str = ""
+    topic: str = ""
+
+
 class SayeonSheetRequest(BaseModel):
     channel_id: str
     character: CharacterSpec
