@@ -133,6 +133,15 @@ def upload_audio(file_path: str, job_id: str, filename: str = "narration.wav") -
     return upload_image(file_path, object_key, content_type=content_type)
 
 
+def upload_sayeon_video(file_path: str, job_id: str) -> str:
+    """사연 완성 영상을 R2(기본 videos 버킷)에 업로드하고 공개 URL 반환.
+
+    오브젝트 키: sayeon/videos/{job_id}/final.mp4
+    """
+    object_key = f"sayeon/videos/{job_id}/final.mp4"
+    return upload_image(file_path, object_key, content_type="video/mp4")
+
+
 def upload_character_sheet(file_path: str, channel_id: str) -> str:
     """캐릭터 시트(채널당 1회, 영구 보존)를 R2에 업로드.
 
