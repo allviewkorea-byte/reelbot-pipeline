@@ -18,6 +18,7 @@ from pathlib import Path
 import httpx
 
 from adapters import ImageGenerationRequest, get_kontext_adapter, r2_storage
+from services.sayeon_character import SAYEON_IMAGE_STYLE
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ def build_scene_prompt(image_prompt: str, anchor: str = "") -> str:
             "Same face, hair, outfit, and accessories."
         )
     parts.append("9:16 vertical composition. No text, no subtitles, no watermark.")
+    parts.append(f"{SAYEON_IMAGE_STYLE}.")
     return " ".join(p for p in parts if p)
 
 

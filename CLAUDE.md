@@ -48,6 +48,7 @@ AI 기반 숏폼·롱폼 영상 자동 제작 파이프라인.
 |---|---|
 | 프론트엔드 | Next.js (App Router) + Tailwind v4 + shadcn/ui |
 | 이미지 생성 | gpt-image-1 (OpenAI, 1024×1536, quality: high) / Z-Image Turbo (WaveSpeed) |
+| 사연 캐릭터 일관성 | FLUX Kontext Pro Multi (WaveSpeed) — 캐릭터 시트 reference. 그림체는 **반실사 일러스트**(`SAYEON_IMAGE_STYLE`, `services/sayeon_character.py`)로 통일. ⚠️ 풀 포토리얼 금지(일관성 깨짐) |
 | 영상 생성 | Kling via WaveSpeed API |
 | TTS | Edge TTS (현재) / ElevenLabs (예정) |
 | 합성 | ffmpeg (현재) / Remotion (예정) |
