@@ -48,6 +48,7 @@ AI 기반 숏폼·롱폼 영상 자동 제작 파이프라인.
 |---|---|
 | 프론트엔드 | Next.js (App Router) + Tailwind v4 + shadcn/ui |
 | 이미지 생성 | gpt-image-1 (OpenAI, 1024×1536, quality: high) / Z-Image Turbo (WaveSpeed) |
+| 사연 자동 대본 | gpt-4o-mini — 후킹(0~2초)·중반 반전·여운 질문 구조 강제 (`services/sayeon_autoscript.py`) |
 | 영상 생성 | Kling via WaveSpeed API |
 | TTS | Edge TTS (현재) / ElevenLabs (예정) |
 | 합성 | ffmpeg (현재) / Remotion (예정) |
