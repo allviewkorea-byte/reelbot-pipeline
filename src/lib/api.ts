@@ -219,6 +219,47 @@ export async function generateSayeon(
   })
 }
 
+// ── 사연 캐릭터 저장·재사용 ───────────────────────────────────────
+
+export interface SayeonCharacter {
+  id: string
+  name: string
+  spec: SayeonCharacterSpec | null
+  sheet_url: string | null
+  anchor: string | null
+  created_at?: string
+}
+
+export async function listSayeonCharacters(): Promise<SayeonCharacter[]> {
+  const res = await request<{ characters: SayeonCharacter[] }>(
+    "/api/sayeon/characters",
+  )
+  return res.characters ?? []
+}
+
+export async function saveSayeonCharacter(params: {
+  name: string
+  spec: SayeonCharacterSpec
+  sheet_url?: string | null
+  anchor?: string | null
+}): Promise<{ success: boolean; character?: SayeonCharacter; error?: string }> {
+  return request("/api/sayeon/characters", {
+    method: "POST",
+    body: JSON.stringify(params),
+  })
+}
+
+export async function updateSayeonCharacterSheet(
+  id: string,
+  sheet_url: string,
+  anchor: string,
+): Promise<{ success: boolean }> {
+  return request(`/api/sayeon/characters/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ sheet_url, anchor }),
+  })
+}
+
 // ── 폴링 헬퍼 ─────────────────────────────────────────────────────
 // jobId 상태를 intervalMs 마다 조회. completed/failed 시 자동 중단.
 // 반환값을 호출하면 폴링을 강제 중단(cleanup)한다.
