@@ -12,6 +12,7 @@ import {
   generateSayeonScript,
   pollJobStatus,
   listSayeonCharacters,
+  getDefaultSayeonCharacter,
   saveSayeonCharacter,
   updateSayeonCharacterSheet,
   ApiError,
@@ -33,6 +34,26 @@ const MODE_DESC: Record<Mode, string> = {
   auto: "버튼 한 번 — 사연 자동 작성 + 영상 제작까지 한 번에.",
   semi: "사연을 자동 작성해 채워주면, 검토·수정 후 직접 제작합니다.",
   manual: "사연을 직접 입력·수정한 뒤 제작합니다.",
+}
+
+// 자동/반자동에서 캐릭터 미선택 시 쓰는 클라 폴백 스펙(서버 default 와 동일, 고정값).
+// 서버/DB 가 없어도 자동 모드가 멈추지 않게 한다. 랜덤 아님 — 일관성 유지.
+const FALLBACK_SPEC: SayeonCharacterSpec = {
+  gender: "woman",
+  age: "early 20s",
+  hair: "long straight dark brown hair",
+  face: "warm soft features, expressive eyes",
+  outfit: "cozy cream knit sweater",
+  accessories: "simple small stud earrings",
+  signature: "warm relatable everyday girl",
+}
+
+// 자동 확보된 캐릭터(드롭다운 미선택 시 runGenerate 에 넘기는 오버라이드).
+type CharSel = {
+  id?: string
+  spec: SayeonCharacterSpec
+  sheet_url: string
+  anchor: string
 }
 
 // CharacterSpec 필드 (백엔드 schemas.py 와 동일) + 한글 라벨/플레이스홀더
@@ -170,81 +191,138 @@ export default function SayeonPage() {
     setSubmitting(false)
   }, [])
 
-  // scriptOverride: 자동 모드에서 방금 생성한 사연을 즉시 넘길 때 사용
-  // (setScript 는 비동기라 state 를 기다리지 않고 직접 전달).
-  const runGenerate = useCallback(async (scriptOverride?: string) => {
-    setError(null)
-    const effScript = (scriptOverride ?? script).trim()
-    if (!effScript) {
-      setError("사연 대본을 입력해주세요.")
-      return
-    }
-    const params: SayeonGenerateParams = {
-      script: effScript,
-      gap_sec: Number(gapSec) || 0.4,
-    }
-    if (charMode === "existing") {
-      if (!sheetUrl.trim() || !anchor.trim()) {
-        setError("기존 시트 재사용에는 시트 URL 과 앵커가 모두 필요합니다.")
-        return
-      }
-      params.sheet_url = sheetUrl.trim()
-      params.anchor = anchor.trim()
-    } else {
-      const filled = Object.values(spec).some((v) => v && v.trim())
-      if (!filled) {
-        setError("새 캐릭터는 최소 한 개 이상의 특징을 입력해주세요.")
-        return
-      }
-      params.character_spec = spec
-    }
-    if (voiceId.trim()) params.voice_id = voiceId.trim()
-    if (numScenes.trim()) params.num_scenes = Number(numScenes)
-    if (thumbIndex.trim()) params.thumbnail_scene_index = Number(thumbIndex)
+  // 자동/반자동: 캐릭터 미선택·미입력이면 기본 캐릭터를 확보(없으면 시드)해 반환.
+  // 선택/입력된 캐릭터가 있으면 null(= runGenerate 가 state 사용). 일관성 위해 랜덤 생성 안 함.
+  const ensureCharacter = useCallback(async (): Promise<CharSel | null> => {
+    if (selectedCharId) return null
+    const hasSpec = Object.values(spec).some((v) => v && v.trim())
+    if (hasSpec || (sheetUrl.trim() && anchor.trim())) return null
 
-    setSubmitting(true)
-    setJobStatus(null)
-    try {
-      const { job_id } = await generateSayeon(params)
-      stopRef.current = pollJobStatus(
-        job_id,
-        (s) => {
-          setJobStatus(s)
-          if (s.status === "completed" || s.status === "failed") {
-            setSubmitting(false)
-          }
-          // 생성된 시트(URL+앵커)를 선택했던 캐릭터에 자동 저장 → 다음부터 재사용.
-          if (s.status === "completed") {
-            const r = s.result as SayeonResult | null
-            const c = savedChars.find((x) => x.id === selectedCharId)
-            if (r?.sheet_url && r?.anchor && c && !c.sheet_url) {
-              updateSayeonCharacterSheet(c.id, r.sheet_url, r.anchor)
-                .then(() => {
-                  loadChars()
-                  toast.success("생성된 시트를 캐릭터에 저장했어요. 다음부터 재사용됩니다.")
-                })
-                .catch(() => {})
+    const def = await getDefaultSayeonCharacter()
+    const sel: CharSel = def
+      ? {
+          id: def.id,
+          spec: def.spec ?? FALLBACK_SPEC,
+          sheet_url: def.sheet_url ?? "",
+          anchor: def.anchor ?? "",
+        }
+      : { spec: FALLBACK_SPEC, sheet_url: "", anchor: "" }
+    // 화면에도 반영(사용자가 확인 가능)
+    setSpec(sel.spec)
+    setSheetUrl(sel.sheet_url)
+    setAnchor(sel.anchor)
+    setCharMode(sel.sheet_url && sel.anchor ? "existing" : "new")
+    if (def) {
+      setSelectedCharId(def.id)
+      setSaveName(def.name)
+      loadChars()
+    }
+    return sel
+  }, [selectedCharId, spec, sheetUrl, anchor, loadChars])
+
+  // scriptOverride/charOverride: 자동 모드에서 방금 만든 사연·확보한 캐릭터를
+  // state 갱신을 기다리지 않고 즉시 넘길 때 사용.
+  const runGenerate = useCallback(
+    async (scriptOverride?: string, charOverride?: CharSel) => {
+      setError(null)
+      const effScript = (scriptOverride ?? script).trim()
+      if (!effScript) {
+        setError("사연 대본을 입력해주세요.")
+        return
+      }
+      const params: SayeonGenerateParams = {
+        script: effScript,
+        gap_sec: Number(gapSec) || 0.4,
+      }
+      if (charOverride) {
+        // 자동 확보된 캐릭터: 시트 있으면 재사용, 없으면 스펙으로 생성.
+        if (charOverride.sheet_url && charOverride.anchor) {
+          params.sheet_url = charOverride.sheet_url
+          params.anchor = charOverride.anchor
+        } else {
+          params.character_spec = charOverride.spec
+        }
+      } else if (charMode === "existing") {
+        if (!sheetUrl.trim() || !anchor.trim()) {
+          setError("기존 시트 재사용에는 시트 URL 과 앵커가 모두 필요합니다.")
+          return
+        }
+        params.sheet_url = sheetUrl.trim()
+        params.anchor = anchor.trim()
+      } else {
+        const filled = Object.values(spec).some((v) => v && v.trim())
+        if (!filled) {
+          setError("새 캐릭터는 최소 한 개 이상의 특징을 입력해주세요.")
+          return
+        }
+        params.character_spec = spec
+      }
+      if (voiceId.trim()) params.voice_id = voiceId.trim()
+      if (numScenes.trim()) params.num_scenes = Number(numScenes)
+      if (thumbIndex.trim()) params.thumbnail_scene_index = Number(thumbIndex)
+
+      setSubmitting(true)
+      setJobStatus(null)
+      try {
+        const { job_id } = await generateSayeon(params)
+        stopRef.current = pollJobStatus(
+          job_id,
+          (s) => {
+            setJobStatus(s)
+            if (s.status === "completed" || s.status === "failed") {
+              setSubmitting(false)
             }
-          }
-        },
-        2500,
-        (err) => setError(err.message),
-      )
-    } catch (err) {
-      setSubmitting(false)
-      setError(err instanceof ApiError ? err.message : "요청에 실패했습니다.")
-    }
-  }, [script, charMode, spec, sheetUrl, anchor, voiceId, numScenes, thumbIndex, gapSec, selectedCharId, savedChars, loadChars])
+            // 생성된 시트(URL+앵커)를 사용한 캐릭터에 저장 → 다음부터 동일 인물 재사용.
+            if (s.status === "completed") {
+              const r = s.result as SayeonResult | null
+              if (!r?.sheet_url || !r?.anchor) return
+              // (a) 자동 확보 캐릭터: 시트 없던 경우 저장 + 세션 상태도 갱신
+              if (charOverride?.id && !charOverride.sheet_url) {
+                updateSayeonCharacterSheet(charOverride.id, r.sheet_url, r.anchor)
+                  .then(() => loadChars())
+                  .catch(() => {})
+                setSheetUrl(r.sheet_url)
+                setAnchor(r.anchor)
+                setCharMode("existing")
+              } else if (!charOverride) {
+                // (b) 드롭다운 선택 캐릭터: 시트 없던 경우 저장
+                const c = savedChars.find((x) => x.id === selectedCharId)
+                if (c && !c.sheet_url) {
+                  updateSayeonCharacterSheet(c.id, r.sheet_url, r.anchor)
+                    .then(() => {
+                      loadChars()
+                      toast.success("생성된 시트를 캐릭터에 저장했어요. 다음부터 재사용됩니다.")
+                    })
+                    .catch(() => {})
+                  setSheetUrl(r.sheet_url)
+                  setAnchor(r.anchor)
+                  setCharMode("existing")
+                }
+              }
+            }
+          },
+          2500,
+          (err) => setError(err.message),
+        )
+      } catch (err) {
+        setSubmitting(false)
+        setError(err instanceof ApiError ? err.message : "요청에 실패했습니다.")
+      }
+    },
+    [script, charMode, spec, sheetUrl, anchor, voiceId, numScenes, thumbIndex, gapSec, selectedCharId, savedChars, loadChars],
+  )
 
-  // 자동 모드: 사연 자동 작성 → 곧바로 영상 생성까지 한 번에.
+  // 자동 모드: 캐릭터 확보 → 사연 자동 작성 → 곧바로 영상 생성까지 한 번에.
   const handleAutoRun = useCallback(async () => {
     setError(null)
     setAutoLoading(true)
     let generated = ""
+    let co: CharSel | null = null
     try {
-      const res = await generateSayeonScript({
-        character: { gender: spec.gender, age: spec.age },
-      })
+      co = await ensureCharacter()
+      const g = co ? co.spec.gender : spec.gender
+      const a = co ? co.spec.age : spec.age
+      const res = await generateSayeonScript({ character: { gender: g, age: a } })
       generated = res.script
       setScript(generated)
       if (res.title) toast.success(`사연: ${res.title}`)
@@ -256,8 +334,14 @@ export default function SayeonPage() {
       return
     }
     setAutoLoading(false)
-    await runGenerate(generated)
-  }, [spec.gender, spec.age, runGenerate])
+    await runGenerate(generated, co ?? undefined)
+  }, [ensureCharacter, spec.gender, spec.age, runGenerate])
+
+  // 반자동: "사연 영상 생성" 시 캐릭터 미선택이면 기본 캐릭터로 자동 확보 후 진행.
+  const handleSemiGenerate = useCallback(async () => {
+    const co = await ensureCharacter()
+    await runGenerate(undefined, co ?? undefined)
+  }, [ensureCharacter, runGenerate])
 
   const completed = jobStatus?.status === "completed"
   const failed = jobStatus?.status === "failed"
@@ -505,7 +589,7 @@ export default function SayeonPage() {
             )}
             {mode !== "auto" && (
               <Button
-                onClick={() => runGenerate()}
+                onClick={mode === "semi" ? handleSemiGenerate : () => runGenerate()}
                 disabled={submitting}
                 className="gap-2"
               >

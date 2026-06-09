@@ -248,6 +248,18 @@ export async function listSayeonCharacters(): Promise<SayeonCharacter[]> {
   return res.characters ?? []
 }
 
+// 기본 캐릭터 조회(없으면 서버가 고정 스펙으로 시드). 실패 시 null.
+export async function getDefaultSayeonCharacter(): Promise<SayeonCharacter | null> {
+  try {
+    const res = await request<{ success: boolean; character?: SayeonCharacter }>(
+      "/api/sayeon/characters/default",
+    )
+    return res.character ?? null
+  } catch {
+    return null
+  }
+}
+
 export async function saveSayeonCharacter(params: {
   name: string
   spec: SayeonCharacterSpec
