@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { ChevronDown, ChevronUp, Clapperboard, Sparkles, AlertCircle } from "lucide-react"
+import { ChevronDown, ChevronUp, Clapperboard, Sparkles, AlertCircle, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
@@ -9,6 +9,7 @@ import { ProgressTracker } from "@/components/video/ProgressTracker"
 import { toast } from "sonner"
 import {
   generateSayeon,
+  generateSayeonScript,
   pollJobStatus,
   listSayeonCharacters,
   saveSayeonCharacter,
@@ -81,6 +82,7 @@ export default function SayeonPage() {
   const [selectedCharId, setSelectedCharId] = useState("")
   const [saveName, setSaveName] = useState("")
   const [saving, setSaving] = useState(false)
+  const [autoLoading, setAutoLoading] = useState(false)
 
   // 언마운트 시 폴링 정리
   useEffect(() => () => stopRef.current?.(), [])
@@ -106,6 +108,24 @@ export default function SayeonPage() {
     },
     [savedChars],
   )
+
+  const handleAutoScript = useCallback(async () => {
+    setAutoLoading(true)
+    try {
+      // 현재 캐릭터의 gender/age 를 화자 설정으로 함께 전송.
+      const res = await generateSayeonScript({
+        character: { gender: spec.gender, age: spec.age },
+      })
+      setScript(res.script)
+      if (res.title) toast.success(`사연 생성 완료: ${res.title}`)
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "사연 자동 생성에 실패했어요.",
+      )
+    } finally {
+      setAutoLoading(false)
+    }
+  }, [spec.gender, spec.age])
 
   const handleSaveChar = useCallback(async () => {
     if (!saveName.trim()) {
@@ -241,14 +261,30 @@ export default function SayeonPage() {
         <div className="flex max-w-3xl flex-col gap-6">
           {/* 사연 대본 */}
           <div className={CARD}>
-            <Field label="사연 대본 (필수)">
-              <textarea
-                className={`${FIELD} min-h-40 resize-y`}
-                placeholder="1인칭 감성 사연을 입력하세요. (예: 스무 살 때, 엄마의 낡은 코트가 부끄러웠어요...)"
-                value={script}
-                onChange={(e) => setScript(e.target.value)}
-              />
-            </Field>
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-xs font-medium text-muted-foreground">
+                사연 대본 (필수)
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleAutoScript}
+                disabled={autoLoading}
+              >
+                {autoLoading ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  "🎲"
+                )}
+                사연 자동 생성
+              </Button>
+            </div>
+            <textarea
+              className={`${FIELD} min-h-40 resize-y`}
+              placeholder="1인칭 감성 사연을 입력하세요. (예: 스무 살 때, 엄마의 낡은 코트가 부끄러웠어요...) — 또는 '사연 자동 생성'을 눌러보세요."
+              value={script}
+              onChange={(e) => setScript(e.target.value)}
+            />
           </div>
 
           {/* 캐릭터 */}

@@ -1,5 +1,6 @@
 """사연(이미지 기반) 트랙 라우터.
 
+- POST /sayeon/generate-script   랜덤 감성 사연 자동 작성 (동기)
 - POST /sayeon/split             사연 대본 → 씬 리스트(JSON) (PR-S1, 동기)
 - POST /sayeon/character-sheet   캐릭터 시트 생성·R2 저장 (PR-S2a)
 - POST /sayeon/scenes            시트 reference 로 씬 이미지 생성 (PR-S2b)
@@ -18,6 +19,8 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from api.jobs import job_manager
 from api.schemas import (
     SayeonAssembleRequest,
+    SayeonAutoScriptRequest,
+    SayeonAutoScriptResponse,
     SayeonGenerateRequest,
     SayeonJobResponse,
     SayeonScenesRequest,
@@ -29,6 +32,7 @@ from api.schemas import (
     SayeonTtsRequest,
 )
 from services.sayeon_assemble import generate_assemble
+from services.sayeon_autoscript import generate_script as generate_auto_script
 from services.sayeon_character import generate_character_sheet
 from services.sayeon_orchestrate import generate_full
 from services.sayeon_scene import generate_scenes
@@ -37,6 +41,20 @@ from services.sayeon_thumbnail import generate_thumbnail
 from services.sayeon_tts import generate_tts
 
 router = APIRouter()
+
+
+@router.post("/generate-script", response_model=SayeonAutoScriptResponse)
+def generate_script(req: SayeonAutoScriptRequest):
+    """랜덤(또는 지정) 주제로 1인칭 감성 사연을 자동 작성한다. gpt-4o-mini, 동기."""
+    try:
+        return generate_auto_script(
+            topic=req.topic or "",
+            character=req.character.model_dump() if req.character else None,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/split", response_model=SayeonSplitResponse)
