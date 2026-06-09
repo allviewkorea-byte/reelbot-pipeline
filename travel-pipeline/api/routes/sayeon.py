@@ -6,6 +6,7 @@
 - POST /sayeon/tts               씬 narration → TTS 음성 + 타이밍 맵 (PR-S3)
 - POST /sayeon/assemble          씬+타이밍+자막+음성 → 완성 mp4 (PR-S4)
 - POST /sayeon/thumbnail         씬 이미지 + 후킹 → 썸네일 PNG (PR-S5, 동기)
+- POST /sayeon/generate          사연 글 → 완성 영상 + 썸네일 (end-to-end, 백그라운드)
 
 진행 상황은 기존 GET /jobs/{job_id}/status 로 폴링한다(공용 job_manager 사용).
 """
@@ -17,6 +18,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from api.jobs import job_manager
 from api.schemas import (
     SayeonAssembleRequest,
+    SayeonGenerateRequest,
     SayeonJobResponse,
     SayeonScenesRequest,
     SayeonSheetRequest,
@@ -28,6 +30,7 @@ from api.schemas import (
 )
 from services.sayeon_assemble import generate_assemble
 from services.sayeon_character import generate_character_sheet
+from services.sayeon_orchestrate import generate_full
 from services.sayeon_scene import generate_scenes
 from services.sayeon_split import split_script
 from services.sayeon_thumbnail import generate_thumbnail
@@ -189,4 +192,35 @@ def assemble(req: SayeonAssembleRequest, background: BackgroundTasks):
     background.add_task(
         _run_assemble, job.job_id, req.scenes, req.scene_timings, req.audio_url
     )
+    return SayeonJobResponse(job_id=job.job_id, status=job.status.value)
+
+
+def _run_generate(job_id: str, req: SayeonGenerateRequest) -> None:
+    job_manager.start_job(job_id)
+    try:
+        def cb(pct: int, msg: str) -> None:
+            job_manager.update_progress(job_id, pct, msg)
+
+        result = generate_full(
+            job_id,
+            req.script,
+            character_spec=req.character_spec.model_dump() if req.character_spec else None,
+            sheet_url=req.sheet_url or "",
+            anchor=req.anchor or "",
+            voice_id=req.voice_id,
+            num_scenes=req.num_scenes,
+            gap_sec=req.gap_sec,
+            thumbnail_scene_index=req.thumbnail_scene_index,
+            progress_cb=cb,
+        )
+        job_manager.complete_job(job_id, result)
+    except Exception as e:  # noqa: BLE001
+        job_manager.fail_job(job_id, str(e))
+
+
+@router.post("/generate", response_model=SayeonJobResponse)
+def generate(req: SayeonGenerateRequest, background: BackgroundTasks):
+    """사연 글 → 완성 영상 + 썸네일. 6개 서비스를 순서대로 체인하는 end-to-end job."""
+    job = job_manager.create_job("sayeon_generate")
+    background.add_task(_run_generate, job.job_id, req)
     return SayeonJobResponse(job_id=job.job_id, status=job.status.value)
