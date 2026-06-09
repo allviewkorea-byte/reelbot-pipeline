@@ -310,27 +310,28 @@ function ResultView({
   const scenes = result.scenes ?? []
   return (
     <div className="flex flex-col gap-6">
-      <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
-        <div className={CARD}>
+      {/* 영상·썸네일을 폰 프레임처럼 폭 제한 + 높이 캡(데스크톱 한눈에) */}
+      <div className="flex flex-col items-center gap-6 lg:flex-row lg:items-start lg:justify-center">
+        <div className={`${CARD} w-full max-w-[360px]`}>
           <p className="mb-3 text-sm font-semibold text-foreground">완성 영상</p>
           {result.video_url ? (
             <video
               controls
-              className="w-full rounded-lg bg-black"
+              className="mx-auto aspect-[9/16] max-h-[70vh] w-full rounded-lg bg-black object-contain"
               src={result.video_url}
             />
           ) : (
             <p className="text-sm text-muted-foreground">영상 URL 없음</p>
           )}
         </div>
-        <div className={CARD}>
+        <div className={`${CARD} w-full max-w-[320px]`}>
           <p className="mb-3 text-sm font-semibold text-foreground">썸네일</p>
           {result.thumbnail_url ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={result.thumbnail_url}
               alt="썸네일"
-              className="w-full rounded-lg"
+              className="mx-auto aspect-[9/16] max-h-[70vh] w-full rounded-lg object-cover"
             />
           ) : (
             <p className="text-sm text-muted-foreground">썸네일 URL 없음</p>
@@ -343,28 +344,28 @@ function ResultView({
           <p className="mb-3 text-sm font-semibold text-foreground">
             씬 {scenes.length}개
           </p>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
             {scenes.map((s) => (
-              <div
-                key={s.index}
-                className="flex flex-col gap-2 rounded-lg border border-border bg-background p-3"
-              >
-                <div className="flex items-center gap-2">
-                  <Badge variant="secondary">#{s.index}</Badge>
-                  {s.motion && (
-                    <span className="text-xs text-muted-foreground">{s.motion}</span>
+              <div key={s.index} className="flex flex-col gap-1.5">
+                <div className="relative overflow-hidden rounded-md border border-border bg-background">
+                  {s.image_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={s.image_url}
+                      alt={`씬 ${s.index}`}
+                      className="aspect-[9/16] w-full object-cover"
+                    />
+                  ) : (
+                    <div className="aspect-[9/16] w-full bg-secondary" />
                   )}
+                  <span className="absolute left-1.5 top-1.5">
+                    <Badge variant="secondary">#{s.index}</Badge>
+                  </span>
                 </div>
-                {s.image_url && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={s.image_url}
-                    alt={`씬 ${s.index}`}
-                    className="aspect-[9/16] w-full rounded-md object-cover"
-                  />
-                )}
                 {s.subtitle && (
-                  <p className="text-xs text-foreground">{s.subtitle}</p>
+                  <p className="line-clamp-2 text-[11px] text-muted-foreground">
+                    {s.subtitle}
+                  </p>
                 )}
               </div>
             ))}
