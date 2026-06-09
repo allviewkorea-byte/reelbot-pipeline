@@ -35,6 +35,12 @@ def build_scene_prompt(image_prompt: str, anchor: str = "") -> str:
             f"Keep the exact same identity: {anchor.strip()}. "
             "Same face, hair, outfit, and accessories."
         )
+    # 와이드·풀·OTS 샷에서도 시트 참조로 동일 인물 유지(연출 다양성과 일관성의 균형).
+    parts.append(
+        "Even in wide, full-body, or over-the-shoulder shots, strictly keep the same "
+        "face, hairstyle, outfit, and accessories as the reference character sheet "
+        "(same person). Vary framing, pose, and background freely, but not the identity."
+    )
     parts.append("9:16 vertical composition. No text, no subtitles, no watermark.")
     parts.append(f"{SAYEON_IMAGE_STYLE}.")
     return " ".join(p for p in parts if p)
