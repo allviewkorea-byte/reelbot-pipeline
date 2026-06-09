@@ -11,6 +11,9 @@ import {
 
 export const CHARACTER_BUCKET = "character-seeds"
 export const CHARACTER_TABLE = "characters"
+// 사연 트랙 전용 캐릭터(CharacterSpec + 시트 URL/앵커). 기존 travel 캐릭터
+// (config/images, front/side/back)와 스키마가 달라 별도 테이블로 둔다.
+export const SAYEON_CHARACTER_TABLE = "sayeon_characters"
 export const CHANNELS_TABLE = "channels"
 
 let cached: SupabaseClient | null = null

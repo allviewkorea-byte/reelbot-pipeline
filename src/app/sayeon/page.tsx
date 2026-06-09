@@ -6,11 +6,16 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { ProgressTracker } from "@/components/video/ProgressTracker"
+import { toast } from "sonner"
 import {
   generateSayeon,
   pollJobStatus,
+  listSayeonCharacters,
+  saveSayeonCharacter,
+  updateSayeonCharacterSheet,
   ApiError,
   type JobStatus,
+  type SayeonCharacter,
   type SayeonCharacterSpec,
   type SayeonGenerateParams,
   type SayeonResult,
@@ -71,8 +76,63 @@ export default function SayeonPage() {
   const [error, setError] = useState<string | null>(null)
   const stopRef = useRef<(() => void) | null>(null)
 
+  // 저장된 사연 캐릭터
+  const [savedChars, setSavedChars] = useState<SayeonCharacter[]>([])
+  const [selectedCharId, setSelectedCharId] = useState("")
+  const [saveName, setSaveName] = useState("")
+  const [saving, setSaving] = useState(false)
+
   // 언마운트 시 폴링 정리
   useEffect(() => () => stopRef.current?.(), [])
+
+  const loadChars = useCallback(() => {
+    listSayeonCharacters()
+      .then(setSavedChars)
+      .catch(() => setSavedChars([]))
+  }, [])
+  useEffect(() => loadChars(), [loadChars])
+
+  // 저장된 캐릭터 선택 → 폼 자동 채움. 시트(URL+앵커) 있으면 재사용 경로로.
+  const onSelectChar = useCallback(
+    (id: string) => {
+      setSelectedCharId(id)
+      const c = savedChars.find((x) => x.id === id)
+      if (!c) return
+      setSpec(c.spec ?? {})
+      setSheetUrl(c.sheet_url ?? "")
+      setAnchor(c.anchor ?? "")
+      setSaveName(c.name)
+      setCharMode(c.sheet_url && c.anchor ? "existing" : "new")
+    },
+    [savedChars],
+  )
+
+  const handleSaveChar = useCallback(async () => {
+    if (!saveName.trim()) {
+      toast.error("저장할 캐릭터 이름을 입력해주세요.")
+      return
+    }
+    setSaving(true)
+    try {
+      const res = await saveSayeonCharacter({
+        name: saveName.trim(),
+        spec,
+        sheet_url: sheetUrl.trim() || null,
+        anchor: anchor.trim() || null,
+      })
+      if (res.success && res.character) {
+        toast.success("캐릭터를 저장했어요.")
+        setSavedChars((prev) => [res.character as SayeonCharacter, ...prev])
+        setSelectedCharId(res.character.id)
+      } else {
+        toast.error(res.error ?? "저장에 실패했어요.")
+      }
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "저장에 실패했어요.")
+    } finally {
+      setSaving(false)
+    }
+  }, [saveName, spec, sheetUrl, anchor])
 
   const reset = useCallback(() => {
     stopRef.current?.()
@@ -122,6 +182,19 @@ export default function SayeonPage() {
           if (s.status === "completed" || s.status === "failed") {
             setSubmitting(false)
           }
+          // 생성된 시트(URL+앵커)를 선택했던 캐릭터에 자동 저장 → 다음부터 재사용.
+          if (s.status === "completed") {
+            const r = s.result as SayeonResult | null
+            const c = savedChars.find((x) => x.id === selectedCharId)
+            if (r?.sheet_url && r?.anchor && c && !c.sheet_url) {
+              updateSayeonCharacterSheet(c.id, r.sheet_url, r.anchor)
+                .then(() => {
+                  loadChars()
+                  toast.success("생성된 시트를 캐릭터에 저장했어요. 다음부터 재사용됩니다.")
+                })
+                .catch(() => {})
+            }
+          }
         },
         2500,
         (err) => setError(err.message),
@@ -130,7 +203,7 @@ export default function SayeonPage() {
       setSubmitting(false)
       setError(err instanceof ApiError ? err.message : "요청에 실패했습니다.")
     }
-  }, [script, charMode, spec, sheetUrl, anchor, voiceId, numScenes, thumbIndex, gapSec])
+  }, [script, charMode, spec, sheetUrl, anchor, voiceId, numScenes, thumbIndex, gapSec, selectedCharId, savedChars, loadChars])
 
   const completed = jobStatus?.status === "completed"
   const failed = jobStatus?.status === "failed"
@@ -181,6 +254,35 @@ export default function SayeonPage() {
           {/* 캐릭터 */}
           <div className={CARD}>
             <p className="mb-3 text-sm font-semibold text-foreground">캐릭터</p>
+
+            {/* 저장된 캐릭터 선택 + 현재 캐릭터 저장 */}
+            <div className="mb-4 flex flex-wrap items-end gap-3">
+              <Field label="저장된 캐릭터">
+                <select
+                  className={`${FIELD} min-w-[180px]`}
+                  value={selectedCharId}
+                  onChange={(e) => onSelectChar(e.target.value)}
+                >
+                  <option value="">— 직접 입력 —</option>
+                  {savedChars.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                      {c.sheet_url ? " · 시트✓" : ""}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <input
+                className={`${FIELD} max-w-[200px]`}
+                placeholder="저장할 이름"
+                value={saveName}
+                onChange={(e) => setSaveName(e.target.value)}
+              />
+              <Button variant="outline" onClick={handleSaveChar} disabled={saving}>
+                현재 캐릭터 저장
+              </Button>
+            </div>
+
             <Tabs value={charMode} onValueChange={(v) => setCharMode(v as CharMode)}>
               <TabsList className="grid w-full max-w-md grid-cols-2">
                 <TabsTrigger value="new">새 캐릭터</TabsTrigger>
