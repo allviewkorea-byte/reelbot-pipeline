@@ -94,8 +94,8 @@ def main() -> None:
         print(f"  {'✓' if cond else '✗'} 씬 개수 {n} (요청 {args.num_scenes})")
         ok &= cond
     else:
-        cond = 6 <= n <= 10
-        print(f"  {'✓' if cond else '✗'} 씬 개수 {n} (6~10)")
+        cond = 8 <= n <= 16
+        print(f"  {'✓' if cond else '✗'} 씬 개수 {n} (8~16)")
         ok &= cond
 
     for s in scenes:

@@ -116,9 +116,9 @@ def _ken_burns_clip(image: Path, motion: str, frames: int, out: Path, cwd: Path)
 def _xfade_chain(clips: list[Path], clip_durs: list[float], out: Path, cwd: Path) -> None:
     """클립들을 0.6s 크로스페이드로 이어붙인다(재인코딩). 클립 1개면 그대로 복사.
 
-    Railway 메모리 절감을 위해 8개를 한 그래프에 동시에 넣지 않고 '순차 2개씩' 합친다:
-    누적본(acc) + 다음 클립을 ffmpeg 1회로 xfade → 중간 파일, 마지막까지 반복.
-    각 단계 입력이 2개뿐이라 피크 메모리가 크게 줄어든다.
+    Railway 메모리 절감을 위해 클립 N개(씬 길이에 따라 가변)를 한 그래프에 동시에
+    넣지 않고 '순차 2개씩' 합친다: 누적본(acc) + 다음 클립을 ffmpeg 1회로 xfade →
+    중간 파일, 마지막까지 반복. 각 단계 입력이 2개뿐이라 피크 메모리가 크게 줄어든다.
 
     누적 길이/전환 오프셋은 '한 그래프' 방식과 동일하게 계산하므로(offset = 누적길이 -
     XFADE, 누적길이 += 다음.dur - XFADE) 최종 길이·크로스페이드 위치는 기존과 동일하다.

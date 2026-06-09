@@ -32,7 +32,10 @@ def _build_system_prompt(num_scenes: int | None, character_anchor: str) -> str:
     count_rule = (
         f"대본을 정확히 {num_scenes}개 씬으로 나눈다."
         if num_scenes
-        else "대본을 자연스러운 감정 비트 단위로 6~10개 씬으로 나눈다."
+        else (
+            "대본을 자연스러운 호흡/문장 단위로 나눈다 — 한 줄(한 호흡)이 한 씬이다. "
+            "대본 길이에 맞춰 씬 수를 정하되 보통 8~16개(짧으면 적게, 길면 많게)."
+        )
     )
     anchor_note = ""
     if character_anchor and character_anchor.strip():
@@ -124,7 +127,7 @@ def split_script(
 
     client = OpenAI(api_key=api_key)
     system = _build_system_prompt(num_scenes, character_anchor)
-    count_hint = str(num_scenes) if num_scenes else "6~10"
+    count_hint = str(num_scenes) if num_scenes else "8~16"
     user = (
         f"[사연 대본]\n{script.strip()}\n\n"
         f"위 대본을 {count_hint}개 씬으로 분할해 JSON으로 출력하라."
