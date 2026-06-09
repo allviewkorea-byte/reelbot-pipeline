@@ -24,6 +24,17 @@ logger = logging.getLogger(__name__)
 # 시트 생성용 기본 모델(저비용). 채널이 더 좋은 모델을 지정하면 그것을 쓴다.
 DEFAULT_SHEET_MODEL = "wavespeed-ai/z-image/turbo"
 
+# 공통 그림체/품질 서술어. 시트·씬 프롬프트 양쪽 끝에 붙여 인물을 더 리치하게(반실사
+# 일러스트) 만든다. ⚠️ 풀 포토리얼 금지 — FLUX Kontext 일관성이 깨진다. 정체성(성별·
+# 나이·헤어·의상 등) 스펙은 절대 바꾸지 않고, 여기서는 그림체/품질/조명 서술어만 더한다.
+SAYEON_IMAGE_STYLE = (
+    "polished semi-realistic Korean illustration style, soft volumetric lighting, "
+    "detailed facial rendering with subtle skin shading and natural blush, "
+    "expressive eyes with catchlights, fine individual hair strands, "
+    "gentle depth of field, professional webtoon/anime-film finish, high detail, "
+    "clean lines with painterly shading"
+)
+
 
 @dataclass
 class CharacterSpec:
@@ -72,7 +83,8 @@ def build_sheet_prompt(spec: CharacterSpec) -> str:
         "full-body front view, side profile, and a bust shot with a gentle smile. "
         "Identical face, hairstyle, and outfit across all three. "
         "Character turnaround / model sheet layout. "
-        "No text, no labels, no watermark."
+        "No text, no labels, no watermark. "
+        f"{SAYEON_IMAGE_STYLE}."
     )
 
 
