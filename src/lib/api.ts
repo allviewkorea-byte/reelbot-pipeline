@@ -164,6 +164,61 @@ export async function getJobStatus(jobId: string): Promise<JobStatus> {
   return request<JobStatus>(`/api/jobs/${jobId}/status`)
 }
 
+// ── 사연(이미지 기반) 트랙 ────────────────────────────────────────
+// 백엔드 SayeonGenerateRequest / CharacterSpec 와 1:1.
+
+export interface SayeonCharacterSpec {
+  gender?: string
+  age?: string
+  face?: string
+  hair?: string
+  outfit?: string
+  accessories?: string
+  signature?: string
+  extra?: string
+}
+
+export interface SayeonGenerateParams {
+  script: string
+  character_spec?: SayeonCharacterSpec | null
+  sheet_url?: string | null
+  anchor?: string | null
+  voice_id?: string | null
+  num_scenes?: number | null
+  gap_sec?: number
+  thumbnail_scene_index?: number | null
+}
+
+// 완료 시 job.result 의 모양(orchestrate generate_full 반환).
+export interface SayeonScene {
+  index: number
+  narration?: string
+  subtitle?: string
+  highlight?: string
+  image_prompt?: string
+  motion?: string
+  image_url?: string | null
+}
+
+export interface SayeonResult {
+  video_url?: string
+  thumbnail_url?: string
+  audio_url?: string
+  sheet_url?: string
+  anchor?: string
+  scenes?: SayeonScene[]
+  scene_timings?: Record<string, unknown>[]
+}
+
+export async function generateSayeon(
+  params: SayeonGenerateParams,
+): Promise<{ job_id: string; status: string }> {
+  return request<{ job_id: string; status: string }>("/api/sayeon/generate", {
+    method: "POST",
+    body: JSON.stringify(params),
+  })
+}
+
 // ── 폴링 헬퍼 ─────────────────────────────────────────────────────
 // jobId 상태를 intervalMs 마다 조회. completed/failed 시 자동 중단.
 // 반환값을 호출하면 폴링을 강제 중단(cleanup)한다.
