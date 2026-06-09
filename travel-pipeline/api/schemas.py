@@ -80,6 +80,12 @@ class SayeonSheetRequest(BaseModel):
     sheet_model: str | None = None
 
 
+class SayeonTtsRequest(BaseModel):
+    scenes: list[dict]  # [{"index", "narration"}, ...] (S1 출력)
+    voice_id: str | None = None
+    gap_sec: float = 0.4
+
+
 class SayeonScenesRequest(BaseModel):
     channel_id: str = ""
     sheet_url: str  # PR-S2a 가 만든 캐릭터 시트 공개 URL (reference)
