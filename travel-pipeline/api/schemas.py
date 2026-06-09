@@ -74,6 +74,17 @@ class CharacterSpec(BaseModel):
     extra: str = ""
 
 
+class SayeonGenerateRequest(BaseModel):
+    script: str                              # 사연 나레이션
+    character_spec: CharacterSpec | None = None  # 시트 생성용(없고 sheet_url 없으면 에러)
+    sheet_url: str | None = None             # 기존 캐릭터 시트(주면 시트 생성 스킵)
+    anchor: str | None = None                # 기존 시트의 정체성 앵커
+    voice_id: str | None = None              # Supertone(없으면 env 기본/Edge)
+    num_scenes: int | None = None
+    gap_sec: float = 0.4
+    thumbnail_scene_index: int | None = None  # 썸네일용 씬(없으면 기본 컷)
+
+
 class SayeonSheetRequest(BaseModel):
     channel_id: str
     character: CharacterSpec
