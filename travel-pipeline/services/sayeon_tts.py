@@ -136,7 +136,10 @@ def generate_tts(
     for n, (idx, text) in enumerate(narrations, 1):
         if progress_cb:
             progress_cb(int((n - 1) / total * 90), f"라인 {idx} 음성 생성 중...")
-        raw = out_dir / f"line_{idx}.{adapter.audio_format}"
+        # TTS 원본은 항상 별도 경로(.src.<ext>)로 받는다. Supertone 은 출력이 wav 라
+        # 정규화 대상(line_N.wav)과 경로가 겹치면 ffmpeg in==out 으로 거부된다
+        # (Edge 는 mp3→wav 라 경로가 달라 안 겹쳤음).
+        raw = out_dir / f"line_{idx}.src.{adapter.audio_format}"
         adapter.synthesize(text, str(raw))
         wav = out_dir / f"line_{idx}.wav"
         _to_wav(raw, wav)
