@@ -1,7 +1,8 @@
 FROM python:3.11-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg fonts-nanum \
+    && apt-get install -y --no-install-recommends ffmpeg fonts-nanum fonts-noto-cjk fontconfig \
+    && fc-cache -f \
     && rm -rf /var/lib/apt/lists/*
 
 ENV SUBTITLE_FONT_PATH=/usr/share/fonts/truetype/nanum/NanumGothic.ttf
