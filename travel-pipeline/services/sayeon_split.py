@@ -52,6 +52,10 @@ def _build_system_prompt(num_scenes: int | None, character_anchor: str) -> str:
         f"- {count_rule}\n"
         "- 씬 1개 = 나레이션 1줄 = 자막 1개 (1:1 대응).\n"
         "- 대본에 충실히 쪼갠다. 내용을 새로 지어내지 않는다(재창작 금지).\n"
+        "- 연출 다양성: 전체 씬에 걸쳐 establishing wide / full-body / medium / "
+        "over-the-shoulder / close-up 샷을 고르게 섞는다. 전부 얼굴 클로즈업 금지 — "
+        "최소 2~3씬은 인물이 환경 속에 작게 들어간 와이드/풀샷으로 한다. 모든 씬에 "
+        "구체적 장소·배경을 넣고 'plain/empty background' 는 절대 쓰지 않는다.\n"
         "- 사연 톤 보존: 1인칭 감성·반전을 유지하고, 마지막 씬은 후킹 질문/여운으로 끝낸다."
         f"{anchor_note}\n\n"
         "[각 씬 필드]\n"
@@ -61,27 +65,29 @@ def _build_system_prompt(num_scenes: int | None, character_anchor: str) -> str:
         "narration보다 짧아야 한다.\n"
         "- highlight: 국문. subtitle 안에 실제로 들어있는 핵심 단어/구 1개(노란 강조용). "
         "반드시 subtitle의 부분 문자열이어야 한다.\n"
-        "- image_prompt: 영문. 나레이션의 '감정'에 맞춰 한 장면을 시네마틱하게 묘사한다. "
-        "다음 4가지를 반드시 포함한다:\n"
-        "    · 표정/감정 (예: tearful eyes, shocked wide eyes, gentle warm smile, "
-        "downcast look, trembling lips)\n"
-        "    · 동작/포즈 (예: covering face with hands, reaching out, sitting hunched, "
-        "looking away over the shoulder, clutching an old coat)\n"
-        "    · 카메라/샷 — 씬마다 다르게 섞는다 (extreme close-up / close-up / medium shot "
-        "/ wide shot / over-the-shoulder / low angle 등). 매 씬 'centered standing "
-        "portrait' 반복 절대 금지.\n"
-        "    · 분위기/조명 (예: warm morning light, cold blue night, soft indoor lamp, "
-        "backlit silhouette, rain on the window)\n"
+        "- image_prompt: 영문. 나레이션 맥락에 맞는 한 장면을 시네마틱하게 묘사한다. "
+        "다음을 반드시 포함한다:\n"
+        "    · LOCATION/배경: 구체적 장소·환경 (예: rainy back alley, sunset street, "
+        "father's study, cafe by the window, bus stop at dusk) + 배경 디테일·깊이감. "
+        "'plain/empty background' 절대 금지.\n"
+        "    · SHOT TYPE: establishing wide / full-body / medium / over-the-shoulder / "
+        "close-up 중 이 씬에 맞는 것(씬마다 다르게, 전체에서 골고루).\n"
+        "    · ACTION/동작: 능동적 동작 (예: walking down the alley, unfolding a letter, "
+        "looking out the window, turning back to look). 정적 정면 흉상 금지.\n"
+        "    · CAMERA: 앵글·심도(shallow/deep depth of field)·구도 변화.\n"
+        "    · 표정/감정 + 분위기/조명 (예: tearful eyes; warm morning light, cold blue "
+        "night, backlit silhouette, rain on the window).\n"
         "  ⚠️ 인물의 외모·정체성(머리색·머리모양·안경·의상·얼굴 생김새·나이) 은 절대 쓰지 "
-        "말 것 — 그건 캐릭터 시트/앵커가 담당한다. 표정·포즈·카메라·장면·분위기만 적는다. "
+        "말 것 — 그건 캐릭터 시트/앵커가 담당한다. 장소·샷·동작·카메라·분위기만 적는다. "
         "인물은 'the character' 로만 지칭. 9:16 세로 구도.\n"
         "- motion: \"zoom_in\" | \"zoom_out\" | \"pan_left\" | \"pan_right\" 중 하나. "
         "연출에 맞게 다양하게(감정 고조=zoom_in, 공간/반전 드러냄=zoom_out, 이동/시선=pan).\n\n"
         "[출력 형식]\n"
         '{"scenes":[{"index":1,"narration":"...","subtitle":"...","highlight":"...",'
-        '"image_prompt":"medium shot, the character sitting hunched on the floor, '
-        'covering face with both hands, trembling, dim cold blue night light, '
-        'melancholic mood, vertical 9:16","motion":"zoom_in"}]}'
+        '"image_prompt":"wide establishing shot, the character walking alone down a rainy '
+        'back alley at night, neon reflections on wet pavement, seen small within the deep '
+        'cluttered background, shallow depth of field, melancholic cold blue mood, '
+        'vertical 9:16","motion":"zoom_in"}]}'
     )
 
 
