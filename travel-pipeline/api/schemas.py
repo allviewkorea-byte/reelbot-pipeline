@@ -103,6 +103,19 @@ class SayeonAssembleRequest(BaseModel):
     audio_url: str  # S3 나레이션 오디오 URL
 
 
+class SayeonThumbnailRequest(BaseModel):
+    image_url: str               # 썸네일 배경 씬 이미지
+    hook_text: str | None = None  # 2줄 후킹(없으면 script 로 생성)
+    highlight: str | None = None  # hook_text 내 노란 강조구
+    script: str | None = None     # hook_text 없을 때 LLM 후킹 생성용
+
+
+class SayeonThumbnailResponse(BaseModel):
+    thumbnail_url: str
+    hook_text: str
+    highlight: str
+
+
 class SayeonJobResponse(BaseModel):
     job_id: str
     status: str

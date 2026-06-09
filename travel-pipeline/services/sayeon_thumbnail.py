@@ -1,0 +1,160 @@
+"""사연 트랙 — 썸네일 자동 생성 (PR-S5).
+
+씬 이미지 1장 + 후킹 문구 → 썸네일 PNG (큰 글씨 + 노란 강조, 웹툰 소개 채널 스타일).
+부록 §4-(f) 썸네일 레시피 그대로. ffmpeg 단일 프레임 + ASS 오버레이.
+
+후킹 문구는 hook_text 가 주어지면 그대로, 없으면 script 로 gpt-4o-mini 가 생성한다.
+렌더링/다운로드 헬퍼는 S4 합성 엔진(sayeon_assemble)의 것을 재사용한다.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import uuid
+from pathlib import Path
+
+from openai import OpenAI
+
+from adapters import r2_storage
+# S4 합성 엔진의 검증된 헬퍼 재사용(재발명 금지).
+from services.sayeon_assemble import _ass_text, _fetch, _require_ffmpeg, _run
+
+logger = logging.getLogger(__name__)
+
+W, H = 1080, 1920
+_FONT = "Noto Sans CJK KR"
+_OPENAI_MODEL = "gpt-4o-mini"
+
+
+def _strip_code_fence(raw: str) -> str:
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    return raw.strip()
+
+
+def _generate_hook(script: str) -> tuple[str, str]:
+    """사연 대본 → (hook_text 2줄, highlight 핵심구). gpt-4o-mini JSON 모드."""
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY 미설정 — 후킹 문구를 생성할 수 없습니다.")
+    client = OpenAI(api_key=api_key)
+    system = (
+        "너는 한국 '사연' 숏폼 영상의 썸네일 카피라이터다. 사연 대본을 받아 "
+        "호기심을 강하게 자극하는 2줄 후킹 문구와 그중 강조할 핵심구를 만든다.\n"
+        "[규칙]\n"
+        "- 출력은 오직 JSON 객체 하나. 마크다운/설명 금지.\n"
+        "- hook_text: 2줄(줄바꿈은 \\n). 짧고 강한 호기심 유발. 결말 스포일러 금지.\n"
+        "- highlight: hook_text 안에 실제로 들어있는 핵심구(부분문자열).\n"
+        '[출력] {"hook_text":"엄마 옷장에\\n새 옷이 없던 이유",'
+        '"highlight":"새 옷이 없던 이유"}'
+    )
+    user = f"[사연 대본]\n{script.strip()}\n\n위 사연의 썸네일 후킹을 JSON으로 출력하라."
+    resp = client.chat.completions.create(
+        model=_OPENAI_MODEL,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        response_format={"type": "json_object"},
+        temperature=0.7,
+    )
+    content = resp.choices[0].message.content or "{}"
+    try:
+        data = json.loads(_strip_code_fence(content))
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"LLM 후킹 응답 JSON 파싱 실패: {e}") from e
+    hook = str(data.get("hook_text", "")).strip()
+    highlight = str(data.get("highlight", "")).strip()
+    if not hook:
+        raise RuntimeError("후킹 문구 생성 결과가 비어 있습니다.")
+    # highlight 가 실제 부분문자열이 아니면 버린다(줄바꿈 정규화 후 비교).
+    if highlight and highlight not in hook.replace("\\n", "\n"):
+        highlight = ""
+    return hook, highlight
+
+
+def _build_thumb_ass(hook_text: str, highlight: str, ass_path: Path) -> None:
+    """썸네일 ASS(§4-(f)): 큰 굵은 2줄, 상단(Alignment=8), 두꺼운 외곽선, 노란 강조."""
+    # 리터럴 '\n' 도 실제 줄바꿈으로 정규화한 뒤 _ass_text 가 \N 으로 변환.
+    normalized = hook_text.replace("\\n", "\n")
+    text = _ass_text(normalized, highlight)
+    header = (
+        "[Script Info]\n"
+        "ScriptType: v4.00+\n"
+        "PlayResX: 1080\n"
+        "PlayResY: 1920\n"
+        "WrapStyle: 0\n\n"
+        "[V4+ Styles]\n"
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+        "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, "
+        "ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, "
+        "MarginL, MarginR, MarginV, Encoding\n"
+        f"Style: Thumb,{_FONT},104,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"
+        "1,0,0,0,100,100,0,0,1,7,5,8,60,60,150,1\n\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, "
+        "Effect, Text\n"
+    )
+    body = f"Dialogue: 0,0:00:00.00,9:00:00.00,Thumb,,0,0,0,,{text}\n"
+    ass_path.write_text(header + body, encoding="utf-8")
+
+
+def generate_thumbnail(
+    image_url: str,
+    hook_text: str = "",
+    highlight: str = "",
+    script: str = "",
+    output_dir: str | None = None,
+) -> dict:
+    """씬 이미지 + 후킹 문구 → 썸네일 PNG. Returns {"thumbnail_url", ...}."""
+    _require_ffmpeg()
+    if not image_url:
+        raise ValueError("image_url 이 필요합니다.")
+
+    hook_text = (hook_text or "").strip()
+    if not hook_text:
+        if not script.strip():
+            raise ValueError("hook_text 또는 script 중 하나는 필요합니다.")
+        hook_text, highlight = _generate_hook(script)
+
+    tid = uuid.uuid4().hex[:12]
+    out_dir = Path(output_dir or f"output/sayeon/thumbnails/{tid}")
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    bg = out_dir / "bg.png"
+    _fetch(image_url, bg)
+    ass = out_dir / "thumb.ass"
+    _build_thumb_ass(hook_text, highlight, ass)
+    out = out_dir / "thumb.png"
+    # §4-(f): 단일 프레임 + ASS 오버레이. 입력 이미지를 9:16 로 스케일.
+    _run([
+        "-i", bg.name,
+        "-vf", f"scale={W}:{H},ass={ass.name}",
+        "-frames:v", "1",
+        out.name,
+    ], cwd=out_dir)
+
+    thumbnail_url = str(out)
+    persistent = False
+    if r2_storage.is_available():
+        try:
+            thumbnail_url = r2_storage.upload_image(
+                str(out), f"sayeon/thumbnails/{tid}/thumb.png", content_type="image/png"
+            )
+            persistent = True
+        except Exception as e:  # noqa: BLE001
+            logger.warning("썸네일 R2 업로드 실패, 로컬 경로 사용: %s", e)
+    else:
+        logger.warning("R2 미설정 — 썸네일이 로컬에만 있습니다.")
+
+    return {
+        "thumbnail_url": thumbnail_url,
+        "persistent": persistent,
+        "hook_text": hook_text,
+        "highlight": highlight,
+    }

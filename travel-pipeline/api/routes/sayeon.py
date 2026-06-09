@@ -5,6 +5,7 @@
 - POST /sayeon/scenes            시트 reference 로 씬 이미지 생성 (PR-S2b)
 - POST /sayeon/tts               씬 narration → TTS 음성 + 타이밍 맵 (PR-S3)
 - POST /sayeon/assemble          씬+타이밍+자막+음성 → 완성 mp4 (PR-S4)
+- POST /sayeon/thumbnail         씬 이미지 + 후킹 → 썸네일 PNG (PR-S5, 동기)
 
 진행 상황은 기존 GET /jobs/{job_id}/status 로 폴링한다(공용 job_manager 사용).
 """
@@ -21,12 +22,15 @@ from api.schemas import (
     SayeonSheetRequest,
     SayeonSplitRequest,
     SayeonSplitResponse,
+    SayeonThumbnailRequest,
+    SayeonThumbnailResponse,
     SayeonTtsRequest,
 )
 from services.sayeon_assemble import generate_assemble
 from services.sayeon_character import generate_character_sheet
 from services.sayeon_scene import generate_scenes
 from services.sayeon_split import split_script
+from services.sayeon_thumbnail import generate_thumbnail
 from services.sayeon_tts import generate_tts
 
 router = APIRouter()
@@ -40,6 +44,22 @@ def split(req: SayeonSplitRequest):
             req.script,
             num_scenes=req.num_scenes,
             character_anchor=req.character_anchor or "",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/thumbnail", response_model=SayeonThumbnailResponse)
+def thumbnail(req: SayeonThumbnailRequest):
+    """씬 이미지 + 후킹 문구로 썸네일 PNG 를 만든다. ffmpeg 1프레임, 동기 응답."""
+    try:
+        return generate_thumbnail(
+            req.image_url,
+            hook_text=req.hook_text or "",
+            highlight=req.highlight or "",
+            script=req.script or "",
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
