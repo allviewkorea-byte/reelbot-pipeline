@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import httpx
@@ -113,37 +114,43 @@ def _ken_burns_clip(image: Path, motion: str, frames: int, out: Path, cwd: Path)
 
 
 def _xfade_chain(clips: list[Path], clip_durs: list[float], out: Path, cwd: Path) -> None:
-    """클립들을 0.6s 크로스페이드로 이어붙인다(재인코딩). 클립 1개면 그대로 복사."""
+    """클립들을 0.6s 크로스페이드로 이어붙인다(재인코딩). 클립 1개면 그대로 복사.
+
+    Railway 메모리 절감을 위해 8개를 한 그래프에 동시에 넣지 않고 '순차 2개씩' 합친다:
+    누적본(acc) + 다음 클립을 ffmpeg 1회로 xfade → 중간 파일, 마지막까지 반복.
+    각 단계 입력이 2개뿐이라 피크 메모리가 크게 줄어든다.
+
+    누적 길이/전환 오프셋은 '한 그래프' 방식과 동일하게 계산하므로(offset = 누적길이 -
+    XFADE, 누적길이 += 다음.dur - XFADE) 최종 길이·크로스페이드 위치는 기존과 동일하다.
+    """
     n = len(clips)
     if n == 1:
         shutil.copy(cwd / clips[0].name, cwd / out.name)
         return
 
-    inputs: list[str] = []
-    for c in clips:
-        inputs += ["-i", c.name]
-
-    # offset: cum 은 직전까지 누적 길이. 매 xfade 는 0.6s 겹친다.
-    filt: list[str] = []
-    cum = clip_durs[0]
-    prev = "0"
-    for k in range(1, n):
-        offset = round(cum - XFADE, 3)
-        label = "vout" if k == n - 1 else f"v{k}"
-        filt.append(
-            f"[{prev}][{k}]xfade=transition=fade:duration={XFADE}:offset={offset}[{label}]"
-        )
-        cum = cum + clip_durs[k] - XFADE
-        prev = label
-
-    _run([
-        *inputs,
-        "-filter_complex", ";".join(filt),
-        "-map", "[vout]",
-        "-c:v", "libx264", "-preset", PRESET, "-crf", "20", "-threads", THREADS,
-        "-pix_fmt", "yuv420p", "-r", str(FPS),
-        out.name,
-    ], cwd=cwd)
+    tmp = Path(tempfile.mkdtemp(prefix="xfade_", dir=str(cwd)))
+    rel = tmp.name  # cwd 기준 상대 경로
+    try:
+        acc_name = clips[0].name      # 현재 누적본(cwd 기준 상대 경로)
+        acc_dur = clip_durs[0]
+        for k in range(1, n):
+            offset = round(acc_dur - XFADE, 3)
+            is_last = k == n - 1
+            out_name = out.name if is_last else f"{rel}/acc_{k}.mp4"
+            _run([
+                "-i", acc_name,
+                "-i", clips[k].name,
+                "-filter_complex",
+                f"[0][1]xfade=transition=fade:duration={XFADE}:offset={offset}[v]",
+                "-map", "[v]",
+                "-c:v", "libx264", "-preset", PRESET, "-crf", "20", "-threads", THREADS,
+                "-pix_fmt", "yuv420p", "-r", str(FPS),
+                out_name,
+            ], cwd=cwd)
+            acc_name = out_name
+            acc_dur = acc_dur + clip_durs[k] - XFADE
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def _ass_time(t: float) -> str:
