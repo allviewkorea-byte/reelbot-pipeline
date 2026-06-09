@@ -27,6 +27,13 @@ const FIELD =
 const CARD = "rounded-xl border border-border bg-card p-6"
 
 type CharMode = "new" | "existing"
+type Mode = "auto" | "semi" | "manual"
+
+const MODE_DESC: Record<Mode, string> = {
+  auto: "버튼 한 번 — 사연 자동 작성 + 영상 제작까지 한 번에.",
+  semi: "사연을 자동 작성해 채워주면, 검토·수정 후 직접 제작합니다.",
+  manual: "사연을 직접 입력·수정한 뒤 제작합니다.",
+}
 
 // CharacterSpec 필드 (백엔드 schemas.py 와 동일) + 한글 라벨/플레이스홀더
 const SPEC_FIELDS: {
@@ -83,6 +90,7 @@ export default function SayeonPage() {
   const [saveName, setSaveName] = useState("")
   const [saving, setSaving] = useState(false)
   const [autoLoading, setAutoLoading] = useState(false)
+  const [mode, setMode] = useState<Mode>("auto")
 
   // 언마운트 시 폴링 정리
   useEffect(() => () => stopRef.current?.(), [])
@@ -162,14 +170,17 @@ export default function SayeonPage() {
     setSubmitting(false)
   }, [])
 
-  const handleSubmit = useCallback(async () => {
+  // scriptOverride: 자동 모드에서 방금 생성한 사연을 즉시 넘길 때 사용
+  // (setScript 는 비동기라 state 를 기다리지 않고 직접 전달).
+  const runGenerate = useCallback(async (scriptOverride?: string) => {
     setError(null)
-    if (!script.trim()) {
+    const effScript = (scriptOverride ?? script).trim()
+    if (!effScript) {
       setError("사연 대본을 입력해주세요.")
       return
     }
     const params: SayeonGenerateParams = {
-      script: script.trim(),
+      script: effScript,
       gap_sec: Number(gapSec) || 0.4,
     }
     if (charMode === "existing") {
@@ -225,6 +236,29 @@ export default function SayeonPage() {
     }
   }, [script, charMode, spec, sheetUrl, anchor, voiceId, numScenes, thumbIndex, gapSec, selectedCharId, savedChars, loadChars])
 
+  // 자동 모드: 사연 자동 작성 → 곧바로 영상 생성까지 한 번에.
+  const handleAutoRun = useCallback(async () => {
+    setError(null)
+    setAutoLoading(true)
+    let generated = ""
+    try {
+      const res = await generateSayeonScript({
+        character: { gender: spec.gender, age: spec.age },
+      })
+      generated = res.script
+      setScript(generated)
+      if (res.title) toast.success(`사연: ${res.title}`)
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "사연 자동 생성에 실패했어요.",
+      )
+      setAutoLoading(false)
+      return
+    }
+    setAutoLoading(false)
+    await runGenerate(generated)
+  }, [spec.gender, spec.age, runGenerate])
+
   const completed = jobStatus?.status === "completed"
   const failed = jobStatus?.status === "failed"
   const running = submitting || jobStatus?.status === "running" || jobStatus?.status === "pending"
@@ -244,6 +278,18 @@ export default function SayeonPage() {
         </div>
       </header>
 
+      {/* 제작 모드 토글 */}
+      <div>
+        <Tabs value={mode} onValueChange={(v) => setMode(v as Mode)}>
+          <TabsList className="grid w-full max-w-md grid-cols-3">
+            <TabsTrigger value="auto">자동</TabsTrigger>
+            <TabsTrigger value="semi">반자동</TabsTrigger>
+            <TabsTrigger value="manual">수동</TabsTrigger>
+          </TabsList>
+        </Tabs>
+        <p className="mt-2 text-xs text-muted-foreground">{MODE_DESC[mode]}</p>
+      </div>
+
       {(failed || error) && (
         <div className="flex items-start gap-3 rounded-xl border border-red-500/40 bg-red-500/10 p-4">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
@@ -253,8 +299,16 @@ export default function SayeonPage() {
         </div>
       )}
 
-      {running && !completed ? (
-        <ProgressTracker jobStatus={jobStatus} title="사연 영상 생성 중" />
+      {(autoLoading || running) && !completed ? (
+        autoLoading ? (
+          <div className="mx-auto flex max-w-md flex-col items-center gap-3 rounded-xl border border-border bg-card p-8">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <p className="text-sm font-semibold text-foreground">사연 작성 중…</p>
+            <p className="text-xs text-muted-foreground">감성 사연을 만들고 있어요</p>
+          </div>
+        ) : (
+          <ProgressTracker jobStatus={jobStatus} title="사연 영상 생성 중" />
+        )
       ) : completed && result ? (
         <ResultView result={result} onReset={reset} />
       ) : (
@@ -265,19 +319,21 @@ export default function SayeonPage() {
               <span className="text-xs font-medium text-muted-foreground">
                 사연 대본 (필수)
               </span>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleAutoScript}
-                disabled={autoLoading}
-              >
-                {autoLoading ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  "🎲"
-                )}
-                사연 자동 생성
-              </Button>
+              {mode !== "auto" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAutoScript}
+                  disabled={autoLoading}
+                >
+                  {autoLoading ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    "🎲"
+                  )}
+                  사연 자동 생성
+                </Button>
+              )}
             </div>
             <textarea
               className={`${FIELD} min-h-40 resize-y`}
@@ -426,11 +482,37 @@ export default function SayeonPage() {
             )}
           </div>
 
-          <div>
-            <Button onClick={handleSubmit} disabled={submitting} className="gap-2">
-              <Sparkles className="h-4 w-4" />
-              사연 영상 생성
-            </Button>
+          <div className="flex flex-wrap gap-3">
+            {mode === "auto" && (
+              <Button
+                onClick={handleAutoRun}
+                disabled={autoLoading || submitting}
+                className="gap-2"
+              >
+                <Sparkles className="h-4 w-4" />
+                자동 생성 (사연 작성 + 영상)
+              </Button>
+            )}
+            {mode === "semi" && (
+              <Button
+                variant="outline"
+                onClick={handleAutoScript}
+                disabled={autoLoading}
+                className="gap-2"
+              >
+                🎲 사연 자동 작성
+              </Button>
+            )}
+            {mode !== "auto" && (
+              <Button
+                onClick={() => runGenerate()}
+                disabled={submitting}
+                className="gap-2"
+              >
+                <Sparkles className="h-4 w-4" />
+                사연 영상 생성
+              </Button>
+            )}
           </div>
         </div>
       )}
