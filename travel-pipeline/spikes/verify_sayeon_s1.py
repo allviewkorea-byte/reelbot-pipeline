@@ -59,6 +59,13 @@ APPEARANCE_WORDS = [
     "young woman", "old woman", "young man", "teenage",
 ]
 
+# 시네마틱화 검증: image_prompt 에 카메라 샷 종류가 들어가는지/다양한지 확인용
+SHOT_KEYWORDS = [
+    "extreme close-up", "close-up", "closeup", "medium shot", "wide shot",
+    "over-the-shoulder", "over the shoulder", "low angle", "high angle",
+    "long shot", "establishing shot",
+]
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="PR-S1 로컬 검증 (split_script 직접 호출)")
@@ -115,9 +122,19 @@ def main() -> None:
         hits = [w for w in APPEARANCE_WORDS if w in ip.lower()]
         if hits:
             print(f"  ⚠ 씬 {idx}: image_prompt 에 외모 단어 {hits} (S2 시트가 처리해야 함)")
+        # 시네마틱: 카메라 샷 키워드 존재
+        if not any(k in ip.lower() for k in SHOT_KEYWORDS):
+            print(f"  ⚠ 씬 {idx}: image_prompt 에 카메라 샷 표기 없음")
 
     motions = {s["motion"] for s in scenes}
     print(f"  {'✓' if len(motions) > 1 else '⚠'} motion 다양성: {sorted(motions)}")
+
+    # 시네마틱: 씬마다 샷이 다양한지(매번 같은 샷 반복 금지)
+    used_shots = {
+        next((k for k in SHOT_KEYWORDS if k in s["image_prompt"].lower()), "—")
+        for s in scenes
+    }
+    print(f"  {'✓' if len(used_shots) > 1 else '⚠'} 카메라 샷 다양성: {sorted(used_shots)}")
 
     print("=" * 60)
     print(f"결과: {'통과 ✅ — PR-S1 OK' if ok else '실패 ✗ — 위 항목 확인'}")
