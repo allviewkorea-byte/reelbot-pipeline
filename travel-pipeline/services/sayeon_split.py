@@ -58,14 +58,27 @@ def _build_system_prompt(num_scenes: int | None, character_anchor: str) -> str:
         "narration보다 짧아야 한다.\n"
         "- highlight: 국문. subtitle 안에 실제로 들어있는 핵심 단어/구 1개(노란 강조용). "
         "반드시 subtitle의 부분 문자열이어야 한다.\n"
-        "- image_prompt: 영문. 배경·상황·동작·감정·구도만 묘사한다. "
-        "⚠️ 인물의 외모(머리색·머리모양·안경·의상·얼굴 생김새·나이) 절대 쓰지 말 것. "
-        "인물은 'the character' 정도로만 지칭. 9:16 세로 구도, 인물 중앙 배치를 고려.\n"
+        "- image_prompt: 영문. 나레이션의 '감정'에 맞춰 한 장면을 시네마틱하게 묘사한다. "
+        "다음 4가지를 반드시 포함한다:\n"
+        "    · 표정/감정 (예: tearful eyes, shocked wide eyes, gentle warm smile, "
+        "downcast look, trembling lips)\n"
+        "    · 동작/포즈 (예: covering face with hands, reaching out, sitting hunched, "
+        "looking away over the shoulder, clutching an old coat)\n"
+        "    · 카메라/샷 — 씬마다 다르게 섞는다 (extreme close-up / close-up / medium shot "
+        "/ wide shot / over-the-shoulder / low angle 등). 매 씬 'centered standing "
+        "portrait' 반복 절대 금지.\n"
+        "    · 분위기/조명 (예: warm morning light, cold blue night, soft indoor lamp, "
+        "backlit silhouette, rain on the window)\n"
+        "  ⚠️ 인물의 외모·정체성(머리색·머리모양·안경·의상·얼굴 생김새·나이) 은 절대 쓰지 "
+        "말 것 — 그건 캐릭터 시트/앵커가 담당한다. 표정·포즈·카메라·장면·분위기만 적는다. "
+        "인물은 'the character' 로만 지칭. 9:16 세로 구도.\n"
         "- motion: \"zoom_in\" | \"zoom_out\" | \"pan_left\" | \"pan_right\" 중 하나. "
         "연출에 맞게 다양하게(감정 고조=zoom_in, 공간/반전 드러냄=zoom_out, 이동/시선=pan).\n\n"
         "[출력 형식]\n"
         '{"scenes":[{"index":1,"narration":"...","subtitle":"...","highlight":"...",'
-        '"image_prompt":"...","motion":"zoom_in"}]}'
+        '"image_prompt":"medium shot, the character sitting hunched on the floor, '
+        'covering face with both hands, trembling, dim cold blue night light, '
+        'melancholic mood, vertical 9:16","motion":"zoom_in"}]}'
     )
 
 
