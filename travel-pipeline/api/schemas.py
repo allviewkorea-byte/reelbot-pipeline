@@ -95,6 +95,14 @@ class SayeonScenesRequest(BaseModel):
     seed: int = -1
 
 
+class SayeonAssembleRequest(BaseModel):
+    # 씬: [{index, image_url, subtitle, highlight, motion}] (S1+S2 결합)
+    scenes: list[dict]
+    # 타이밍: [{index, start, end, duration}] (S3 출력)
+    scene_timings: list[dict]
+    audio_url: str  # S3 나레이션 오디오 URL
+
+
 class SayeonJobResponse(BaseModel):
     job_id: str
     status: str
