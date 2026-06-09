@@ -31,6 +31,13 @@ W, H = 1080, 1920
 FPS = 30
 XFADE = 0.6          # 크로스페이드 길이(초) — §4
 PAN_ZOOM = 1.12      # pan 모션의 고정 줌 배율
+# Ken Burns 작업 캔버스. 최대 줌 1.25 만큼만 업스케일(1080·1.25=1350, 1920·1.25=2400)
+# 해서 줌 여유를 주되 4K(2160x3840) 대비 픽셀수를 ~2.6배 줄여 Railway 메모리 초과를 막는다.
+WORK_W, WORK_H = 1350, 2400
+# Railway 컨테이너 메모리/CPU 완화: 빠른 프리셋 + 스레드 제한(프레임 스레드 버퍼 절감).
+# 화질은 Shorts 수준(crf 20) 유지.
+PRESET = "veryfast"
+THREADS = "2"
 _FONT = "Noto Sans CJK KR"
 
 
@@ -70,7 +77,8 @@ def _fetch(url_or_path: str, dest: Path) -> None:
 
 
 def _zoompan_expr(motion: str, frames: int) -> tuple[str, str, str]:
-    """모션별 (z, x, y) zoompan 식. iw/ih 는 스케일된 입력(2160x3840) 기준."""
+    """모션별 (z, x, y) zoompan 식. iw/ih 는 작업 캔버스(WORK_WxWORK_H) 기준이며
+    식이 상대값이라 캔버스 크기가 바뀌어도 그대로 동작한다."""
     f = max(frames, 2)
     cx = "iw/2-(iw/zoom/2)"
     cy = "ih/2-(ih/zoom/2)"
@@ -86,15 +94,19 @@ def _zoompan_expr(motion: str, frames: int) -> tuple[str, str, str]:
 
 def _ken_burns_clip(image: Path, motion: str, frames: int, out: Path, cwd: Path) -> None:
     z, x, y = _zoompan_expr(motion, frames)
+    # 입력이 9:16 이 아니어도(예: 752x1392) 작업 캔버스를 '덮도록' 키운 뒤 중앙 crop →
+    # 늘어짐 없이 WORK_WxWORK_H 로 정규화. zoompan 출력은 1080x1920, setsar=1 로 SAR 통일.
+    # 모든 클립이 1080x1920·SAR 1:1 로 균일해져 xfade/concat 에서 크기·SAR 불일치가 없다.
     vf = (
-        f"scale=2160:3840,"
+        f"scale={WORK_W}:{WORK_H}:force_original_aspect_ratio=increase,"
+        f"crop={WORK_W}:{WORK_H},"
         f"zoompan=z='{z}':x='{x}':y='{y}':d={frames}:s={W}x{H}:fps={FPS},"
-        f"format=yuv420p"
+        f"setsar=1,format=yuv420p"
     )
     _run([
         "-i", image.name,
         "-vf", vf,
-        "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+        "-c:v", "libx264", "-preset", PRESET, "-crf", "20", "-threads", THREADS,
         "-r", str(FPS), "-frames:v", str(frames),
         out.name,
     ], cwd=cwd)
@@ -128,7 +140,7 @@ def _xfade_chain(clips: list[Path], clip_durs: list[float], out: Path, cwd: Path
         *inputs,
         "-filter_complex", ";".join(filt),
         "-map", "[vout]",
-        "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+        "-c:v", "libx264", "-preset", PRESET, "-crf", "20", "-threads", THREADS,
         "-pix_fmt", "yuv420p", "-r", str(FPS),
         out.name,
     ], cwd=cwd)
@@ -188,7 +200,8 @@ def _burn_and_mux(video: Path, audio: Path, ass: Path, out: Path, cwd: Path) -> 
         "-i", audio.name,
         "-vf", f"ass={ass.name}",
         "-map", "0:v", "-map", "1:a",
-        "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
+        "-c:v", "libx264", "-preset", PRESET, "-crf", "20", "-threads", THREADS,
+        "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "192k",
         "-shortest", "-movflags", "+faststart",
         out.name,
