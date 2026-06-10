@@ -14,6 +14,7 @@ from contextlib import contextmanager
 
 from services.sayeon_assemble import generate_assemble
 from services.sayeon_character import generate_character_sheet
+from services.sayeon_director import apply_director
 from services.sayeon_scene import generate_scenes
 from services.sayeon_split import split_script
 from services.sayeon_thumbnail import generate_thumbnail
@@ -70,6 +71,10 @@ def generate_full(
     if not scenes:
         raise RuntimeError("[씬 분할] 결과가 비어 있습니다.")
     report(10, f"씬 {len(scenes)}개 분할 완료")
+
+    # a-2. 디렉터: 씬별 샷 설계 → image_prompt 구성(실패 시 기존 프롬프트 폴백, 안 멈춤)
+    report(12, "샷 연출 설계 중...")
+    scenes = apply_director(script, scenes)
 
     # b. 캐릭터 시트 (~25%) — sheet_url+anchor 주어지면 재사용(스킵)
     if sheet_url and anchor:
