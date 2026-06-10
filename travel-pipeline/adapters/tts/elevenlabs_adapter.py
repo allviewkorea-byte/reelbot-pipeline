@@ -30,8 +30,9 @@ _DEFAULT_MODEL = "eleven_multilingual_v2"
 
 class ElevenLabsTTSAdapter(TTSAdapter):
     def __init__(self, voice_id: str | None = None):
-        self.voice_id = voice_id or os.getenv("ELEVENLABS_VOICE_ID", "")
-        self.model_id = os.getenv("ELEVENLABS_MODEL_ID", _DEFAULT_MODEL)
+        # 앞뒤 공백/줄바꿈 제거(대시보드 환경변수에 섞이는 경우가 잦아 401 유발).
+        self.voice_id = (voice_id or os.getenv("ELEVENLABS_VOICE_ID", "")).strip()
+        self.model_id = os.getenv("ELEVENLABS_MODEL_ID", _DEFAULT_MODEL).strip()
 
     @property
     def name(self) -> str:
@@ -48,8 +49,17 @@ class ElevenLabsTTSAdapter(TTSAdapter):
         api_key = os.getenv("ELEVENLABS_API_KEY")
         if not api_key:
             raise RuntimeError("ELEVENLABS_API_KEY not set")
+        # 키 앞뒤 공백/줄바꿈 제거 — 401 의 흔한 원인.
+        api_key = api_key.strip()
         if not self.voice_id:
             raise RuntimeError("ElevenLabs voice_id 미지정 (ELEVENLABS_VOICE_ID 필요)")
+
+        # 진단 로그(비밀값 노출 금지: 존재 여부·길이·앞 3글자만). stdout 로 남겨 Railway 에서 확인.
+        print(
+            f"  [tts:elevenlabs] ELEVENLABS_API_KEY present={bool(api_key)} "
+            f"len={len(api_key)} prefix={api_key[:3]!r} | "
+            f"model_id={self.model_id!r} voice_id={self.voice_id!r}"
+        )
 
         payload = {
             "text": text,
