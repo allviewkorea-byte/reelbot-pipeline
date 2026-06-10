@@ -51,7 +51,7 @@ AI 기반 숏폼·롱폼 영상 자동 제작 파이프라인.
 | 사연 캐릭터 일관성 | FLUX Kontext Pro Multi (WaveSpeed) — 캐릭터 시트 reference. 그림체는 **반실사 일러스트**(`SAYEON_IMAGE_STYLE`, `services/sayeon_character.py`)로 통일. ⚠️ 풀 포토리얼 금지(일관성 깨짐). 씬 연출은 **디렉터 단계**(`services/sayeon_director.py`, gpt-4o-mini)가 씬별 샷 스펙(shot_type/angle/action/setting/mood)을 설계해 장소·샷종류(와이드~클로즈업)·동작·카메라를 다양화하되 시트 참조로 동일인 유지(`sayeon_split.py`·`sayeon_scene.py`). 디렉터 실패 시 기존 프롬프트로 폴백 |
 | 사연 자동 대본 | gpt-4o-mini — 후킹(0~2초)·중반 반전·여운 질문 구조 + **사실적 구어체·약 90초(12~16비트)** (`services/sayeon_autoscript.py`). 씬 분할은 길이에 맞게 8~16씬 스케일 |
 | 영상 생성 | Kling via WaveSpeed API |
-| TTS | Edge TTS (현재) / ElevenLabs (예정) |
+| TTS | Supertone / Edge TTS / ElevenLabs — 사연 TTS 는 `TTS_PROVIDER`("supertone"\|"elevenlabs"\|"edge")로 선택, 미설정 시 Supertone→Edge 폴백 (`adapters/tts/`) |
 | 합성 | ffmpeg (현재) / Remotion (예정) |
 | 백엔드 | Python FastAPI (`travel-pipeline/`) |
 | 배포 | Vercel (프론트) / Railway or Render (FastAPI, 예정) / Supabase (DB·인증·스토리지, 예정) |
@@ -168,6 +168,10 @@ reelbot-pipeline/
 - 모든 비밀 키(`OPENAI_API_KEY`, `WAVESPEED_API_KEY` 등)는 서버사이드에서만 사용
 - WaveSpeed 호출은 반드시 서버사이드 API route 경유 (`/api/character/generate`)
 - 허용된 `NEXT_PUBLIC_`: `NEXT_PUBLIC_API_BASE_URL` (URL 값은 노출 무방)
+- 사연 TTS 프로바이더(서버사이드, `NEXT_PUBLIC_` 금지): `TTS_PROVIDER`("supertone"|"elevenlabs"|"edge").
+  - Supertone: `SUPERTONE_API_KEY`, `SUPERTONE_VOICE_ID`
+  - ElevenLabs: `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, `ELEVENLABS_MODEL_ID`(기본 `eleven_multilingual_v2`)
+  - Edge TTS: 키 불필요(무료 폴백)
 
 ---
 
