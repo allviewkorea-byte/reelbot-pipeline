@@ -48,7 +48,7 @@ AI 기반 숏폼·롱폼 영상 자동 제작 파이프라인.
 |---|---|
 | 프론트엔드 | Next.js (App Router) + Tailwind v4 + shadcn/ui |
 | 이미지 생성 | gpt-image-1 (OpenAI, 1024×1536, quality: high) / Z-Image Turbo (WaveSpeed) |
-| 사연 캐릭터 일관성 | FLUX Kontext Pro Multi (WaveSpeed) — 캐릭터 시트 reference. 그림체는 **반실사 일러스트**(`SAYEON_IMAGE_STYLE`, `services/sayeon_character.py`)로 통일. ⚠️ 풀 포토리얼 금지(일관성 깨짐). 씬 연출은 **디렉터 단계**(`services/sayeon_director.py`, gpt-4o-mini)가 씬별 샷 스펙(shot_type/angle/action/setting/mood)을 설계해 장소·샷종류(와이드~클로즈업)·동작·카메라를 다양화하되 시트 참조로 동일인 유지(`sayeon_split.py`·`sayeon_scene.py`). 디렉터 실패 시 기존 프롬프트로 폴백 |
+| 사연 캐릭터 일관성 | FLUX Kontext Pro Multi (WaveSpeed) — 캐릭터 시트 reference. 주인공은 **흰곰 마스코트**(동물 캐스팅, `services/sayeon_character.py`: `build_protagonist_character`/`CASTING_PALETTE`/남자상대=갈색 시바견 고정). 사연 톤 `tone`("serious"=선글라스/"light"=초롱초롱 눈) 토글. 그림체는 **반실사 일러스트**(`SAYEON_IMAGE_STYLE`)로 통일. ⚠️ 풀 포토리얼 금지(일관성 깨짐). 씬 연출은 **디렉터 단계**(`services/sayeon_director.py`, gpt-4o-mini)가 씬별 샷 스펙(shot_type/angle/action/setting/mood)을 설계해 장소·샷종류(와이드~클로즈업)·동작·카메라를 다양화하되 시트 참조로 동일인 유지(`sayeon_split.py`·`sayeon_scene.py`). 디렉터 실패 시 기존 프롬프트로 폴백 |
 | 사연 자동 대본 | gpt-4o-mini — 후킹(0~2초)·중반 반전·여운 질문 구조 + **사실적 구어체·약 90초(12~16비트)** (`services/sayeon_autoscript.py`). 씬 분할은 길이에 맞게 8~16씬 스케일 |
 | 영상 생성 | Kling via WaveSpeed API |
 | TTS | Supertone / Edge TTS / ElevenLabs — 사연 TTS 는 `TTS_PROVIDER`("supertone"\|"elevenlabs"\|"edge")로 선택, 미설정 시 Supertone→Edge 폴백 (`adapters/tts/`) |
