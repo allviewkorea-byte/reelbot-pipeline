@@ -100,6 +100,12 @@ SAYEON_NEGATIVE = (
     "cluttered background, inconsistent character design"
 )
 
+# 주인공 단독 컷 전용 네거티브 — 곰이 둘 이상 나오는 것을 막는다. two_shot(상대 동물)
+# 이나 family(갈색곰)가 정당히 등장하는 컷에는 적용하지 않는다.
+SAYEON_NEGATIVE_SOLO = (
+    "multiple bears, second bear, duplicate protagonist, different bear species"
+)
+
 
 def normalize_tone(tone: str | None) -> str:
     """톤 플래그 정규화 — 'serious' | 'light'(기본)."""

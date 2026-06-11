@@ -48,6 +48,10 @@ _SUBJECT_PHRASE = {
 # 컷 감정(흰곰 표정 매핑의 재료 — 표정 문구 변환은 PR③ 프롬프트 빌더에서).
 _EMOTIONS = ("joy", "sadness", "shock", "anger", "flutter", "anxiety", "deadpan")
 
+# two_shot 에서 상대 캐릭터의 역할(캐스팅 팔레트 키, sayeon_character.CASTING_PALETTE).
+# 디렉터가 등장인물을 식별하면 후속 빌더가 역할→동물 매핑을 주입한다(주인공 외 곰 금지).
+_SUPPORT_ROLES = ("male_lead", "female_lead", "friend", "family", "villain")
+
 
 def _strip_code_fence(raw: str) -> str:
     raw = raw.strip()
@@ -66,11 +70,20 @@ def _build_director_prompt(n: int) -> str:
         '- 각 shot 필드: shot_type("wide"|"full"|"medium"|"over_the_shoulder"|"close_up"), '
         'subject_type("protagonist"|"two_shot"|"detail"|"mood"|"flashback"), '
         'emotion("joy"|"sadness"|"shock"|"anger"|"flutter"|"anxiety"|"deadpan"), '
+        'other_role(two_shot 일 때 상대 역할 "male_lead"|"female_lead"|"friend"|"family"'
+        '|"villain", 아니면 ""), '
+        "include_protagonist(detail/mood 일 때만 의미 — 그 컷에 주인공 곰을 작게/일부만 "
+        "담는 게 문장을 더 잘 보여주면 true, 순수 사물·배경이 나으면 false), "
         "camera_angle(영문), action(영문, 능동 동작), setting(영문, 구체적 장소·환경), "
         "mood(영문, 분위기/조명).\n"
         "- subject_type 의미: protagonist=주인공 단독 / two_shot=상대와 2인 / "
         "detail=감정을 상징하는 사물 클로즈업(예: 식어가는 커피, 읽씹된 메신저 화면) / "
         "mood=인물 없는 배경·무드(빈 방, 밤거리) / flashback=회상(낮은 채도, 다른 시공간).\n"
+        "- two_shot 이면 상대의 역할(other_role)을 반드시 지정한다(남자=male_lead, "
+        "여자=female_lead, 친구=friend, 가족·어른=family, 얄미운 역=villain). 외모는 쓰지 말 것.\n"
+        "- detail/mood 의 include_protagonist 는 강제 규칙이 아니다 — '그 문장을 가장 잘 "
+        "보여주는 그림'이 기준. 곰 발이 컵을 감싸는 클로즈업처럼 곰 일부가 나으면 true, "
+        "읽씹된 채팅 화면 단독처럼 사물만이 나으면 false.\n"
         f"- protagonist 단독 샷은 전체의 {int(_PROTAGONIST_CAP * 100)}% 이하로 제한한다 — "
         "사물(detail)·배경(mood)·회상(flashback)을 적극 섞어 인물 반복을 피한다.\n"
         "- 감정 피크/반전 비트 = detail 클로즈업을 우선 고려(상징 사물로 감정 표현), "
@@ -87,6 +100,7 @@ def _build_director_prompt(n: int) -> str:
         "담당한다. 인물은 'the character' 로만 지칭.\n\n"
         "[출력 예시]\n"
         '{"shots":[{"shot_type":"wide","subject_type":"mood","emotion":"anxiety",'
+        '"other_role":"","include_protagonist":false,'
         '"camera_angle":"low angle","action":"empty street scene",'
         '"setting":"a rainy back alley at night with neon reflections",'
         '"mood":"melancholic cold blue"}]}'
@@ -105,10 +119,18 @@ def _normalize_shots(shots: list, n: int) -> list[dict]:
     for i in range(n):
         s = shots[i] if i < len(shots) and isinstance(shots[i], dict) else {}
         st = _norm_enum(s.get("shot_type"), _SHOT_TYPES, "wide" if i == 0 else "medium")
+        subj = _norm_enum(s.get("subject_type"), _SUBJECT_TYPES, "protagonist")
         out.append({
             "shot_type": st,
-            "subject_type": _norm_enum(s.get("subject_type"), _SUBJECT_TYPES, "protagonist"),
+            "subject_type": subj,
             "emotion": _norm_enum(s.get("emotion"), _EMOTIONS, "deadpan"),
+            # two_shot 상대 역할(캐스팅 팔레트 키). two_shot 인데 미상이면 friend.
+            "other_role": (
+                _norm_enum(s.get("other_role"), _SUPPORT_ROLES, "friend")
+                if subj == "two_shot" else ""
+            ),
+            # detail/mood 에서만 의미 — 곰을 작게/일부 담을지.
+            "include_protagonist": bool(s.get("include_protagonist")) if subj in ("detail", "mood") else False,
             "camera_angle": str(s.get("camera_angle", "")).strip(),
             "action": str(s.get("action", "")).strip(),
             "setting": str(s.get("setting", "")).strip(),
@@ -220,7 +242,10 @@ def _default_shots(n: int) -> list[dict]:
             subject = "protagonist"
         else:
             subject = cycle[(i - 1) % len(cycle)]
-        out.append({"subject_type": subject, "emotion": "deadpan"})
+        out.append({
+            "subject_type": subject, "emotion": "deadpan",
+            "other_role": "", "include_protagonist": False,
+        })
     return out
 
 
@@ -239,7 +264,8 @@ def apply_director(script: str, scenes: list[dict]) -> list[dict]:
         logger.warning("디렉터 단계 실패 — 기존 image_prompt + 기본 샷 리스트로 폴백: %s", e)
         defaults = _default_shots(len(scenes))
         return [
-            {**s, "subject_type": d["subject_type"], "emotion": d["emotion"]}
+            {**s, "subject_type": d["subject_type"], "emotion": d["emotion"],
+             "other_role": d["other_role"], "include_protagonist": d["include_protagonist"]}
             for s, d in zip(scenes, defaults)
         ]
 
@@ -250,7 +276,9 @@ def apply_director(script: str, scenes: list[dict]) -> list[dict]:
         ns = dict(s)
         if composed:
             ns["image_prompt"] = composed
-        ns["subject_type"] = _norm_enum(spec.get("subject_type"), _SUBJECT_TYPES, "protagonist")
-        ns["emotion"] = _norm_enum(spec.get("emotion"), _EMOTIONS, "deadpan")
+        ns["subject_type"] = spec.get("subject_type", "protagonist")
+        ns["emotion"] = spec.get("emotion", "deadpan")
+        ns["other_role"] = spec.get("other_role", "")
+        ns["include_protagonist"] = bool(spec.get("include_protagonist", False))
         out.append(ns)
     return out
