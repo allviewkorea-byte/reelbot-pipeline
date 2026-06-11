@@ -55,6 +55,7 @@ def build_scene_prompt(
     tone: str = "light",
     other_role: str = "",
     include_protagonist: bool = False,
+    context: str = "",
 ) -> str:
     """부록 C 템플릿: [STYLE 고정]+[CHARACTER 고정]+[SHOT/SCENE 가변]+[NEGATIVE 고정].
 
@@ -87,7 +88,7 @@ def build_scene_prompt(
         else:
             parts.append(f"The SAME character as in the reference sheet: {character}.")
         if subject == "two_shot":
-            animal = cast_supporting_animal(other_role)
+            animal = cast_supporting_animal(other_role, context)
             parts.append(
                 f"Other character present: {animal} — a clearly different animal species "
                 "(NOT a polar bear), with a distinct base color and silhouette."
@@ -168,6 +169,8 @@ def generate_scenes(
         emotion = str(scene.get("emotion", "")).strip()
         other_role = str(scene.get("other_role", "")).strip()
         include_protag = bool(scene.get("include_protagonist", False))
+        # 갈색곰(family) 게이팅용 한국어 씬 텍스트(가족 키워드 판별).
+        context = f"{scene.get('narration', '')} {scene.get('subtitle', '')}"
         prompt = build_scene_prompt(
             scene.get("image_prompt", ""),
             anchor,
@@ -176,6 +179,7 @@ def generate_scenes(
             tone=tone,
             other_role=other_role,
             include_protagonist=include_protag,
+            context=context,
         )
 
         if progress_cb:
