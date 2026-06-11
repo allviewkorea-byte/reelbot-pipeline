@@ -183,8 +183,11 @@ def _build_ass(items: list[dict], ass_path: Path) -> None:
         "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, "
         "ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, "
         "MarginL, MarginR, MarginV, Encoding\n"
-        f"Style: Default,{_FONT},74,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"
-        "1,0,0,0,100,100,0,0,1,5,3,2,40,40,340,1\n\n"
+        # 자막 확대(74→90, 외곽선5→6·그림자3→4)로 가독성 ↑. 하단 중앙(Alignment=2),
+        # MarginV 340→400 으로 9:16 안전영역(하단 진행바·버튼)을 피해 위로 띄운다.
+        # WrapStyle=0 로 긴 문장은 2줄로 자동 래핑(MarginL/R=40 폭 제한).
+        f"Style: Default,{_FONT},90,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"
+        "1,0,0,0,100,100,0,0,1,6,4,2,40,40,400,1\n\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, "
         "Effect, Text\n"
