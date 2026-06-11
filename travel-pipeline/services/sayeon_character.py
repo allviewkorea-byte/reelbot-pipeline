@@ -48,13 +48,18 @@ _BEAR_EYES = {
 # 캐스팅 팔레트(역할 → 동물, 부록 B). 같은 사연 내 같은 역할은 동일 동물로 일관 유지.
 # 주인공 흰곰과 베이스 색·실루엣(귀 모양)이 확실히 달라야 한다.
 MALE_LEAD_ANIMAL = "a warm brown shiba-dog"   # 남자 상대(그) — 고정
+# 갈색곰은 '주인공(흰곰)의 친한 친구·조언자'로 고정 배역(긍정적 조연). 빌런은 너구리로
+# 고정. 미상 역할은 갈색곰 금지 → 중립(다람쥐) fallback (주인공 외 곰 오남용 방지).
+_BROWN_BEAR_FRIEND = "a gentle brown bear, the protagonist's close friend and advisor"
 CASTING_PALETTE = {
     "protagonist": "the white polar bear",          # 화자(주인공)
     "male_lead": MALE_LEAD_ANIMAL,                  # 그
     "female_lead": "a soft cream-colored rabbit",   # 그녀
-    "friend": "a small brown squirrel",             # 조연(친구)
-    "family": "a gentle large brown bear",          # 가족·어른
-    "villain": "a sly raccoon",                     # 얄미운 역
+    "friend": _BROWN_BEAR_FRIEND,                   # 친한 친구·조언자(갈색곰 고정)
+    "advisor": _BROWN_BEAR_FRIEND,                  # 조언자(갈색곰 고정)
+    "family": _BROWN_BEAR_FRIEND,                   # 가까운 가족·어른(갈색곰)
+    "villain": "a sly raccoon",                     # 얄미운 역(너구리 고정)
+    "neutral": "a small brown squirrel",            # 미상 역할 기본값(갈색곰 금지)
 }
 
 
@@ -102,18 +107,15 @@ SAYEON_NEGATIVE = (
     "isolated on white, background-free, "
     # 주인공은 항상 흰곰 — 갈색곰이 주인공/메인으로 잡히는 것을 전 컷에서 차단.
     "brown bear as main character, brown bear protagonist, "
-    "brown bear as the focal subject"
+    "brown bear as the focal subject, brown bear as protagonist, "
+    "brown bear replacing white bear, brown bear replacing the white polar bear"
 )
 
-# 주인공 단독 컷 전용 네거티브 — 곰이 둘 이상 나오는 것을 막는다. two_shot(상대 동물)
-# 이나 family(갈색곰)가 정당히 등장하는 컷에는 적용하지 않는다.
+# 주인공 단독 컷 전용 네거티브 — 곰이 둘 이상이거나 갈색곰이 끼는 것을 막는다.
+# two_shot(상대 동물·갈색곰 친구가 정당히 등장)에는 적용하지 않는다.
 SAYEON_NEGATIVE_SOLO = (
-    "multiple bears, second bear, duplicate protagonist, different bear species"
-)
-
-# 갈색곰(family/어른)은 가족 관계 키워드가 씬 텍스트에 있을 때만 배정한다.
-_FAMILY_KEYWORDS = (
-    "엄마", "아빠", "부모", "가족", "오빠", "언니", "형", "누나", "할머니", "할아버지",
+    "multiple bears, second bear, duplicate protagonist, different bear species, "
+    "brown bear, brown bear in frame"
 )
 
 
@@ -138,14 +140,12 @@ def build_protagonist_character(tone: str = "light") -> str:
 def cast_supporting_animal(role: str, context: str = "") -> str:
     """역할 → 상대/조연 동물(부록 B). 같은 역할은 항상 같은 동물(일관성).
 
-    남자 상대(male_lead)는 항상 갈색 시바견. 미상 역할은 친구 기본값.
-    ⚠️ family(갈색곰)는 씬 텍스트(context)에 가족 관계 키워드가 있을 때만 배정하고,
-    없으면 갈색곰 금지 → 친구(다람쥐/펭귄)로 fallback (친구·연인·직장 등에 곰 오배정 방지).
+    갈색곰은 friend/advisor/family(주인공의 가깝고 따뜻한 존재)에만 고정 배정한다.
+    남자 상대(male_lead)는 갈색 시바견, 빌런은 너구리. 미상 역할은 갈색곰 금지 →
+    중립(다람쥐) fallback (주인공 외 곰 오남용 방지). context 는 호환용(현재 미사용).
     """
     key = (role or "").strip().lower().replace(" ", "_")
-    if key == "family" and not any(kw in (context or "") for kw in _FAMILY_KEYWORDS):
-        return CASTING_PALETTE["friend"]
-    return CASTING_PALETTE.get(key, CASTING_PALETTE["friend"])
+    return CASTING_PALETTE.get(key, CASTING_PALETTE["neutral"])
 
 
 @dataclass
