@@ -17,32 +17,60 @@ from pathlib import Path
 
 import httpx
 
-from adapters import ImageGenerationRequest, get_kontext_adapter, r2_storage
-from services.sayeon_character import SAYEON_IMAGE_STYLE
+from adapters import ImageGenerationRequest, get_image_adapter, get_kontext_adapter, r2_storage
+from services.sayeon_character import (
+    POLAR_BEAR_ART_STYLE,
+    SAYEON_NEGATIVE,
+    bear_expression,
+    build_protagonist_character,
+)
 
 logger = logging.getLogger(__name__)
 
+# 캐릭터 블록(흰곰 바이블)을 주입하는 피사체 유형. detail/mood 는 사물·배경 컷이라
+# 미주입(곰이 끼어들지 않도록), flashback 은 약하게(시트 reference 만, 블록 미주입).
+_CHARACTER_SUBJECTS = ("protagonist", "two_shot")
+# 캐릭터 시트 reference 를 아예 빼는 유형(사물/배경 컷 — Kontext 대신 t2i 사용).
+_NO_REFERENCE_SUBJECTS = ("detail", "mood")
 
-def build_scene_prompt(image_prompt: str, anchor: str = "") -> str:
-    """씬 묘사 + 스타일/정체성 앵커/9:16/no-text 제약을 합친 최종 프롬프트."""
-    parts = [
-        "Korean webtoon (manhwa) style, flat color with soft cel shading.",
-        "The SAME character as in the reference image.",
-        (image_prompt or "").strip(),
-    ]
-    if anchor and anchor.strip():
+
+def build_scene_prompt(
+    image_prompt: str,
+    anchor: str = "",
+    subject_type: str = "protagonist",
+    emotion: str = "",
+    tone: str = "light",
+) -> str:
+    """부록 C 템플릿: [STYLE 고정]+[CHARACTER 고정]+[SHOT/SCENE 가변]+[NEGATIVE 고정].
+
+    CHARACTER 블록은 protagonist/two_shot 에만 주입한다. emotion 은 부록 D 매핑으로
+    곰 표정 문구로 변환(serious 톤은 입·몸짓 위주).
+    """
+    subject = (subject_type or "protagonist").strip().lower()
+    # [STYLE — 고정]
+    parts = [f"{POLAR_BEAR_ART_STYLE}, soft ambient lighting, with subtle texture."]
+    # [CHARACTER — 고정, protagonist/two_shot 에만]
+    if subject in _CHARACTER_SUBJECTS:
+        character = (anchor or "").strip() or build_protagonist_character(tone)
+        parts.append(f"The SAME character as in the reference sheet: {character}.")
+        expr = bear_expression(emotion, tone)
+        if expr:
+            parts.append(f"Facial expression: {expr}.")
         parts.append(
-            f"Keep the exact same identity: {anchor.strip()}. "
-            "Same face, hair, outfit, and accessories."
+            "Even in wide, full-body, or over-the-shoulder shots, strictly keep the "
+            "same fur, nose, ears, and body proportions as the reference sheet "
+            "(same mascot). Vary framing, pose, and background freely, but not the identity."
         )
-    # 와이드·풀·OTS 샷에서도 시트 참조로 동일 인물 유지(연출 다양성과 일관성의 균형).
+    elif subject in _NO_REFERENCE_SUBJECTS:
+        parts.append("No characters in this frame — objects and environment only.")
+    # [SHOT/SCENE — 가변] (디렉터가 구성한 image_prompt: 샷·피사체·동작·장소·무드·감정)
+    parts.append((image_prompt or "").strip())
     parts.append(
-        "Even in wide, full-body, or over-the-shoulder shots, strictly keep the same "
-        "face, hairstyle, outfit, and accessories as the reference character sheet "
-        "(same person). Vary framing, pose, and background freely, but not the identity."
+        "Composition: rule-of-thirds, breathing room, cinematic framing. "
+        "9:16 vertical composition. No text, no subtitles, no watermark."
     )
-    parts.append("9:16 vertical composition. No text, no subtitles, no watermark.")
-    parts.append(f"{SAYEON_IMAGE_STYLE}.")
+    # [NEGATIVE — 고정]
+    parts.append(f"{SAYEON_NEGATIVE}.")
     return " ".join(p for p in parts if p)
 
 
@@ -63,6 +91,7 @@ def generate_scenes(
     seed: int = -1,
     output_dir: str | None = None,
     progress_cb=None,
+    tone: str = "light",
 ) -> dict:
     """각 씬을 Kontext 로 num_images 장씩 생성하고 후보들을 R2에 올린다.
 
@@ -90,25 +119,49 @@ def generate_scenes(
     total = max(len(scenes), 1)
     total_cost = 0.0
 
+    # 사물/배경(detail/mood) 컷용 t2i 어댑터 — 시트 reference 없이 생성해 곰 미등장 보장.
+    t2i_adapter = get_image_adapter()
+
     for idx, scene in enumerate(scenes, 1):
         index = scene.get("index", idx)
-        prompt = build_scene_prompt(scene.get("image_prompt", ""), anchor)
+        subject = str(scene.get("subject_type", "protagonist")).strip().lower()
+        emotion = str(scene.get("emotion", "")).strip()
+        prompt = build_scene_prompt(
+            scene.get("image_prompt", ""),
+            anchor,
+            subject_type=subject,
+            emotion=emotion,
+            tone=tone,
+        )
 
         if progress_cb:
             progress_cb(int((idx - 1) / total * 100), f"씬 {index} 생성 중...")
 
-        extra: dict = {"num_images": num_images}
-        if seed is not None and seed >= 0:
-            extra["seed"] = seed
         # 첫 후보는 어댑터가 output_path 에 저장한다(scene_{index}_1.png 재사용).
-        request = ImageGenerationRequest(
-            prompt=prompt,
-            reference_images=[sheet_url],
-            aspect_ratio="9:16",
-            output_path=str(out_dir / f"scene_{index}_1.png"),
-            extra_params=extra,
-        )
-        result = asyncio.run(adapter.generate(request))
+        if subject in _NO_REFERENCE_SUBJECTS:
+            # detail/mood: 캐릭터 시트 reference 미적용(t2i). seed 만 전달.
+            extra_t2i: dict = {}
+            if seed is not None and seed >= 0:
+                extra_t2i["seed"] = seed
+            request = ImageGenerationRequest(
+                prompt=prompt,
+                aspect_ratio="9:16",
+                output_path=str(out_dir / f"scene_{index}_1.png"),
+                extra_params=extra_t2i or None,
+            )
+            result = asyncio.run(t2i_adapter.generate(request))
+        else:
+            extra: dict = {"num_images": num_images}
+            if seed is not None and seed >= 0:
+                extra["seed"] = seed
+            request = ImageGenerationRequest(
+                prompt=prompt,
+                reference_images=[sheet_url],
+                aspect_ratio="9:16",
+                output_path=str(out_dir / f"scene_{index}_1.png"),
+                extra_params=extra,
+            )
+            result = asyncio.run(adapter.generate(request))
         total_cost += result.cost_usd
 
         candidates = []
