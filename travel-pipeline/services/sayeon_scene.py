@@ -21,17 +21,30 @@ from adapters import ImageGenerationRequest, get_image_adapter, get_kontext_adap
 from services.sayeon_character import (
     POLAR_BEAR_ART_STYLE,
     SAYEON_NEGATIVE,
+    SAYEON_NEGATIVE_SOLO,
     bear_expression,
     build_protagonist_character,
+    cast_supporting_animal,
 )
 
 logger = logging.getLogger(__name__)
 
-# 캐릭터 블록(흰곰 바이블)을 주입하는 피사체 유형. detail/mood 는 사물·배경 컷이라
-# 미주입(곰이 끼어들지 않도록), flashback 은 약하게(시트 reference 만, 블록 미주입).
-_CHARACTER_SUBJECTS = ("protagonist", "two_shot")
-# 캐릭터 시트 reference 를 아예 빼는 유형(사물/배경 컷 — Kontext 대신 t2i 사용).
-_NO_REFERENCE_SUBJECTS = ("detail", "mood")
+# 시트 reference(주인공 곰)를 항상 쓰는 피사체 유형.
+_BEAR_REF_SUBJECTS = ("protagonist", "two_shot", "flashback")
+
+
+def bear_in_frame(subject_type: str, include_protagonist: bool) -> bool:
+    """그 컷에 주인공 곰이 등장하는가 → 시트 reference(Kontext) 경로 사용 여부.
+
+    detail/mood 는 디렉터가 씬 단위로 정한 include_protagonist 로 결정한다
+    (곰 일부/작게 담는 게 나은 씬 vs 순수 사물·배경 씬).
+    """
+    subject = (subject_type or "protagonist").strip().lower()
+    if subject in _BEAR_REF_SUBJECTS:
+        return True
+    if subject in ("detail", "mood"):
+        return bool(include_protagonist)
+    return True
 
 
 def build_scene_prompt(
@@ -40,37 +53,64 @@ def build_scene_prompt(
     subject_type: str = "protagonist",
     emotion: str = "",
     tone: str = "light",
+    other_role: str = "",
+    include_protagonist: bool = False,
 ) -> str:
     """부록 C 템플릿: [STYLE 고정]+[CHARACTER 고정]+[SHOT/SCENE 가변]+[NEGATIVE 고정].
 
-    CHARACTER 블록은 protagonist/two_shot 에만 주입한다. emotion 은 부록 D 매핑으로
-    곰 표정 문구로 변환(serious 톤은 입·몸짓 위주).
+    주인공 곰이 나오는 컷(protagonist/two_shot/flashback, 또는 include_protagonist 인
+    detail/mood)에만 캐릭터 블록을 주입한다. two_shot 상대는 캐스팅 팔레트 동물로
+    묘사(주인공 외 곰 금지). 표정은 앞부분 강조 + 뒤 반복(Kontext 가 시트 무표정을
+    따라가는 문제 완화). 주인공 단독 컷에만 '곰 둘 금지' 네거티브를 추가한다.
     """
     subject = (subject_type or "protagonist").strip().lower()
+    bear = bear_in_frame(subject, include_protagonist)
+    expr = bear_expression(emotion, tone)
     # [STYLE — 고정]
     parts = [f"{POLAR_BEAR_ART_STYLE}, soft ambient lighting, with subtle texture."]
-    # [CHARACTER — 고정, protagonist/two_shot 에만]
-    if subject in _CHARACTER_SUBJECTS:
+    # 표정 강조를 앞부분에(반복) — 시트 무표정 추종 완화
+    if bear and expr and subject in ("protagonist", "two_shot"):
+        parts.append(f"IMPORTANT: the bear's facial expression must clearly read as {expr}.")
+    # [CHARACTER — 곰 등장 컷에만]
+    if bear:
         character = (anchor or "").strip() or build_protagonist_character(tone)
-        parts.append(f"The SAME character as in the reference sheet: {character}.")
-        expr = bear_expression(emotion, tone)
-        if expr:
-            parts.append(f"Facial expression: {expr}.")
+        if subject in ("detail", "mood"):
+            parts.append(
+                "The SAME mascot as in the reference sheet appears small or only "
+                "partially in frame (e.g., just its paws around the object, or sitting "
+                f"small in a corner): {character}."
+            )
+        elif subject == "flashback":
+            parts.append(
+                f"The SAME mascot as in the reference sheet, shown in a faded flashback: {character}."
+            )
+        else:
+            parts.append(f"The SAME character as in the reference sheet: {character}.")
+        if subject == "two_shot":
+            animal = cast_supporting_animal(other_role)
+            parts.append(
+                f"Other character present: {animal} — a clearly different animal species "
+                "(NOT a polar bear), with a distinct base color and silhouette."
+            )
+        if expr and subject in ("protagonist", "two_shot"):
+            parts.append(f"Facial expression: {expr}.")  # 반복 강조
         parts.append(
             "Even in wide, full-body, or over-the-shoulder shots, strictly keep the "
             "same fur, nose, ears, and body proportions as the reference sheet "
             "(same mascot). Vary framing, pose, and background freely, but not the identity."
         )
-    elif subject in _NO_REFERENCE_SUBJECTS:
-        parts.append("No characters in this frame — objects and environment only.")
+    else:
+        parts.append("No characters in this frame — objects and environment only, no animals.")
     # [SHOT/SCENE — 가변] (디렉터가 구성한 image_prompt: 샷·피사체·동작·장소·무드·감정)
     parts.append((image_prompt or "").strip())
     parts.append(
         "Composition: rule-of-thirds, breathing room, cinematic framing. "
         "9:16 vertical composition. No text, no subtitles, no watermark."
     )
-    # [NEGATIVE — 고정]
+    # [NEGATIVE — 고정] (+ 주인공 단독 컷에만 곰 둘 금지)
     parts.append(f"{SAYEON_NEGATIVE}.")
+    if subject == "protagonist":
+        parts.append(f"{SAYEON_NEGATIVE_SOLO}.")
     return " ".join(p for p in parts if p)
 
 
@@ -126,20 +166,32 @@ def generate_scenes(
         index = scene.get("index", idx)
         subject = str(scene.get("subject_type", "protagonist")).strip().lower()
         emotion = str(scene.get("emotion", "")).strip()
+        other_role = str(scene.get("other_role", "")).strip()
+        include_protag = bool(scene.get("include_protagonist", False))
         prompt = build_scene_prompt(
             scene.get("image_prompt", ""),
             anchor,
             subject_type=subject,
             emotion=emotion,
             tone=tone,
+            other_role=other_role,
+            include_protagonist=include_protag,
         )
 
         if progress_cb:
             progress_cb(int((idx - 1) / total * 100), f"씬 {index} 생성 중...")
 
+        # 곰 등장 컷은 반드시 시트 reference(Kontext) 경로로 — 주인공 일관성 보장.
+        use_reference = bear_in_frame(subject, include_protag)
+        logger.info(
+            "씬 %s: subject=%s reference=%s%s",
+            index, subject, use_reference,
+            f" other_role={other_role}" if subject == "two_shot" else "",
+        )
+
         # 첫 후보는 어댑터가 output_path 에 저장한다(scene_{index}_1.png 재사용).
-        if subject in _NO_REFERENCE_SUBJECTS:
-            # detail/mood: 캐릭터 시트 reference 미적용(t2i). seed 만 전달.
+        if not use_reference:
+            # 곰 없는 사물/배경 컷: 시트 reference 미적용(t2i). seed 만 전달.
             extra_t2i: dict = {}
             if seed is not None and seed >= 0:
                 extra_t2i["seed"] = seed
