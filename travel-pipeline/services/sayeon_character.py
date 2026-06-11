@@ -24,17 +24,6 @@ logger = logging.getLogger(__name__)
 # 시트 생성용 기본 모델(저비용). 채널이 더 좋은 모델을 지정하면 그것을 쓴다.
 DEFAULT_SHEET_MODEL = "wavespeed-ai/z-image/turbo"
 
-# 공통 그림체/품질 서술어. 시트·씬 프롬프트 양쪽 끝에 붙여 인물을 더 리치하게(반실사
-# 일러스트) 만든다. ⚠️ 풀 포토리얼 금지 — FLUX Kontext 일관성이 깨진다. 정체성(성별·
-# 나이·헤어·의상 등) 스펙은 절대 바꾸지 않고, 여기서는 그림체/품질/조명 서술어만 더한다.
-SAYEON_IMAGE_STYLE = (
-    "polished semi-realistic Korean illustration style, soft volumetric lighting, "
-    "detailed facial rendering with subtle skin shading and natural blush, "
-    "expressive eyes with catchlights, fine individual hair strands, "
-    "gentle depth of field, professional webtoon/anime-film finish, high detail, "
-    "clean lines with painterly shading"
-)
-
 # ── 동물 캐스팅 (사람 → 동물 마스코트 전환) ──────────────────────────────
 # 주인공은 항상 흰곰 마스코트(부록 A). 매 컷 프롬프트에 고정 삽입되는 단일 소스.
 _POLAR_BEAR_CORE = (
@@ -69,9 +58,60 @@ CASTING_PALETTE = {
 }
 
 
+# emotion → 곰 표정 매핑(부록 D). serious 톤(선글라스)은 눈이 안 보이므로
+# 입·몸짓 위주 표현으로 대체한다.
+BEAR_EXPRESSIONS = {
+    "joy": {
+        "light": "crescent smiling eyes, big warm smile, rosy cheeks",
+        "serious": "wide happy smile, bouncy posture",
+    },
+    "sadness": {
+        "light": "droopy watery eyes, downturned mouth, slumped shoulders",
+        "serious": "trembling downturned mouth, hanging head",
+    },
+    "shock": {
+        "light": "huge wide eyes, tiny open mouth, paws on cheeks",
+        "serious": "jaw dropped, paws raised, stiff body",
+    },
+    "anger": {
+        "light": "furrowed brows, puffed cheeks, clenched paws",
+        "serious": "gritted teeth, steam-puffed cheeks, stomping stance",
+    },
+    "flutter": {
+        "light": "sparkling eyes, shy smile, blushing cheeks, paws together",
+        "serious": "bashful smile, glowing blush, fidgeting paws",
+    },
+    "anxiety": {
+        "light": "wavering eyes glancing sideways, bitten lip, hunched posture",
+        "serious": "tense mouth, a sweat drop, gripping own paws",
+    },
+    "deadpan": {
+        "light": "half-lidded flat eyes, straight mouth",
+        "serious": "flat straight mouth, motionless slouch",
+    },
+}
+
+# 이미지 프롬프트 공통 NEGATIVE 블록(부록 C). z-image/Kontext 는 별도 negative
+# 파라미터가 없어 프롬프트 끝에 'Avoid:' 로 항상 포함시킨다.
+SAYEON_NEGATIVE = (
+    "Avoid: photorealistic, 3D render, plastic look, realistic human, "
+    "adult-bear proportions, extra limbs, deformed paws, distorted face, "
+    "harsh outlines, stiff vector, watermark, text, signature, "
+    "cluttered background, inconsistent character design"
+)
+
+
 def normalize_tone(tone: str | None) -> str:
     """톤 플래그 정규화 — 'serious' | 'light'(기본)."""
     return "serious" if (tone or "").strip().lower() == "serious" else "light"
+
+
+def bear_expression(emotion: str | None, tone: str = "light") -> str:
+    """emotion(7종) + 톤 → 곰 표정 묘사 문구(부록 D). 미상 emotion 은 빈 문자열."""
+    table = BEAR_EXPRESSIONS.get((emotion or "").strip().lower())
+    if not table:
+        return ""
+    return table[normalize_tone(tone)]
 
 
 def build_protagonist_character(tone: str = "light") -> str:
