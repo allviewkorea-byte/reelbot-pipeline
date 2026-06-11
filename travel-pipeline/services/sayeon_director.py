@@ -52,6 +52,9 @@ _EMOTIONS = ("joy", "sadness", "shock", "anger", "flutter", "anxiety", "deadpan"
 # 디렉터가 등장인물을 식별하면 후속 빌더가 역할→동물 매핑을 주입한다(주인공 외 곰 금지).
 _SUPPORT_ROLES = ("male_lead", "female_lead", "friend", "family", "villain")
 
+# setting 은 모든 씬에서 필수(빈 값 금지). 미상 시 기본 배경으로 채운다.
+_DEFAULT_SETTING = "cozy Korean apartment interior, warm lighting"
+
 
 def _strip_code_fence(raw: str) -> str:
     raw = raw.strip()
@@ -95,7 +98,8 @@ def _build_director_prompt(n: int) -> str:
         "- 같은 장소는 연속 씬에서 setting 을 일관 유지(연속성). 장면이 바뀔 때만 setting 변경.\n"
         "- 대화/대면 비트 = two_shot + over_the_shoulder.\n"
         "- 전체에서 최소 2~3씬은 wide 또는 full(인물이 환경 속에 작게).\n"
-        "- setting 은 대본 맥락에서 일관되게 추론. 스토리 아크를 따라 샷 강도를 점차 높인다.\n"
+        "- ⚠️ setting(배경)은 모든 씬에서 반드시 구체적 장소로 채운다(빈 값/생략 금지). "
+        "대본 맥락에서 일관되게 추론. 스토리 아크를 따라 샷 강도를 점차 높인다.\n"
         "- ⚠️ 인물 외모·정체성(털색·체형·의상·얼굴)은 절대 쓰지 않는다 — 캐릭터 시트가 "
         "담당한다. 인물은 'the character' 로만 지칭.\n\n"
         "[출력 예시]\n"
@@ -133,7 +137,8 @@ def _normalize_shots(shots: list, n: int) -> list[dict]:
             "include_protagonist": bool(s.get("include_protagonist")) if subj in ("detail", "mood") else False,
             "camera_angle": str(s.get("camera_angle", "")).strip(),
             "action": str(s.get("action", "")).strip(),
-            "setting": str(s.get("setting", "")).strip(),
+            # 배경 필수 — 빈 값/null 금지, 미상 시 기본 배경으로 채운다.
+            "setting": str(s.get("setting", "")).strip() or _DEFAULT_SETTING,
             "mood": str(s.get("mood", "")).strip(),
         })
     # 첫 씬은 establishing wide 보장

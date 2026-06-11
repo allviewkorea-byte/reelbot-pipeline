@@ -97,13 +97,20 @@ SAYEON_NEGATIVE = (
     "Avoid: photorealistic, 3D render, plastic look, realistic human, "
     "adult-bear proportions, extra limbs, deformed paws, distorted face, "
     "harsh outlines, stiff vector, watermark, text, signature, "
-    "cluttered background, inconsistent character design"
+    "cluttered background, inconsistent character design, "
+    "white background, plain background, no background, floating character, "
+    "isolated on white, background-free"
 )
 
 # 주인공 단독 컷 전용 네거티브 — 곰이 둘 이상 나오는 것을 막는다. two_shot(상대 동물)
 # 이나 family(갈색곰)가 정당히 등장하는 컷에는 적용하지 않는다.
 SAYEON_NEGATIVE_SOLO = (
     "multiple bears, second bear, duplicate protagonist, different bear species"
+)
+
+# 갈색곰(family/어른)은 가족 관계 키워드가 씬 텍스트에 있을 때만 배정한다.
+_FAMILY_KEYWORDS = (
+    "엄마", "아빠", "부모", "가족", "오빠", "언니", "형", "누나", "할머니", "할아버지",
 )
 
 
@@ -125,12 +132,16 @@ def build_protagonist_character(tone: str = "light") -> str:
     return f"{_POLAR_BEAR_CORE}, {_BEAR_EYES[normalize_tone(tone)]}"
 
 
-def cast_supporting_animal(role: str) -> str:
+def cast_supporting_animal(role: str, context: str = "") -> str:
     """역할 → 상대/조연 동물(부록 B). 같은 역할은 항상 같은 동물(일관성).
 
     남자 상대(male_lead)는 항상 갈색 시바견. 미상 역할은 친구 기본값.
+    ⚠️ family(갈색곰)는 씬 텍스트(context)에 가족 관계 키워드가 있을 때만 배정하고,
+    없으면 갈색곰 금지 → 친구(다람쥐/펭귄)로 fallback (친구·연인·직장 등에 곰 오배정 방지).
     """
     key = (role or "").strip().lower().replace(" ", "_")
+    if key == "family" and not any(kw in (context or "") for kw in _FAMILY_KEYWORDS):
+        return CASTING_PALETTE["friend"]
     return CASTING_PALETTE.get(key, CASTING_PALETTE["friend"])
 
 
