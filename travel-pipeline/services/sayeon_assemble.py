@@ -25,6 +25,7 @@ from pathlib import Path
 import httpx
 
 from adapters import r2_storage
+from services.sayeon_bgm import fetch_bgm
 
 logger = logging.getLogger(__name__)
 
@@ -207,20 +208,51 @@ def _build_ass(items: list[dict], ass_path: Path) -> None:
 # 라우드니스 타깃(유튜브 권장): I=-14 LUFS, TP=-1.5 dBTP, LRA=11.
 _LOUDNORM = "loudnorm=I=-14:TP=-1.5:LRA=11"
 
+# BGM 베이스 게인(나레이션 대비). 목소리가 메인, BGM 은 배경(-18~-20dB).
+_BGM_GAIN_DB = -19
 
-def _prepare_audio_track(audio: Path, cwd: Path) -> Path:
-    """오디오 체인(분리 함수) — 최종 나레이션 트랙 정규화.
+
+def _prepare_audio_track(audio: Path, cwd: Path, bgm: Path | None = None) -> Path:
+    """오디오 체인(분리 함수) — 최종 나레이션 트랙 정규화(+선택적 BGM 덕킹).
 
     TTS 단계(sayeon_tts)가 클립별 loudnorm 을 이미 적용하므로 그 산출물에는 거의
     무변화(안전망)지만, 외부/과거 audio_url 입력도 동일 타깃으로 맞춰준다.
     오디오 전용 1-pass 재인코딩이라 메모리 부담이 거의 없고 영상 스트림은 일절
-    건드리지 않는다. ⚠️ 향후 BGM 덕킹/밸런스(sidechaincompress, amix)는 이 함수에
-    체인으로 얹는다.
+    건드리지 않는다.
+
+    bgm 이 주어지면 나레이션 아래에 배경음악을 덕킹해 깐다:
+      - BGM 을 나레이션 길이만큼 무한 루프(-stream_loop)로 채우고
+      - 베이스 게인 _BGM_GAIN_DB(-19dB)로 낮춘 뒤
+      - 나레이션을 사이드체인 키로 sidechaincompress(목소리가 나올 때 BGM 더 눌림)
+      - amix(normalize=0)로 합치고 전체를 -14 LUFS 로 재정규화.
     """
     out = cwd / "narration_norm.wav"
+    if bgm is None:
+        _run([
+            "-i", audio.name,
+            "-af", _LOUDNORM,
+            "-ar", "44100", "-ac", "1", "-c:a", "pcm_s16le",
+            out.name,
+        ], cwd=cwd)
+        return out
+
+    # 나레이션을 둘로 분기(asplit): 하나는 믹스용, 하나는 사이드체인 키용.
+    # ffmpeg 는 라벨 링크를 한 번만 연결할 수 있어 분기가 필요하다.
+    filt = (
+        "[0:a]aresample=44100,aformat=channel_layouts=mono,asplit=2[voice][vkey];"
+        f"[1:a]aresample=44100,aformat=channel_layouts=mono,volume={_BGM_GAIN_DB}dB[bgmv];"
+        "[bgmv][vkey]sidechaincompress="
+        "threshold=0.05:ratio=6:attack=20:release=400[bgmduck];"
+        "[voice][bgmduck]amix=inputs=2:duration=first:"
+        "dropout_transition=0:normalize=0[mix];"
+        f"[mix]{_LOUDNORM}[out]"
+    )
     _run([
         "-i", audio.name,
-        "-af", _LOUDNORM,
+        # BGM 을 나레이션 길이만큼 루프(amix duration=first 가 길이를 나레이션에 맞춤).
+        "-stream_loop", "-1", "-i", bgm.name,
+        "-filter_complex", filt,
+        "-map", "[out]",
         "-ar", "44100", "-ac", "1", "-c:a", "pcm_s16le",
         out.name,
     ], cwd=cwd)
@@ -248,8 +280,13 @@ def generate_assemble(
     audio_url: str,
     output_dir: str | None = None,
     progress_cb=None,
+    bgm_mood: str | None = None,
 ) -> dict:
-    """씬 이미지 + 타이밍 + 자막 + 음성 → 완성 mp4. Returns {"video_url", ...}."""
+    """씬 이미지 + 타이밍 + 자막 + 음성 → 완성 mp4. Returns {"video_url", ...}.
+
+    bgm_mood(emotional|suspense|hopeful)가 주어지면 해당 분위기 BGM 한 곡을 R2 에서
+    무작위로 받아 나레이션 아래에 덕킹해 깐다(없으면/실패하면 BGM 없이 진행).
+    """
     _require_ffmpeg()
     if not scenes:
         raise ValueError("scenes 가 비어 있습니다.")
@@ -265,8 +302,10 @@ def generate_assemble(
         progress_cb(5, "오디오/이미지 받는 중...")
     audio_local = out_dir / "narration.wav"
     _fetch(audio_url, audio_local)
-    # 오디오 체인: 라우드니스 정규화(-14 LUFS). 영상 스트림은 건드리지 않는다.
-    audio_local = _prepare_audio_track(audio_local, out_dir)
+    # 분위기 BGM 선택(R2). 실패해도 None 으로 BGM 없이 진행(파이프라인 안 멈춤).
+    bgm_local = fetch_bgm(bgm_mood, out_dir) if bgm_mood else None
+    # 오디오 체인: (BGM 덕킹 +) 라우드니스 정규화(-14 LUFS). 영상 스트림은 안 건드린다.
+    audio_local = _prepare_audio_track(audio_local, out_dir, bgm=bgm_local)
 
     # 2) 씬별 켄번즈 클립 + 클립 길이 보정(전환 중심=씬 경계)
     n = len(scenes)

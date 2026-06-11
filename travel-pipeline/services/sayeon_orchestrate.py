@@ -13,6 +13,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 
 from services.sayeon_assemble import generate_assemble
+from services.sayeon_bgm import select_mood
 from services.sayeon_character import generate_character_sheet
 from services.sayeon_director import apply_director
 from services.sayeon_scene import generate_scenes
@@ -122,9 +123,12 @@ def generate_full(
     missing = [s["index"] for s in assemble_scenes if not s["image_url"]]
     if missing:
         raise RuntimeError(f"[합성] 씬 이미지 누락: {missing}")
+    # 씬 감정 분포로 BGM 분위기 선택(emotional|suspense|hopeful). 결말 긍정이면 hopeful.
+    bgm_mood = select_mood(emotions=[s.get("emotion", "") for s in scenes])
     with _stage("합성"):
         asm = generate_assemble(
-            job_id, assemble_scenes, scene_timings, audio_url, progress_cb=band(70, 90)
+            job_id, assemble_scenes, scene_timings, audio_url,
+            progress_cb=band(70, 90), bgm_mood=bgm_mood,
         )
     video_url = asm["video_url"]
     report(90, "영상 합성 완료")
