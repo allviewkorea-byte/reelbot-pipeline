@@ -67,6 +67,46 @@ def _duration(path: Path) -> float:
     return float(out.stdout.strip())
 
 
+# 무음 판정 임계치(평균 음량). 정상 발화는 보통 -30~-14 dB, 완전 무음은 -inf/-91 dB.
+_SILENCE_DB = -50.0
+
+
+def _mean_volume(path: Path) -> float | None:
+    """ffmpeg volumedetect 로 평균 음량(dB)을 읽는다. 측정 실패 시 None.
+
+    완전 무음(-inf)은 매우 작은 값으로 떨어지므로 무음/누락 클립 판별에 쓴다.
+    """
+    proc = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-i", str(path), "-af", "volumedetect",
+         "-f", "null", "-"],
+        capture_output=True, text=True,
+    )
+    for line in proc.stderr.splitlines():
+        if "mean_volume:" in line:
+            try:
+                return float(line.split("mean_volume:")[1].strip().split()[0])
+            except (ValueError, IndexError):
+                return None
+    return None
+
+
+def _check_line_audio(idx: int, wav: Path, duration: float) -> str | None:
+    """씬 TTS 클립의 누락/무음을 검증한다. 문제 있으면 사유 문자열, 정상이면 None.
+
+    '자막은 있는데 음성이 없는 구간'을 합성 전에 잡기 위함.
+    """
+    if not wav.exists():
+        return "클립 파일 없음(누락)"
+    if duration < 0.05:
+        return f"길이 0 의심(dur={duration:.3f}s)"
+    mv = _mean_volume(wav)
+    if mv is None:
+        return "평균 음량 측정 실패"
+    if mv < _SILENCE_DB:
+        return f"무음 의심(mean_volume={mv:.1f}dB)"
+    return None
+
+
 def _concat(line_wavs: list[Path], gap: Path, dst: Path) -> None:
     """라인 wav 들을 쉼(gap) 으로 끼워 하나로 concat (스트림 복사)."""
     entries: list[str] = []
@@ -144,6 +184,7 @@ def generate_tts(
     indices: list[int] = []
     durations: list[float] = []
     line_wavs: list[Path] = []
+    silent_scenes: list[int] = []  # 무음/누락 클립 씬 번호(자막만 있고 음성 없는 구간)
     total = len(narrations)
     for n, (idx, text) in enumerate(narrations, 1):
         if progress_cb:
@@ -155,9 +196,24 @@ def generate_tts(
         adapter.synthesize(text, str(raw))
         wav = out_dir / f"line_{idx}.wav"
         _to_wav(raw, wav)
+        dur = _duration(wav)
+        # 합성 전 검증: 자막은 있는데 음성이 없는(무음/누락) 클립을 로그로 명시.
+        problem = _check_line_audio(idx, wav, dur)
+        if problem:
+            silent_scenes.append(idx)
+            logger.warning(
+                "씬 %s TTS 클립 이상 — %s | narration=%r", idx, problem, text[:40]
+            )
         indices.append(idx)
-        durations.append(_duration(wav))
+        durations.append(dur)
         line_wavs.append(wav)
+
+    if silent_scenes:
+        logger.warning(
+            "TTS 무음/누락 의심 씬 %d개: %s (자막만 있고 음성 없는 구간일 수 있음 — "
+            "TTS 프로바이더/voice_id/텍스트 확인 권장)",
+            len(silent_scenes), silent_scenes,
+        )
 
     if progress_cb:
         progress_cb(92, "나레이션 합치는 중...")
@@ -190,4 +246,5 @@ def generate_tts(
         "total_duration": round(total_duration, 3),
         "voice": adapter.name,
         "scene_timings": timings,
+        "silent_scenes": silent_scenes,  # 무음/누락 의심 씬(자막만 있고 음성 없는 구간)
     }
