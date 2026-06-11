@@ -35,10 +35,22 @@ def _run(cmd: list[str]) -> None:
     subprocess.run(cmd, check=True, capture_output=True)
 
 
+# 라우드니스 타깃(유튜브 권장): I=-14 LUFS, TP=-1.5 dBTP, LRA=11.
+# 클립별 1-pass 로 적용한다 — 클립 간 음량 편차가 원인이므로 'concat 전 정규화'가 핵심.
+# (2-pass 가 측정상 더 정밀하지만 라인 수×2 의 ffmpeg 호출이 추가되고, 짧은 발화
+# 클립에는 1-pass 로 충분해 처리 시간을 우선했다.)
+_LOUDNORM = "loudnorm=I=-14:TP=-1.5:LRA=11"
+
+
 def _to_wav(src: Path, dst: Path) -> None:
-    """입력 오디오를 공통 규격(pcm_s16le 44.1kHz mono)으로 정규화 → concat 안전."""
-    _run(["ffmpeg", "-y", "-i", str(src), "-ar", "44100", "-ac", "1",
-          "-c:a", "pcm_s16le", str(dst)])
+    """입력 오디오를 공통 규격(pcm_s16le 44.1kHz mono) + 타깃 라우드니스로 정규화.
+
+    이 단계는 원래도 재인코딩이라 loudnorm 추가에 별도 패스가 들지 않으며,
+    여기서 클립별 음량을 맞춰두면 이후 concat 은 -c copy(스트림 복사)를 유지할
+    수 있다(PR #40 OOM 해결책과 충돌 없음).
+    """
+    _run(["ffmpeg", "-y", "-i", str(src), "-af", _LOUDNORM,
+          "-ar", "44100", "-ac", "1", "-c:a", "pcm_s16le", str(dst)])
 
 
 def _make_silence(dst: Path, seconds: float) -> None:
