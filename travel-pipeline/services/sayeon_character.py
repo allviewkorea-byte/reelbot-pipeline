@@ -99,7 +99,10 @@ SAYEON_NEGATIVE = (
     "harsh outlines, stiff vector, watermark, text, signature, "
     "cluttered background, inconsistent character design, "
     "white background, plain background, no background, floating character, "
-    "isolated on white, background-free"
+    "isolated on white, background-free, "
+    # 주인공은 항상 흰곰 — 갈색곰이 주인공/메인으로 잡히는 것을 전 컷에서 차단.
+    "brown bear as main character, brown bear protagonist, "
+    "brown bear as the focal subject"
 )
 
 # 주인공 단독 컷 전용 네거티브 — 곰이 둘 이상 나오는 것을 막는다. two_shot(상대 동물)
