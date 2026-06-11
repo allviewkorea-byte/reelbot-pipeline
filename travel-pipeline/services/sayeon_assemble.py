@@ -201,6 +201,29 @@ def _build_ass(items: list[dict], ass_path: Path) -> None:
     ass_path.write_text("".join(lines), encoding="utf-8")
 
 
+# 라우드니스 타깃(유튜브 권장): I=-14 LUFS, TP=-1.5 dBTP, LRA=11.
+_LOUDNORM = "loudnorm=I=-14:TP=-1.5:LRA=11"
+
+
+def _prepare_audio_track(audio: Path, cwd: Path) -> Path:
+    """오디오 체인(분리 함수) — 최종 나레이션 트랙 정규화.
+
+    TTS 단계(sayeon_tts)가 클립별 loudnorm 을 이미 적용하므로 그 산출물에는 거의
+    무변화(안전망)지만, 외부/과거 audio_url 입력도 동일 타깃으로 맞춰준다.
+    오디오 전용 1-pass 재인코딩이라 메모리 부담이 거의 없고 영상 스트림은 일절
+    건드리지 않는다. ⚠️ 향후 BGM 덕킹/밸런스(sidechaincompress, amix)는 이 함수에
+    체인으로 얹는다.
+    """
+    out = cwd / "narration_norm.wav"
+    _run([
+        "-i", audio.name,
+        "-af", _LOUDNORM,
+        "-ar", "44100", "-ac", "1", "-c:a", "pcm_s16le",
+        out.name,
+    ], cwd=cwd)
+    return out
+
+
 def _burn_and_mux(video: Path, audio: Path, ass: Path, out: Path, cwd: Path) -> None:
     _run([
         "-i", video.name,
@@ -239,6 +262,8 @@ def generate_assemble(
         progress_cb(5, "오디오/이미지 받는 중...")
     audio_local = out_dir / "narration.wav"
     _fetch(audio_url, audio_local)
+    # 오디오 체인: 라우드니스 정규화(-14 LUFS). 영상 스트림은 건드리지 않는다.
+    audio_local = _prepare_audio_track(audio_local, out_dir)
 
     # 2) 씬별 켄번즈 클립 + 클립 길이 보정(전환 중심=씬 경계)
     n = len(scenes)
