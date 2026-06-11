@@ -61,17 +61,25 @@ def build_scene_prompt(
 
     주인공 곰이 나오는 컷(protagonist/two_shot/flashback, 또는 include_protagonist 인
     detail/mood)에만 캐릭터 블록을 주입한다. two_shot 상대는 캐스팅 팔레트 동물로
-    묘사(주인공 외 곰 금지). 표정은 앞부분 강조 + 뒤 반복(Kontext 가 시트 무표정을
-    따라가는 문제 완화). 주인공 단독 컷에만 '곰 둘 금지' 네거티브를 추가한다.
+    묘사(주인공 외 곰 금지). 표정은 **프롬프트 맨 앞에 대문자로 최우선 강조 + 끝에서
+    1회 더 반복**(총 2회)해 Kontext 가 시트 무표정을 따라가는 문제를 강하게 억제한다.
+    protagonist 컷에 표정이 비면 deadpan 을 강제한다. 주인공 단독 컷엔 '곰 둘 금지'
+    네거티브를 추가한다.
     """
     subject = (subject_type or "protagonist").strip().lower()
     bear = bear_in_frame(subject, include_protagonist)
-    expr = bear_expression(emotion, tone)
+    emo = (emotion or "").strip().lower()
+    # protagonist 컷은 표정 미명시 시 deadpan 강제(시트 무표정 추종 방지).
+    if subject == "protagonist" and not emo:
+        emo = "deadpan"
+    expr = bear_expression(emo, tone)
+    show_expr = bool(bear and expr and subject in ("protagonist", "two_shot"))
+    parts: list[str] = []
+    # [표정 — 최우선/앞] 곰 표정 컷은 프롬프트 맨 앞에 대문자로 최우선 강조(1회째).
+    if show_expr:
+        parts.append(f"FACIAL EXPRESSION: {expr} — THIS IS THE MOST IMPORTANT.")
     # [STYLE — 고정]
-    parts = [f"{POLAR_BEAR_ART_STYLE}, soft ambient lighting, with subtle texture."]
-    # 표정 강조를 앞부분에(반복) — 시트 무표정 추종 완화
-    if bear and expr and subject in ("protagonist", "two_shot"):
-        parts.append(f"IMPORTANT: the bear's facial expression must clearly read as {expr}.")
+    parts.append(f"{POLAR_BEAR_ART_STYLE}, soft ambient lighting, with subtle texture.")
     # [CHARACTER — 곰 등장 컷에만]
     if bear:
         character = (anchor or "").strip() or build_protagonist_character(tone)
@@ -93,8 +101,6 @@ def build_scene_prompt(
                 f"Other character present: {animal} — a clearly different animal species "
                 "(NOT a polar bear), with a distinct base color and silhouette."
             )
-        if expr and subject in ("protagonist", "two_shot"):
-            parts.append(f"Facial expression: {expr}.")  # 반복 강조
         parts.append(
             "Even in wide, full-body, or over-the-shoulder shots, strictly keep the "
             "same fur, nose, ears, and body proportions as the reference sheet "
@@ -108,6 +114,12 @@ def build_scene_prompt(
         "Composition: rule-of-thirds, breathing room, cinematic framing. "
         "9:16 vertical composition. No text, no subtitles, no watermark."
     )
+    # [표정 — 끝/반복] 2회째: 표정을 끝에서 한 번 더 못박는다(시트 무표정 추종 완화).
+    if show_expr:
+        parts.append(
+            f"Again — the polar bear's facial expression MUST clearly read as {expr}; "
+            "prioritize this expression over copying the neutral face of the reference sheet."
+        )
     # [NEGATIVE — 고정] (+ 주인공 단독 컷에만 곰 둘 금지)
     parts.append(f"{SAYEON_NEGATIVE}.")
     if subject == "protagonist":
