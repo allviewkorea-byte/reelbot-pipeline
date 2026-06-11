@@ -161,13 +161,50 @@ def _ass_time(t: float) -> str:
     return f"{h}:{m:02d}:{s:05.2f}"
 
 
-def _ass_text(subtitle: str, highlight: str) -> str:
-    """자막 텍스트. highlight 구를 노란색으로 감싼다(§4)."""
-    text = subtitle.strip()
+# 감정 피크 씬 강조 색(ASS 는 BGR 표기). 노랑/빨강으로 핵심 단어를 칠한다.
+_EMPHASIS_DEFAULT = "&H00F0FF&"   # 평소 강조(노랑톤) — 기존 동작 유지
+_EMOTION_COLOR = {
+    "shock": "&H00FFFF&",    # 노랑
+    "sadness": "&H00FFFF&",  # 노랑
+    "anger": "&H0000FF&",    # 빨강
+}
+_PEAK_EMOTIONS = set(_EMOTION_COLOR)  # 감정 피크 씬(shock/anger/sadness)
+_PEAK_FONTSIZE = 100  # 기본 90pt + 10pt
+_FADE = "\\fad(150,100)"  # 자막 페이드 인/아웃
+
+# emotion 별 핵심 키워드(자막에서 찾아 색칠). 오탐을 줄이려 2자 이상 구체어만.
+_EMOTION_KEYWORDS = {
+    "shock": ("충격", "소름", "깜짝", "믿기지", "설마", "발견", "들켰", "기절"),
+    "anger": ("배신", "어이없", "뻔뻔", "황당", "화가", "화났", "용서", "분노"),
+    "sadness": ("눈물", "울컥", "허탈", "무너", "미안", "그리워", "외로", "후회"),
+}
+
+
+def _emphasis_keywords(text: str, highlight: str, emotion: str) -> list[str]:
+    """자막에서 색칠할 핵심 키워드 선정. highlight 우선, 없으면 감정 사전에서 추출."""
     if highlight and highlight in text:
-        text = text.replace(
-            highlight, f"{{\\c&H00F0FF&}}{highlight}{{\\c&HFFFFFF&}}", 1
-        )
+        return [highlight]
+    keywords: list[str] = []
+    for kw in _EMOTION_KEYWORDS.get(emotion, ()):  # 감정 피크 씬만 사전 매칭
+        if kw in text and kw not in keywords:
+            keywords.append(kw)
+        if len(keywords) >= 2:  # 최대 2개
+            break
+    return keywords
+
+
+def _ass_text(subtitle: str, highlight: str, emotion: str = "") -> str:
+    """자막 텍스트. 핵심 키워드를 감정별 색(노랑/빨강)으로 감싼다(§4 + PR⑨).
+
+    emotion 이 감정 피크(shock/anger/sadness)면 해당 색으로 강조하고, 그 외에는
+    기존처럼 highlight 구만 노랑톤으로 칠한다. 페이드·폰트 확대는 줄 단위로
+    _build_ass 에서 얹는다(여기서는 인라인 색만).
+    """
+    text = subtitle.strip()
+    emo = (emotion or "").strip().lower()
+    color = _EMOTION_COLOR.get(emo, _EMPHASIS_DEFAULT)
+    for kw in _emphasis_keywords(text, highlight, emo):
+        text = text.replace(kw, f"{{\\c{color}}}{kw}{{\\c&HFFFFFF&}}", 1)
     return text.replace("\r\n", "\\N").replace("\n", "\\N")
 
 
@@ -195,12 +232,15 @@ def _build_ass(items: list[dict], ass_path: Path) -> None:
     )
     lines = [header]
     for it in items:
-        text = _ass_text(it.get("subtitle", ""), it.get("highlight", ""))
+        emotion = str(it.get("emotion", "")).strip().lower()
+        text = _ass_text(it.get("subtitle", ""), it.get("highlight", ""), emotion)
         if not text:
             continue
+        # 줄 단위 오버라이드: 페이드 인/아웃 + 감정 피크 씬은 폰트 10pt 확대.
+        override = _FADE + (f"\\fs{_PEAK_FONTSIZE}" if emotion in _PEAK_EMOTIONS else "")
         lines.append(
             f"Dialogue: 0,{_ass_time(it['start'])},{_ass_time(it['end'])},"
-            f"Default,,0,0,0,,{text}\n"
+            f"Default,,0,0,0,,{{{override}}}{text}\n"
         )
     ass_path.write_text("".join(lines), encoding="utf-8")
 
@@ -336,6 +376,7 @@ def generate_assemble(
             "end": float(timing["end"]),
             "subtitle": scene.get("subtitle", ""),
             "highlight": scene.get("highlight", ""),
+            "emotion": scene.get("emotion", ""),  # 감정 피크 씬 자막 강조용
         })
 
     # 3) 크로스페이드 체인

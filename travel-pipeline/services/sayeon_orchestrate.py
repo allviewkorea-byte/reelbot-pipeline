@@ -117,6 +117,7 @@ def generate_full(
             "subtitle": s.get("subtitle", ""),
             "highlight": s.get("highlight", ""),
             "motion": s.get("motion", "zoom_in"),
+            "emotion": s.get("emotion", ""),  # 감정 피크 씬 자막 강조용
         }
         for s in scenes
     ]
