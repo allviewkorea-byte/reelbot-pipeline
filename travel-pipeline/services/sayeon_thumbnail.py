@@ -44,14 +44,18 @@ def _generate_hook(script: str) -> tuple[str, str]:
         raise RuntimeError("OPENAI_API_KEY 미설정 — 후킹 문구를 생성할 수 없습니다.")
     client = OpenAI(api_key=api_key)
     system = (
-        "너는 한국 '사연' 숏폼 영상의 썸네일 카피라이터다. 사연 대본을 받아 "
-        "호기심을 강하게 자극하는 2줄 후킹 문구와 그중 강조할 핵심구를 만든다.\n"
+        "너는 한국 '사연' 숏폼 영상의 썸네일 카피라이터다. 사연 대본을 받아 클릭을 "
+        "유도하는 2줄 후킹 문구와 그중 강조할 핵심구를 만든다.\n"
+        "[공식 — 궁금증 생성 + 답 미공개]\n"
+        "- 궁금증을 폭발시키되 결말·답은 절대 누설하지 않는다(스포일러 금지).\n"
+        "- 각 줄 8~14자 내외로 짧고 강하게. 말줄임표(…)·의문형을 적극 사용한다.\n"
+        "- 구체적 숫자·금액·기간을 활용하면 좋다(예: '3년 만에', '500만원').\n"
+        '- 예: "시어머니가 제 통장을\\n보더니…" / "남친 집에서\\n이걸 발견했습니다".\n'
         "[규칙]\n"
         "- 출력은 오직 JSON 객체 하나. 마크다운/설명 금지.\n"
-        "- hook_text: 2줄(줄바꿈은 \\n). 짧고 강한 호기심 유발. 결말 스포일러 금지.\n"
+        "- hook_text: 2줄(줄바꿈은 \\n).\n"
         "- highlight: hook_text 안에 실제로 들어있는 핵심구(부분문자열).\n"
-        '[출력] {"hook_text":"엄마 옷장에\\n새 옷이 없던 이유",'
-        '"highlight":"새 옷이 없던 이유"}'
+        '[출력] {"hook_text":"시어머니가 제 통장을\\n보더니…","highlight":"통장을"}'
     )
     user = f"[사연 대본]\n{script.strip()}\n\n위 사연의 썸네일 후킹을 JSON으로 출력하라."
     resp = client.chat.completions.create(
@@ -94,8 +98,10 @@ def _build_thumb_ass(hook_text: str, highlight: str, ass_path: Path) -> None:
         "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, "
         "ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, "
         "MarginL, MarginR, MarginV, Encoding\n"
-        f"Style: Thumb,{_FONT},104,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"
-        "1,0,0,0,100,100,0,0,1,7,5,8,60,60,150,1\n\n"
+        # 폰트 확대(104→128) + 좌우 마진 축소(60→40)로 텍스트 블록이 화면 폭의
+        # ~80~90% 를 차지. 두꺼운 외곽선(8)·그림자(6)로 가독성. 상단(Alignment=8).
+        f"Style: Thumb,{_FONT},128,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"
+        "1,0,0,0,100,100,0,0,1,8,6,8,40,40,150,1\n\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, "
         "Effect, Text\n"
