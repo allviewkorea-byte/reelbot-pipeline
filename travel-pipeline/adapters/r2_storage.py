@@ -142,6 +142,58 @@ def upload_sayeon_video(file_path: str, job_id: str) -> str:
     return upload_image(file_path, object_key, content_type="video/mp4")
 
 
+def _bgm_bucket() -> str:
+    """BGM 전용 버킷. 미설정 시 기본 버킷으로 폴백한다.
+
+    ⚠️ 기본(videos) 버킷에는 7일 자동삭제 Lifecycle 이 걸려 있어 BGM 자산이
+    사라질 수 있다. Lifecycle 없는 전용 버킷(R2_BGM_BUCKET) 사용을 권장한다.
+    """
+    bucket = os.environ.get("R2_BGM_BUCKET")
+    if not bucket:
+        logger.warning(
+            "R2_BGM_BUCKET 미설정 — 기본 버킷 사용. 7일 Lifecycle 로 BGM 이 삭제될 "
+            "수 있으니 Lifecycle 없는 전용 버킷 설정을 권장합니다."
+        )
+    return bucket or os.environ.get("R2_BUCKET", "videos")
+
+
+# BGM 으로 인정하는 오디오 확장자.
+_BGM_EXTS = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac")
+
+
+def list_bgm_keys(mood: str) -> list[str]:
+    """bgm/{mood}/ 아래 오디오 오브젝트 키 목록(폴더 자체·비오디오 제외).
+
+    mood: emotional | suspense | hopeful. 호출부가 이 중 무작위로 한 곡을 고른다.
+    """
+    client = _get_client()
+    bucket = _bgm_bucket()
+    prefix = f"bgm/{mood.strip('/')}/"
+    keys: list[str] = []
+    paginator = client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if key.endswith("/"):
+                continue
+            if key.lower().endswith(_BGM_EXTS):
+                keys.append(key)
+    return keys
+
+
+def download_bgm(object_key: str, dest: str) -> str:
+    """BGM 오브젝트를 로컬 dest 로 내려받는다(서버사이드 합성용, 공개 URL 불필요)."""
+    client = _get_client()
+    bucket = _bgm_bucket()
+    try:
+        client.download_file(bucket, object_key, dest)
+    except Exception as e:
+        raise RuntimeError(
+            f"R2 BGM 다운로드 실패(bucket={bucket}, key={object_key}): {e}"
+        ) from e
+    return dest
+
+
 def upload_character_sheet(file_path: str, channel_id: str) -> str:
     """캐릭터 시트(채널당 1회, 영구 보존)를 R2에 업로드.
 
