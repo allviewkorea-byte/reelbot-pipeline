@@ -145,17 +145,37 @@ def load_refresh_token(channel_id: str) -> str | None:
                         "[yt-token] Supabase 에서 refresh_token 획득(channel=%s)", channel_id
                     )
                     return rows[0]["refresh_token"]
+                # 정확 키 미스 → 채널 키 불일치 가능(저장 시 default vs 조회 시 실제 id 등).
+                # 단일 채널 운영이므로 테이블의 아무 토큰으로 폴백한다.
+                rany = c.get(
+                    f"{url}/rest/v1/{_TABLE}",
+                    headers=headers,
+                    params={"select": "channel_id,refresh_token", "limit": "1"},
+                )
+                if rany.status_code == 200:
+                    arows = rany.json()
+                    if arows and arows[0].get("refresh_token"):
+                        logger.warning(
+                            "[yt-token] channel=%s 미스 → 저장된 토큰(channel=%s)으로 폴백",
+                            channel_id, arows[0].get("channel_id"),
+                        )
+                        return arows[0]["refresh_token"]
                 logger.warning(
-                    "[yt-token] Supabase 에 channel=%s 토큰 없음 — 로컬 폴백 확인", channel_id
+                    "[yt-token] Supabase 에 토큰 없음(channel=%s) — 로컬 폴백 확인", channel_id
                 )
         except Exception as e:  # noqa: BLE001
             logger.warning("[yt-token] Supabase 조회 실패 — 로컬 폴백: %s", _http_err(e))
     else:
         logger.warning("[yt-token] Supabase 미설정 — 로컬(/tmp) 폴백 사용")
 
-    local = _load_local().get(channel_id)
+    data = _load_local()
+    local = data.get(channel_id)
+    if not local and data:
+        # 로컬도 키 불일치 → 저장된 아무 토큰으로 폴백(단일 채널).
+        k, local = next(iter(data.items()))
+        logger.warning("[yt-token] 로컬 channel=%s 미스 → 저장된 키(%s)로 폴백", channel_id, k)
     logger.warning(
-        "[yt-token] 로컬 폴백 결과: %s (path=%s)",
+        "[yt-token] 최종 결과: %s (local path=%s)",
         "found" if local else "none", _LOCAL,
     )
     return local
