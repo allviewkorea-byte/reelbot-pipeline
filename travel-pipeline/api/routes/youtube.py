@@ -49,12 +49,16 @@ def auth():
 
 
 @router.get("/callback")
-def callback(code: str | None = None, error: str | None = None):
-    """구글 콜백: 코드→토큰 교환→저장. 저장 실패 시 에러를 JSON 으로 그대로 노출(디버그)."""
+def callback(code: str | None = None, error: str | None = None, state: str | None = None):
+    """구글 콜백: 코드→토큰 교환→저장. 저장 실패 시 에러를 JSON 으로 그대로 노출(디버그).
+
+    state 에는 /auth 가 실어 보낸 PKCE code_verifier 가 담겨 있어 토큰 교환에 사용한다.
+    """
     code_preview = (code[:8] + "…") if code else None
     logger.info(
-        "[yt-callback] 진입: code_present=%s code_preview=%s error=%s redirect_uri=%s",
-        bool(code), code_preview, error, redirect_uri(),
+        "[yt-callback] 진입: code_present=%s code_preview=%s error=%s "
+        "pkce_state=%s redirect_uri=%s",
+        bool(code), code_preview, error, bool(state), redirect_uri(),
     )
     if error:
         logger.warning("[yt-callback] 구글 OAuth 오류 파라미터: %s", error)
@@ -67,7 +71,7 @@ def callback(code: str | None = None, error: str | None = None):
         raise HTTPException(status_code=400, detail="code 파라미터가 없습니다.")
 
     try:
-        result = exchange_code(code)
+        result = exchange_code(code, code_verifier=state)
     except Exception as e:  # noqa: BLE001
         logger.exception("[yt-callback] 토큰 교환 예외")
         return JSONResponse(
