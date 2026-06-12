@@ -13,12 +13,8 @@ google-auth / google-auth-oauthlib 사용(이미 requirements 에 있음). impor
 
 from __future__ import annotations
 
-import base64
-import hashlib
 import logging
 import os
-import secrets
-import uuid
 
 from services.youtube_tokens import load_refresh_token, save_refresh_token
 
@@ -31,11 +27,6 @@ SCOPES = [
 ]
 _AUTH_URI = "https://accounts.google.com/o/oauth2/auth"
 _TOKEN_URI = "https://oauth2.googleapis.com/token"
-
-# PKCE 임시 저장소: state(UUID) → code_verifier. Railway 단일 컨테이너라 메모리 공유 OK.
-# /auth 에서 저장, /callback 에서 꺼내 쓰고 삭제(무상태 state 전달 대신 서버사이드 보관).
-_pkce_store: dict[str, str] = {}
-_PKCE_STORE_CAP = 100  # in-flight 인증이 비정상 종료돼도 메모리 무한 증가 방지
 
 
 class YouTubeNotConnected(RuntimeError):
@@ -71,58 +62,29 @@ def redirect_uri() -> str:
     return (os.getenv("YOUTUBE_REDIRECT_URI") or "").strip()
 
 
-def generate_pkce() -> tuple[str, str, str]:
-    """PKCE (verifier, challenge, state) 생성. challenge=base64url(SHA256(verifier)), S256.
-
-    verifier 는 URL-safe 86자(RFC 7636 의 43~128자 범위). state 는 저장소 키용 UUID.
-    """
-    verifier = secrets.token_urlsafe(64)
-    digest = hashlib.sha256(verifier.encode("ascii")).digest()
-    challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
-    state = uuid.uuid4().hex
-    return verifier, challenge, state
-
-
-def pop_pkce_verifier(state: str | None) -> str | None:
-    """state 로 저장된 code_verifier 를 꺼내며 동시에 삭제(1회용)."""
-    if not state:
-        return None
-    return _pkce_store.pop(state, None)
-
-
 def build_auth_url() -> str:
-    """구글 OAuth 동의 화면 URL(PKCE S256). access_type=offline+prompt=consent 로 refresh_token 확보.
+    """구글 OAuth 동의 화면 URL.
 
-    code_verifier 는 서버 메모리(_pkce_store)에 state(UUID) 키로 저장하고, URL 에는 state 만
-    싣는다(콜백이 state 로 조회).
+    서버사이드 OAuth 표준: access_type=offline + prompt=consent 로 refresh_token 을
+    강제 발급받는다(PKCE 불필요 — confidential client + client_secret 보유).
+    컨테이너 재시작에도 안전(상태 저장 없음).
     """
     from google_auth_oauthlib.flow import Flow
 
     config, redir = _client_config()
-    verifier, challenge, state = generate_pkce()
-    if len(_pkce_store) >= _PKCE_STORE_CAP:
-        _pkce_store.clear()  # 비정상 누적 방지(in-flight 인증은 드물고 짧다)
-    _pkce_store[state] = verifier
-    logger.info(
-        "[yt-oauth] 인증 URL 생성: redirect_uri=%s state=%s (PKCE S256, store=%d)",
-        redir, state, len(_pkce_store),
-    )
+    logger.info("[yt-oauth] 인증 URL 생성: redirect_uri=%s", redir)
     flow = Flow.from_client_config(config, scopes=SCOPES, redirect_uri=redir)
     auth_url, _ = flow.authorization_url(
         access_type="offline",
-        include_granted_scopes="true",
         prompt="consent",
-        code_challenge=challenge,
-        code_challenge_method="S256",
-        state=state,  # 서버사이드 저장소 키(코드 verifier 는 URL 에 노출되지 않음)
+        include_granted_scopes="true",
     )
     return auth_url
 
 
-def exchange_code(code: str, code_verifier: str | None = None) -> dict:
+def exchange_code(code: str) -> dict:
     """인증 코드 → 토큰 교환 후 refresh_token 저장. 상세 결과 dict 반환.
 
-    code_verifier(PKCE) 가 주어지면 토큰 교환 요청에 포함한다(S256 검증).
     Returns: {refresh_token(실제값|None), has_access_token, save(저장결과),
               redirect_uri, channel_id, error}
     """
@@ -131,13 +93,10 @@ def exchange_code(code: str, code_verifier: str | None = None) -> dict:
     config, redir = _client_config()
     ch = _channel_id()
     logger.info(
-        "[yt-oauth] 토큰 교환 시작: redirect_uri=%s channel=%s code_len=%d pkce=%s",
-        redir, ch, len(code or ""), bool(code_verifier),
+        "[yt-oauth] 토큰 교환 시작: redirect_uri=%s channel=%s code_len=%d",
+        redir, ch, len(code or ""),
     )
     flow = Flow.from_client_config(config, scopes=SCOPES, redirect_uri=redir)
-    if code_verifier:
-        # google-auth-oauthlib Flow.fetch_token 은 flow.code_verifier 를 토큰 요청에 넣는다.
-        flow.code_verifier = code_verifier
     flow.fetch_token(code=code)
     creds = flow.credentials
     refresh_token = getattr(creds, "refresh_token", None)
