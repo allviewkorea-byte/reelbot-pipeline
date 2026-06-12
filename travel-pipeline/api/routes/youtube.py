@@ -19,7 +19,6 @@ from services.youtube_oauth import (
     build_auth_url,
     exchange_code,
     is_connected,
-    pop_pkce_verifier,
     redirect_uri,
 )
 from services.youtube_tokens import _supabase_cfg
@@ -50,18 +49,12 @@ def auth():
 
 
 @router.get("/callback")
-def callback(code: str | None = None, error: str | None = None, state: str | None = None):
-    """구글 콜백: 코드→토큰 교환→저장. 저장 실패 시 에러를 JSON 으로 그대로 노출(디버그).
-
-    state(UUID)로 서버 저장소(_pkce_store)에서 PKCE code_verifier 를 꺼내 토큰 교환에 쓴다.
-    """
+def callback(code: str | None = None, error: str | None = None):
+    """구글 콜백: 코드→토큰 교환→저장. 저장 실패 시 에러를 JSON 으로 그대로 노출(디버그)."""
     code_preview = (code[:8] + "…") if code else None
-    # state(UUID) 로 서버 저장소에서 code_verifier 조회(꺼내며 삭제).
-    code_verifier = pop_pkce_verifier(state)
     logger.info(
-        "[yt-callback] 진입: code_present=%s code_preview=%s error=%s "
-        "state=%s pkce_found=%s redirect_uri=%s",
-        bool(code), code_preview, error, state, bool(code_verifier), redirect_uri(),
+        "[yt-callback] 진입: code_present=%s code_preview=%s error=%s redirect_uri=%s",
+        bool(code), code_preview, error, redirect_uri(),
     )
     if error:
         logger.warning("[yt-callback] 구글 OAuth 오류 파라미터: %s", error)
@@ -74,7 +67,7 @@ def callback(code: str | None = None, error: str | None = None, state: str | Non
         raise HTTPException(status_code=400, detail="code 파라미터가 없습니다.")
 
     try:
-        result = exchange_code(code, code_verifier=code_verifier)
+        result = exchange_code(code)
     except Exception as e:  # noqa: BLE001
         logger.exception("[yt-callback] 토큰 교환 예외")
         return JSONResponse(
