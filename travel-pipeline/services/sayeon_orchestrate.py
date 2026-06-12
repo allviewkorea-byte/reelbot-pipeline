@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+import random
 from contextlib import contextmanager
 
 from services.sayeon_assemble import generate_assemble
@@ -27,6 +28,40 @@ logger = logging.getLogger(__name__)
 
 # 씬당 후보 장수. 자동 파이프라인이라 큐레이션 없이 1장만 뽑아 비용을 줄인다.
 _SCENE_NUM_IMAGES = 1
+
+# 썸네일에 우선 쓸 감정 피크 씬(자극적·클릭 유도).
+_THUMB_PEAK_EMOTIONS = ("shock", "anger", "sadness")
+
+
+def _select_thumbnail_image(
+    scenes: list[dict], image_by_index: dict, thumbnail_scene_index: int | None
+) -> str | None:
+    """썸네일 배경으로 쓸 씬 이미지 URL 선택(새 이미지 생성 없음).
+
+    우선순위: 명시 지정(thumbnail_scene_index) → 감정 피크(shock/anger/sadness) 씬 랜덤
+    → 나머지 씬 랜덤. 단, **마지막 씬(질문 엔딩)은 제외**하고 이미지가 있는 씬만 후보.
+    후보가 없으면 첫 씬/아무 이미지로 폴백.
+    """
+    if thumbnail_scene_index in image_by_index:
+        return image_by_index[thumbnail_scene_index]
+
+    last_index = scenes[-1].get("index") if scenes else None
+    candidates = [
+        s for s in scenes
+        if s.get("index") != last_index and image_by_index.get(s.get("index"))
+    ]
+    if not candidates:
+        # 폴백: 이미지가 있는 아무 씬(없으면 None).
+        if scenes and image_by_index.get(scenes[0].get("index")):
+            return image_by_index[scenes[0]["index"]]
+        return next(iter(image_by_index.values()), None)
+
+    peak = [
+        s for s in candidates
+        if str(s.get("emotion", "")).strip().lower() in _THUMB_PEAK_EMOTIONS
+    ]
+    chosen = random.choice(peak or candidates)
+    return image_by_index.get(chosen["index"])
 
 
 def _maybe_publish_youtube(video_url: str, thumbnail_url: str, hook_text: str, script: str):
@@ -154,27 +189,13 @@ def generate_full(
     video_url = asm["video_url"]
     report(90, "영상 합성 완료")
 
-    # f. 썸네일 (~98%) — 지정 씬(또는 기본=첫 씬) 이미지 + script 후킹
-    if thumbnail_scene_index in image_by_index:
-        thumb_image = image_by_index[thumbnail_scene_index]
-    else:
-        thumb_image = image_by_index.get(scenes[0]["index"]) or next(
-            iter(image_by_index.values())
-        )
-    # 시트 레퍼런스로 썸네일 전용 흰곰 이미지를 직접 생성(사람·갈색곰 등장 불가).
-    # 생성/품질게이트 실패 시 thumb_image(기존 씬 컷)로 폴백(파이프라인 안 멈춤).
+    # f. 썸네일 (~98%) — 해당 사연의 씬 이미지 1장 선택(마지막 질문 엔딩 제외, 감정
+    # 피크 우선) + 후킹 카피 오버레이. 새 이미지 생성 없음(비용 0, 실제 장면과 일치).
+    thumb_image = _select_thumbnail_image(scenes, image_by_index, thumbnail_scene_index)
     with _stage("썸네일"):
-        thumb = generate_thumbnail(
-            image_url=thumb_image,
-            script=script,
-            sheet_url=sheet_url,
-            anchor=anchor,
-        )
+        thumb = generate_thumbnail(image_url=thumb_image, script=script)
     thumbnail_url = thumb["thumbnail_url"]
-    if thumb.get("thumbnail_fallback"):
-        report(98, "썸네일 자동생성 실패 — 수동 확인 필요")
-    else:
-        report(98, "썸네일 완료")
+    report(98, "썸네일 완료")
 
     # g. 유튜브 자동 게시 (옵션) — YOUTUBE_AUTO_PUBLISH=true 일 때만, 실패해도 안 멈춤.
     youtube_url = _maybe_publish_youtube(
