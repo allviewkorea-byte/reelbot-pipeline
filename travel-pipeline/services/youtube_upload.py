@@ -26,10 +26,12 @@ logger = logging.getLogger(__name__)
 # 고정 태그(작업지시서).
 DEFAULT_TAGS = ["실화", "사연", "공감", "백곰", "실화사연", "숏폼", "실화보고서"]
 
+_SHORTS_TAG = "#Shorts"
+
+# 설명 푸터(제보 줄 제거). 마지막 해시태그 줄에 #Shorts 포함.
 _DESC_FOOTER = (
-    "📮 사연 제보는 댓글로 남겨주세요\n"
     "매일 새 실화 업로드\n\n"
-    "#실화 #사연 #공감 #백곰 #실화사연 #숏폼 #백곰의실화보고서"
+    "#실화 #사연 #공감 #백곰 #실화사연 #숏폼 #백곰의실화보고서 #Shorts"
 )
 
 
@@ -48,7 +50,10 @@ def build_video_metadata(hook_text: str, script: str) -> tuple[str, str, list[st
     title = " ".join((hook_text or "").replace("\\n", "\n").split())
     if not title:
         title = _summarize(script, 1)[:40]
-    title = title[:100]  # 유튜브 제목 한도
+    # 제목 끝에 #Shorts 자동 추가(유튜브 제목 100자 한도 내에서 공간 확보).
+    if _SHORTS_TAG.lower() not in title.lower():
+        title = f"{title[: 100 - len(_SHORTS_TAG) - 1].rstrip()} {_SHORTS_TAG}"
+    title = title[:100]
     summary = _summarize(script)
     description = f"{summary}\n\n{_DESC_FOOTER}" if summary else _DESC_FOOTER
     return title, description, list(DEFAULT_TAGS)
