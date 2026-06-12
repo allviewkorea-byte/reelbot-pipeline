@@ -13,8 +13,11 @@ google-auth / google-auth-oauthlib 사용(이미 requirements 에 있음). impor
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import logging
 import os
+import secrets
 
 from services.youtube_tokens import load_refresh_token, save_refresh_token
 
@@ -62,23 +65,44 @@ def redirect_uri() -> str:
     return (os.getenv("YOUTUBE_REDIRECT_URI") or "").strip()
 
 
+def generate_pkce() -> tuple[str, str]:
+    """PKCE (verifier, challenge) 생성. challenge = base64url(SHA256(verifier)), 메서드 S256.
+
+    verifier 는 URL-safe 86자(RFC 7636 의 43~128자 범위, 허용 문자 [A-Za-z0-9-_]).
+    """
+    verifier = secrets.token_urlsafe(64)
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    return verifier, challenge
+
+
 def build_auth_url() -> str:
-    """구글 OAuth 동의 화면 URL. access_type=offline + prompt=consent 로 refresh_token 확보."""
+    """구글 OAuth 동의 화면 URL(PKCE S256). access_type=offline+prompt=consent 로 refresh_token 확보.
+
+    code_verifier 는 state 파라미터에 실어 보낸다(무상태 — 콜백이 state 로 복원).
+    """
     from google_auth_oauthlib.flow import Flow
 
     config, redir = _client_config()
-    logger.info("[yt-oauth] 인증 URL 생성: redirect_uri=%s", redir)
+    verifier, challenge = generate_pkce()
+    logger.info("[yt-oauth] 인증 URL 생성: redirect_uri=%s (PKCE S256)", redir)
     flow = Flow.from_client_config(config, scopes=SCOPES, redirect_uri=redir)
     auth_url, _ = flow.authorization_url(
-        access_type="offline", include_granted_scopes="true", prompt="consent"
+        access_type="offline",
+        include_granted_scopes="true",
+        prompt="consent",
+        code_challenge=challenge,
+        code_challenge_method="S256",
+        state=verifier,  # 콜백에서 state 로 code_verifier 복원(무상태)
     )
     return auth_url
 
 
-def exchange_code(code: str) -> dict:
+def exchange_code(code: str, code_verifier: str | None = None) -> dict:
     """인증 코드 → 토큰 교환 후 refresh_token 저장. 상세 결과 dict 반환.
 
-    Returns: {refresh_token(bool 아닌 실제값|None), has_access_token, save(저장결과),
+    code_verifier(PKCE) 가 주어지면 토큰 교환 요청에 포함한다(S256 검증).
+    Returns: {refresh_token(실제값|None), has_access_token, save(저장결과),
               redirect_uri, channel_id, error}
     """
     from google_auth_oauthlib.flow import Flow
@@ -86,10 +110,13 @@ def exchange_code(code: str) -> dict:
     config, redir = _client_config()
     ch = _channel_id()
     logger.info(
-        "[yt-oauth] 토큰 교환 시작: redirect_uri=%s channel=%s code_len=%d",
-        redir, ch, len(code or ""),
+        "[yt-oauth] 토큰 교환 시작: redirect_uri=%s channel=%s code_len=%d pkce=%s",
+        redir, ch, len(code or ""), bool(code_verifier),
     )
     flow = Flow.from_client_config(config, scopes=SCOPES, redirect_uri=redir)
+    if code_verifier:
+        # google-auth-oauthlib Flow.fetch_token 은 flow.code_verifier 를 토큰 요청에 넣는다.
+        flow.code_verifier = code_verifier
     flow.fetch_token(code=code)
     creds = flow.credentials
     refresh_token = getattr(creds, "refresh_token", None)
