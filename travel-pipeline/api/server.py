@@ -7,6 +7,9 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import logging
+import os
+
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,6 +19,16 @@ from api.routes import health, sayeon, status, storyboard, trends, video, youtub
 from services.scheduler import shutdown_scheduler, start_scheduler
 
 load_dotenv()
+
+# 애플리케이션 로깅 설정 — 미설정 시 root 로거가 WARNING 기본이라 모듈의 logger.info(...)
+# (예: [youtube-debug]/[yt-oauth]/[yt-token])가 전부 묻힌다. INFO 로 강제(force=True)해
+# uvicorn 이 root 핸들러를 안 깔아도 앱 로그가 stdout(Railway 로그)에 보이게 한다.
+# LOG_LEVEL 환경변수로 조정 가능(기본 INFO).
+logging.basicConfig(
+    level=(os.getenv("LOG_LEVEL") or "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    force=True,
+)
 
 
 @asynccontextmanager
