@@ -115,7 +115,7 @@ SAYEON_NEGATIVE = (
 # two_shot(상대 동물·갈색곰 친구가 정당히 등장)에는 적용하지 않는다.
 SAYEON_NEGATIVE_SOLO = (
     "multiple bears, second bear, duplicate protagonist, different bear species, "
-    "brown bear, brown bear in frame"
+    "brown bear, dark brown bear, brown bear in frame"
 )
 
 
