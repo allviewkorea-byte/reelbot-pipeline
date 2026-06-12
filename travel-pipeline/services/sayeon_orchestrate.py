@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import logging
+import os
 from contextlib import contextmanager
 
 from services.sayeon_assemble import generate_assemble
@@ -21,8 +23,25 @@ from services.sayeon_split import split_script
 from services.sayeon_thumbnail import generate_thumbnail
 from services.sayeon_tts import generate_tts
 
+logger = logging.getLogger(__name__)
+
 # 씬당 후보 장수. 자동 파이프라인이라 큐레이션 없이 1장만 뽑아 비용을 줄인다.
 _SCENE_NUM_IMAGES = 1
+
+
+def _maybe_publish_youtube(video_url: str, thumbnail_url: str, hook_text: str, script: str):
+    """YOUTUBE_AUTO_PUBLISH=true 일 때만 유튜브 자동 업로드. 실패해도 None 반환(안 멈춤)."""
+    if (os.getenv("YOUTUBE_AUTO_PUBLISH") or "").strip().lower() != "true":
+        return None
+    try:
+        from services.youtube_upload import publish_to_youtube
+
+        result = publish_to_youtube(video_url, thumbnail_url, hook_text, script)
+        logger.info("유튜브 자동 업로드 완료: %s", result.get("video_url"))
+        return result.get("video_url")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("유튜브 자동 업로드 실패(영상 생성은 완료 처리): %s", e)
+        return None
 
 
 @contextmanager
@@ -146,6 +165,13 @@ def generate_full(
     thumbnail_url = thumb["thumbnail_url"]
     report(98, "썸네일 완료")
 
+    # g. 유튜브 자동 게시 (옵션) — YOUTUBE_AUTO_PUBLISH=true 일 때만, 실패해도 안 멈춤.
+    youtube_url = _maybe_publish_youtube(
+        video_url, thumbnail_url, thumb.get("hook_text", ""), script
+    )
+    if youtube_url:
+        report(99, "유튜브 업로드 완료")
+
     report(100, "완료")
     out_scenes = [
         {**s, "image_url": image_by_index.get(s["index"])} for s in scenes
@@ -153,6 +179,7 @@ def generate_full(
     return {
         "video_url": video_url,
         "thumbnail_url": thumbnail_url,
+        "youtube_url": youtube_url,  # 자동 게시 OFF/실패 시 None
         "audio_url": audio_url,
         "sheet_url": sheet_url,
         "anchor": anchor,
