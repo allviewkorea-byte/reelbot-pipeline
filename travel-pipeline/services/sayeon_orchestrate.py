@@ -31,6 +31,7 @@ _SCENE_NUM_IMAGES = 1
 
 def _maybe_publish_youtube(video_url: str, thumbnail_url: str, hook_text: str, script: str):
     """YOUTUBE_AUTO_PUBLISH=true 일 때만 유튜브 자동 업로드. 실패해도 None 반환(안 멈춤)."""
+    logger.info("[youtube-debug] YOUTUBE_AUTO_PUBLISH=%s", os.getenv("YOUTUBE_AUTO_PUBLISH"))
     if (os.getenv("YOUTUBE_AUTO_PUBLISH") or "").strip().lower() != "true":
         return None
     try:

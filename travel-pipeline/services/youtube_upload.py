@@ -18,7 +18,7 @@ from pathlib import Path
 
 # 영상/썸네일 다운로드는 검증된 합성 엔진 헬퍼 재사용(http URL/로컬 경로 모두 처리).
 from services.sayeon_assemble import _fetch
-from services.youtube_oauth import get_credentials
+from services.youtube_oauth import get_credentials, is_connected
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +111,9 @@ def publish_to_youtube(
     오케스트레이터가 호출. video_url/thumbnail_url 은 R2 URL 또는 로컬 경로 모두 가능
     (_fetch 가 처리). 임시 디렉터리에 받아 업로드한다.
     """
+    logger.info("[youtube-debug] publish_to_youtube 진입")
+    connected = is_connected()
+    logger.info("[youtube-debug] is_connected=%s", connected)
     title, description, tags = build_video_metadata(hook_text, script)
     with tempfile.TemporaryDirectory(prefix="yt_") as tmp:
         tmp_dir = Path(tmp)
