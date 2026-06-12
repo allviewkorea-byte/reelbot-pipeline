@@ -14,6 +14,7 @@ import logging
 import os
 import re
 import tempfile
+import traceback
 from pathlib import Path
 
 # 영상/썸네일 다운로드는 검증된 합성 엔진 헬퍼 재사용(http URL/로컬 경로 모두 처리).
@@ -67,8 +68,15 @@ def upload_video(
     if not os.path.exists(video_path):
         raise FileNotFoundError(f"업로드할 영상 파일 없음: {video_path}")
 
-    creds = get_credentials()
-    youtube = build("youtube", "v3", credentials=creds, cache_discovery=False)
+    # 자격증명/클라이언트 생성(WARNING 레벨로 가시성 확보).
+    logger.warning("[youtube-debug] 자격증명/클라이언트 생성 시작")
+    try:
+        creds = get_credentials()
+        youtube = build("youtube", "v3", credentials=creds, cache_discovery=False)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[youtube-debug] 자격증명/클라이언트 생성 실패: %s\n%s", e, traceback.format_exc())
+        raise
+    logger.warning("[youtube-debug] 자격증명/클라이언트 생성 완료")
 
     privacy = (os.getenv("YOUTUBE_PRIVACY_STATUS") or "public").strip().lower()
     body = {
@@ -84,11 +92,18 @@ def upload_video(
             "selfDeclaredMadeForKids": False,
         },
     }
-    media = MediaFileUpload(video_path, mimetype="video/mp4", chunksize=-1, resumable=True)
-    request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
-    response = request.execute()
+    logger.warning(
+        "[youtube-debug] 유튜브 API 업로드 시작: privacy=%s file=%s", privacy, video_path
+    )
+    try:
+        media = MediaFileUpload(video_path, mimetype="video/mp4", chunksize=-1, resumable=True)
+        request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
+        response = request.execute()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[youtube-debug] videos.insert 실패: %s\n%s", e, traceback.format_exc())
+        raise
     video_id = response["id"]
-    logger.info("유튜브 업로드 완료: video_id=%s privacy=%s", video_id, privacy)
+    logger.warning("[youtube-debug] 유튜브 업로드 성공: video_id=%s privacy=%s", video_id, privacy)
 
     if thumbnail_path and os.path.exists(thumbnail_path):
         try:
@@ -96,9 +111,9 @@ def upload_video(
                 videoId=video_id,
                 media_body=MediaFileUpload(thumbnail_path, mimetype="image/png"),
             ).execute()
-            logger.info("유튜브 썸네일 첨부 완료: video_id=%s", video_id)
+            logger.warning("[youtube-debug] 썸네일 첨부 완료: video_id=%s", video_id)
         except Exception as e:  # noqa: BLE001
-            logger.warning("썸네일 첨부 실패(영상은 업로드됨): %s", e)
+            logger.warning("[youtube-debug] 썸네일 첨부 실패(영상은 업로드됨): %s\n%s", e, traceback.format_exc())
 
     return {"video_id": video_id, "video_url": f"https://www.youtube.com/watch?v={video_id}"}
 
@@ -111,20 +126,37 @@ def publish_to_youtube(
     오케스트레이터가 호출. video_url/thumbnail_url 은 R2 URL 또는 로컬 경로 모두 가능
     (_fetch 가 처리). 임시 디렉터리에 받아 업로드한다.
     """
-    logger.info("[youtube-debug] publish_to_youtube 진입")
+    logger.warning("[youtube-debug] publish_to_youtube 진입")
     connected = is_connected()
-    logger.info("[youtube-debug] is_connected=%s", connected)
+    logger.warning("[youtube-debug] is_connected=%s", connected)
     title, description, tags = build_video_metadata(hook_text, script)
     with tempfile.TemporaryDirectory(prefix="yt_") as tmp:
         tmp_dir = Path(tmp)
         local_video = tmp_dir / "video.mp4"
-        _fetch(video_url, local_video)
+        logger.warning("[youtube-debug] R2 영상 다운로드 시작: %s", video_url)
+        try:
+            _fetch(video_url, local_video)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[youtube-debug] 영상 다운로드 실패: %s\n%s", e, traceback.format_exc())
+            raise
+        size = local_video.stat().st_size if local_video.exists() else 0
+        logger.warning("[youtube-debug] R2 영상 다운로드 완료: %d bytes", size)
+
         local_thumb: str | None = None
         if thumbnail_url:
             try:
                 t = tmp_dir / "thumb.png"
+                logger.warning("[youtube-debug] 썸네일 다운로드 시작: %s", thumbnail_url)
                 _fetch(thumbnail_url, t)
                 local_thumb = str(t)
+                logger.warning("[youtube-debug] 썸네일 다운로드 완료")
             except Exception as e:  # noqa: BLE001
-                logger.warning("썸네일 다운로드 실패(영상만 업로드): %s", e)
-        return upload_video(str(local_video), title, description, local_thumb, tags)
+                logger.warning("[youtube-debug] 썸네일 다운로드 실패(영상만 업로드): %s\n%s", e, traceback.format_exc())
+
+        try:
+            result = upload_video(str(local_video), title, description, local_thumb, tags)
+            logger.warning("[youtube-debug] 업로드 성공: %s", result.get("video_url"))
+            return result
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[youtube-debug] 업로드 실패: %s\n%s", e, traceback.format_exc())
+            raise
