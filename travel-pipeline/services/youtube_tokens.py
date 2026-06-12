@@ -118,8 +118,12 @@ def save_refresh_token(channel_id: str, refresh_token: str) -> dict:
 
 
 def load_refresh_token(channel_id: str) -> str | None:
-    """channel_id 의 refresh_token 조회(Supabase 우선, 실패/미설정 시 로컬)."""
+    """channel_id 의 refresh_token 조회(Supabase 우선, 실패/미설정 시 로컬 /tmp 폴백)."""
     url, key = _supabase_cfg()
+    logger.warning(
+        "[yt-token] load_refresh_token 시작: channel=%s supabase_configured=%s",
+        channel_id, bool(url and key),
+    )
     if url and key:
         try:
             headers = {"apikey": key, "Authorization": f"Bearer {key}"}
@@ -129,10 +133,29 @@ def load_refresh_token(channel_id: str) -> str | None:
                     headers=headers,
                     params={"channel_id": f"eq.{channel_id}", "select": "refresh_token"},
                 )
+                logger.warning("[yt-token] Supabase 조회 응답: HTTP %s", r.status_code)
                 r.raise_for_status()
                 rows = r.json()
-                if rows:
-                    return rows[0].get("refresh_token")
+                logger.warning(
+                    "[yt-token] Supabase rows=%d",
+                    len(rows) if isinstance(rows, list) else -1,
+                )
+                if rows and rows[0].get("refresh_token"):
+                    logger.warning(
+                        "[yt-token] Supabase 에서 refresh_token 획득(channel=%s)", channel_id
+                    )
+                    return rows[0]["refresh_token"]
+                logger.warning(
+                    "[yt-token] Supabase 에 channel=%s 토큰 없음 — 로컬 폴백 확인", channel_id
+                )
         except Exception as e:  # noqa: BLE001
             logger.warning("[yt-token] Supabase 조회 실패 — 로컬 폴백: %s", _http_err(e))
-    return _load_local().get(channel_id)
+    else:
+        logger.warning("[yt-token] Supabase 미설정 — 로컬(/tmp) 폴백 사용")
+
+    local = _load_local().get(channel_id)
+    logger.warning(
+        "[yt-token] 로컬 폴백 결과: %s (path=%s)",
+        "found" if local else "none", _LOCAL,
+    )
+    return local
