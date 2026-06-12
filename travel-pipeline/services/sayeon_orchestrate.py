@@ -161,10 +161,20 @@ def generate_full(
         thumb_image = image_by_index.get(scenes[0]["index"]) or next(
             iter(image_by_index.values())
         )
+    # 시트 레퍼런스로 썸네일 전용 흰곰 이미지를 직접 생성(사람·갈색곰 등장 불가).
+    # 생성/품질게이트 실패 시 thumb_image(기존 씬 컷)로 폴백(파이프라인 안 멈춤).
     with _stage("썸네일"):
-        thumb = generate_thumbnail(thumb_image, script=script)
+        thumb = generate_thumbnail(
+            image_url=thumb_image,
+            script=script,
+            sheet_url=sheet_url,
+            anchor=anchor,
+        )
     thumbnail_url = thumb["thumbnail_url"]
-    report(98, "썸네일 완료")
+    if thumb.get("thumbnail_fallback"):
+        report(98, "썸네일 자동생성 실패 — 수동 확인 필요")
+    else:
+        report(98, "썸네일 완료")
 
     # g. 유튜브 자동 게시 (옵션) — YOUTUBE_AUTO_PUBLISH=true 일 때만, 실패해도 안 멈춤.
     youtube_url = _maybe_publish_youtube(
