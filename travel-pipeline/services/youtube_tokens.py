@@ -29,7 +29,8 @@ import httpx
 logger = logging.getLogger(__name__)
 
 _TABLE = "youtube_tokens"
-_LOCAL = Path("output/youtube_tokens.json")
+# 로컬 폴백 경로(Railway 에서 쓰기 가능한 /tmp 기본). env 로 변경 가능.
+_LOCAL = Path(os.getenv("YOUTUBE_TOKEN_LOCAL_PATH", "/tmp/youtube_token.json"))
 
 
 def _supabase_cfg() -> tuple[str | None, str | None]:
@@ -43,6 +44,13 @@ def _supabase_cfg() -> tuple[str | None, str | None]:
     return (url or None, key or None)
 
 
+def _http_err(e: Exception) -> str:
+    """httpx 에러를 사람이 읽을 수 있는 한 줄로(상태코드 + 본문 앞부분)."""
+    if isinstance(e, httpx.HTTPStatusError):
+        return f"HTTP {e.response.status_code}: {e.response.text[:300]}"
+    return f"{type(e).__name__}: {e}"
+
+
 def _load_local() -> dict:
     if _LOCAL.exists():
         try:
@@ -52,10 +60,22 @@ def _load_local() -> dict:
     return {}
 
 
-def save_refresh_token(channel_id: str, refresh_token: str) -> None:
-    """refresh_token 을 channel_id 키로 영구 저장(Supabase 우선, 실패 시 로컬)."""
+def save_refresh_token(channel_id: str, refresh_token: str) -> dict:
+    """refresh_token 을 영구 저장(Supabase 우선, 실패 시 로컬). 상세 결과 dict 반환.
+
+    Returns: {stored, backend("supabase"|"local"|None), supabase_error, local_error, local_path}
+    """
+    result = {
+        "stored": False,
+        "backend": None,
+        "supabase_error": None,
+        "local_error": None,
+        "local_path": str(_LOCAL),
+    }
     if not refresh_token:
-        return
+        result["supabase_error"] = "refresh_token 이 비어 있음"
+        return result
+
     url, key = _supabase_cfg()
     if url and key:
         try:
@@ -72,18 +92,29 @@ def save_refresh_token(channel_id: str, refresh_token: str) -> None:
                     headers=headers, json=body,
                 )
                 r.raise_for_status()
-            logger.info("유튜브 refresh_token Supabase 저장 완료(channel=%s)", channel_id)
-            return
+            result.update(stored=True, backend="supabase")
+            logger.info("[yt-token] Supabase 저장 OK (channel=%s)", channel_id)
+            return result
         except Exception as e:  # noqa: BLE001
-            logger.warning("Supabase 토큰 저장 실패 — 로컬 폴백: %s", e)
-    _LOCAL.parent.mkdir(parents=True, exist_ok=True)
-    data = _load_local()
-    data[channel_id] = refresh_token
-    _LOCAL.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    logger.warning(
-        "유튜브 refresh_token 로컬 저장(휘발성). 영구 보관하려면 SUPABASE_URL/"
-        "SUPABASE_SECRET_KEY 를 설정하세요."
-    )
+            msg = _http_err(e)
+            result["supabase_error"] = msg
+            logger.warning("[yt-token] Supabase 저장 실패 — 로컬 폴백 시도: %s", msg)
+    else:
+        result["supabase_error"] = "SUPABASE_URL / SUPABASE_SECRET_KEY 미설정"
+        logger.warning("[yt-token] Supabase 미설정 — 로컬 폴백 시도")
+
+    # 로컬 폴백
+    try:
+        _LOCAL.parent.mkdir(parents=True, exist_ok=True)
+        data = _load_local()
+        data[channel_id] = refresh_token
+        _LOCAL.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        result.update(stored=True, backend="local")
+        logger.warning("[yt-token] 로컬 저장 OK (%s) — ⚠️ 휘발성", _LOCAL)
+    except Exception as e:  # noqa: BLE001
+        result["local_error"] = f"{type(e).__name__}: {e}"
+        logger.error("[yt-token] 로컬 저장도 실패: %s", result["local_error"])
+    return result
 
 
 def load_refresh_token(channel_id: str) -> str | None:
@@ -103,5 +134,5 @@ def load_refresh_token(channel_id: str) -> str | None:
                 if rows:
                     return rows[0].get("refresh_token")
         except Exception as e:  # noqa: BLE001
-            logger.warning("Supabase 토큰 조회 실패 — 로컬 폴백: %s", e)
+            logger.warning("[yt-token] Supabase 조회 실패 — 로컬 폴백: %s", _http_err(e))
     return _load_local().get(channel_id)
