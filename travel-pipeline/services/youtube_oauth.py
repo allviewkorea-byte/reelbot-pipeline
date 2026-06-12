@@ -57,11 +57,17 @@ def _client_config() -> tuple[dict, str]:
     return config, redir
 
 
+def redirect_uri() -> str:
+    """설정된 OAuth 리다이렉트 URI(콜백 URL 재확인·디버그용)."""
+    return (os.getenv("YOUTUBE_REDIRECT_URI") or "").strip()
+
+
 def build_auth_url() -> str:
     """구글 OAuth 동의 화면 URL. access_type=offline + prompt=consent 로 refresh_token 확보."""
     from google_auth_oauthlib.flow import Flow
 
     config, redir = _client_config()
+    logger.info("[yt-oauth] 인증 URL 생성: redirect_uri=%s", redir)
     flow = Flow.from_client_config(config, scopes=SCOPES, redirect_uri=redir)
     auth_url, _ = flow.authorization_url(
         access_type="offline", include_granted_scopes="true", prompt="consent"
@@ -69,21 +75,48 @@ def build_auth_url() -> str:
     return auth_url
 
 
-def exchange_code(code: str) -> str:
-    """인증 코드 → 토큰 교환 후 refresh_token 을 영구 저장하고 반환."""
+def exchange_code(code: str) -> dict:
+    """인증 코드 → 토큰 교환 후 refresh_token 저장. 상세 결과 dict 반환.
+
+    Returns: {refresh_token(bool 아닌 실제값|None), has_access_token, save(저장결과),
+              redirect_uri, channel_id, error}
+    """
     from google_auth_oauthlib.flow import Flow
 
     config, redir = _client_config()
+    ch = _channel_id()
+    logger.info(
+        "[yt-oauth] 토큰 교환 시작: redirect_uri=%s channel=%s code_len=%d",
+        redir, ch, len(code or ""),
+    )
     flow = Flow.from_client_config(config, scopes=SCOPES, redirect_uri=redir)
     flow.fetch_token(code=code)
-    refresh_token = getattr(flow.credentials, "refresh_token", None)
+    creds = flow.credentials
+    refresh_token = getattr(creds, "refresh_token", None)
+    has_access = bool(getattr(creds, "token", None))
+    logger.info(
+        "[yt-oauth] 토큰 교환 결과: access_token=%s refresh_token=%s",
+        has_access, bool(refresh_token),
+    )
+    out: dict = {
+        "refresh_token": refresh_token,
+        "has_access_token": has_access,
+        "redirect_uri": redir,
+        "channel_id": ch,
+        "save": None,
+        "error": None,
+    }
     if not refresh_token:
         # prompt=consent 인데도 refresh_token 이 없으면 이미 승인된 계정일 수 있다.
-        raise RuntimeError(
-            "refresh_token 을 받지 못했습니다. 구글 계정 권한을 해제 후 다시 인증하세요."
+        out["error"] = (
+            "refresh_token 을 받지 못했습니다(이미 승인된 계정일 수 있음). "
+            "구글 계정 보안 > 타사 액세스에서 앱 권한 해제 후 다시 인증하세요."
         )
-    save_refresh_token(_channel_id(), refresh_token)
-    return refresh_token
+        logger.warning("[yt-oauth] %s", out["error"])
+        return out
+    out["save"] = save_refresh_token(ch, refresh_token)
+    logger.info("[yt-oauth] 저장 결과: %s", out["save"])
+    return out
 
 
 def get_credentials():
