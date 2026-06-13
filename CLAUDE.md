@@ -110,42 +110,36 @@ reelbot-pipeline/
 /channels/[id]      채널 상세 (4탭: 개요 / 스택설정 / 워크플로 / 히스토리)
 /character          캐릭터 라이브러리
 /scenario           시나리오 보관함
-/trends             트렌드·SEO 분석
-/competitor         경쟁사 분석
 /upload             멀티 플랫폼 발행
-/publish-queue      발행 큐
 /video              영상 진입점 (채널 워크플로 탭에서 진입)
 /video/create       실제 콘티 → 영상 작업 페이지
-/adobe              어도비 편집 (트랙 C, Premiere MCP 예정)
-/space              실제 공간 업로드 (트랙 B)
+/adobe              어도비 편집 (트랙 C, Premiere MCP 예정) — 유지(채널 워크플로 진입)
+/space              실제 공간 업로드 (트랙 B) — 유지(채널 워크플로 진입)
 /subtitle-style     자막 스타일
-/history            작업 히스토리
-/cost               비용 추적 (실제 라우트: /costs)
-/logs               로그
 /settings           설정
 ```
 
+> UI-1(2026-06)에서 폐기된 라우트: /trends · /competitor · /publish-queue · /history · /costs · /logs
+> (트렌드/경쟁사는 페이지만 폐기, 분석 로직 lib/trends.ts · lib/youtube.ts · api/trends/* 는 보존)
+
 ---
 
-## 사이드바 IA (PR #11 이후 현재 구조)
+## 사이드바 IA (UI-1, 2026-06 이후 현재 구조)
 
 ```
-대시보드
-[분석]  트렌드 분석 → /trends
-        경쟁사 분석 → /competitor
-[제작]  채널 → /channels  ← 진입점
-        캐릭터 라이브러리 → /character
-        시나리오 보관함 → /scenario
-        자막 스타일 → /subtitle-style
-[발행]  멀티 플랫폼 발행 → /upload
-        발행 큐 → /publish-queue
-[운영]  작업 히스토리 → /history
-        비용 추적 → /cost
-        로그 → /logs
-        설정 → /settings
+대시보드                → /
+[채널]
+  내 채널 (동적 목록)    → /channels/[id]  (Supabase fetch)
+    · 활성 채널          (statusVariant active/growing)
+    · 미사용·보관        (그 외, 접기 가능·기본 접힘)
+  새 채널                → (channels 신규 생성 동선)
+[운영]
+  설정                  → /settings
 ```
 
-영상 제작과 어도비 편집은 독립 메뉴가 아니라 채널 워크플로 탭 안에서 진입한다.
+- 채널 목록은 사이드바에서 직접 렌더(`useChannels()` 재사용, `/api/channels`).
+- 활성/보관 분류는 기존 `statusVariant` 필드로만 판단(스키마 변경 없음).
+- 영상 제작·어도비 편집은 독립 메뉴가 아니라 채널 워크플로 탭 안에서 진입한다.
 
 ---
 
@@ -281,3 +275,16 @@ reelbot-pipeline/
 - Railway 배포 완료, URL 노출됨, Vercel 연결됨
 - Railway Variables에 OPENAI_API_KEY 등 환경변수 설정 필요 여부 미확인
 - 로컬 개발 시: cd travel-pipeline && py -m uvicorn api.server:app --reload --port 8000
+
+---
+
+### UI 개편 로드맵 (2026-06~)
+- [완료] UI-1 사이드바 채널목록화 + 죽은탭 폐기
+- UI-2 채널 대시보드 (월간지표 + 시작/일시정지/중단 + NEXT UP + 연동서비스 책갈피)
+- UI-3 업로드 영상 마퀴 (플랫폼 탭: 유튜브/틱톡/인스타/네이버클립)
+- UI-4 노드그래프 파이프라인 (React Flow)
+- UI-5 콘텐츠 캘린더 (DB+API, 주간→월간, 연속 컨셉 감지)
+- UI-6 릴봇 AI 알림/채팅 패널 (자가치유 보고 + 사용자 입력)
+- UI-7 트렌드/경쟁사 로직 → 캘린더 자동기획 엔진으로 흡수
+
+주의: 트렌드/경쟁사 페이지는 폐기됐으나 분석 로직은 UI-7용으로 보존.
