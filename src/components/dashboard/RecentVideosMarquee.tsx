@@ -34,19 +34,22 @@ const TABS: { id: "all" | VideoPlatform; label: string }[] = [
 
 function VideoCard({ v }: { v: MarqueeVideo }) {
   return (
-    <div className="mr-3 w-60 shrink-0 rounded-lg border border-border/60 bg-card p-3">
-      <div className="flex aspect-video w-full items-center justify-center overflow-hidden rounded-md bg-secondary/50">
+    // 숏폼(세로 9:16) 카드 — B형태: [세로 썸네일] 위 / [텍스트 영역] 아래 분리.
+    <div className="mr-3 w-32 shrink-0">
+      <div className="flex aspect-[9/16] w-full items-center justify-center overflow-hidden rounded-lg border border-border/60 bg-secondary/50">
         {v.thumbnailUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={v.thumbnailUrl} alt={v.title} className="h-full w-full object-cover" />
         ) : (
-          <Film className="h-5 w-5 text-muted-foreground" />
+          <Film className="h-6 w-6 text-muted-foreground" />
         )}
       </div>
-      <p className="mt-2 truncate text-sm font-medium text-foreground">{v.title}</p>
-      <div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
-        <span>{v.viewCount}</span>
-        <span>{v.commentCount}</span>
+      <div className="mt-2 px-0.5">
+        <p className="line-clamp-2 text-xs font-medium leading-snug text-foreground">{v.title}</p>
+        <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+          <span>{v.viewCount}</span>
+          <span>{v.commentCount}</span>
+        </div>
       </div>
     </div>
   )
