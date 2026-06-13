@@ -4,6 +4,8 @@
 // search.list(호출당 100 unit)는 사용하지 않는다. 쇼츠 구분은 API 필터가 없으므로
 // contentDetails.duration 을 파싱해 분류한다.
 
+import type { MarqueeVideo } from "@/components/dashboard/RecentVideosMarquee"
+
 const YT_BASE = "https://www.googleapis.com/youtube/v3"
 
 export type VideoFormatKind = "shorts" | "longform"
@@ -135,4 +137,58 @@ export async function fetchTrending(categoryId: string, regionCode = "KR"): Prom
       format: classifyFormat(durationSec),
     }
   })
+}
+
+// 큰 수를 컴팩트 표기로(5100→"5.1K", 12000→"12K", 88→"88"). 더미 표기와 일관.
+function formatCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, "")}K`
+  return String(n)
+}
+
+// 채널의 '공개' 업로드 영상을 마퀴용 MarqueeVideo[] 로 반환(서버 전용, API 키).
+// 흐름: channels.list(uploads 재생목록) → playlistItems.list(videoId) →
+// videos.list(snippet,statistics,status). status.privacyStatus==="public" 만 노출
+// (비공개는 키 조회 시 자동 제외 + 명시 필터). 쿼터 3 unit/호출. 실패는 호출부에서 처리.
+export async function fetchChannelUploads(channelId: string, max = 10): Promise<MarqueeVideo[]> {
+  if (!channelId) return []
+
+  // 1) 업로드 재생목록 id
+  const ch = await ytFetch<
+    YtListResponse<{ contentDetails?: { relatedPlaylists?: { uploads?: string } } }>
+  >("/channels", { part: "contentDetails", id: channelId })
+  const uploads = ch.items?.[0]?.contentDetails?.relatedPlaylists?.uploads
+  if (!uploads) return []
+
+  // 2) 재생목록 → videoId 목록
+  const pl = await ytFetch<YtListResponse<{ contentDetails?: { videoId?: string } }>>(
+    "/playlistItems",
+    { part: "contentDetails", playlistId: uploads, maxResults: max },
+  )
+  const ids = (pl.items ?? [])
+    .map((i) => i.contentDetails?.videoId)
+    .filter((v): v is string => Boolean(v))
+  if (ids.length === 0) return []
+
+  // 3) 영상 상세(공개 영상만)
+  const vids = await ytFetch<YtListResponse<RawVideo & { status?: { privacyStatus?: string } }>>(
+    "/videos",
+    { part: "snippet,statistics,status", id: ids.join(",") },
+  )
+  return (vids.items ?? [])
+    .filter((v) => v.status?.privacyStatus === "public")
+    .map((v) => {
+      const thumbs = v.snippet?.thumbnails ?? {}
+      const thumbnailUrl =
+        thumbs.medium?.url ?? thumbs.high?.url ?? thumbs.default?.url ?? ""
+      return {
+        id: v.id,
+        platform: "youtube" as const,
+        title: v.snippet?.title ?? "",
+        thumbnailUrl,
+        viewCount: `조회 ${formatCount(Number(v.statistics?.viewCount ?? 0))}`,
+        commentCount: `댓글 ${formatCount(Number(v.statistics?.commentCount ?? 0))}`,
+        videoUrl: `https://www.youtube.com/watch?v=${v.id}`,
+      }
+    })
 }

@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { Film } from "lucide-react"
+import { useEffect, useState } from "react"
+import { Film, Loader2 } from "lucide-react"
 
 // UI-3b(다음 PR)에서 이 배열만 유튜브 API 응답으로 갈아끼우면 되도록 타입을 분리.
 export type VideoPlatform = "youtube" | "tiktok" | "instagram" | "naverclip"
@@ -57,12 +57,40 @@ function VideoCard({ v }: { v: MarqueeVideo }) {
 
 export function RecentVideosMarquee() {
   const [tab, setTab] = useState<"all" | VideoPlatform>("all")
-  const videos = tab === "all" ? DUMMY_VIDEOS : DUMMY_VIDEOS.filter((v) => v.platform === tab)
+  // 초기엔 더미로 첫 페인트(화면 안 빔) → /api/channel-videos 실데이터 도착 시 교체.
+  // 공개 영상 0개/실패면 더미 유지(폴백). setState 는 비동기 콜백에서만 호출(effect 본문 직접 호출 회피).
+  const [source, setSource] = useState<MarqueeVideo[]>(DUMMY_VIDEOS)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    fetch("/api/channel-videos")
+      .then((r) => r.json())
+      .then((d) => {
+        if (!active) return
+        const list = Array.isArray(d?.videos) ? (d.videos as MarqueeVideo[]) : []
+        if (list.length > 0) setSource(list) // 공개 영상 있으면 교체, 없으면 더미 유지
+      })
+      .catch(() => {
+        /* 실패 → 더미 유지 */
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const videos = tab === "all" ? source : source.filter((v) => v.platform === tab)
 
   return (
     <div className="rounded-xl border border-border bg-card p-5">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold text-foreground">최근 업로드 영상</h2>
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          최근 업로드 영상
+          {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+        </h2>
         {/* 플랫폼 탭 — 기존 대시보드 탭 스타일/토큰 재사용 */}
         <div className="flex flex-wrap gap-2">
           {TABS.map((t) => (
