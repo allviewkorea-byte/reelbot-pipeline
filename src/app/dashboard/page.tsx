@@ -10,9 +10,9 @@ import {
   DollarSign,
   Users,
   Video,
-  Film,
 } from "lucide-react"
 import { PLATFORM_BADGE, PLATFORM_LABELS, TRACK_BADGE, TRACK_LABELS } from "@/lib/channels"
+import { RecentVideosMarquee } from "@/components/dashboard/RecentVideosMarquee"
 
 // 백곰의 실화보고서 = 유일 운영 채널(트랙 A, /sayeon 엔진). 채널 DB 레코드 없이 고정 표시.
 // 관제 대시보드는 UI-2 채널 대시보드 골격(헤더+제어바+지표+최근영상)을 재사용(복제)한다.
@@ -106,21 +106,8 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      {/* 최근 영상 — 가로 스크롤 카드 자리(마퀴 자동스크롤·플랫폼 탭은 UI-3, 실데이터 연동 후속) */}
-      <div className="rounded-xl border border-border bg-card p-5">
-        <h2 className="mb-3 text-sm font-semibold text-foreground">최근 영상</h2>
-        <div className="flex gap-3 overflow-x-auto pb-1">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="w-44 shrink-0 rounded-lg border border-border/60 p-3">
-              <div className="flex h-24 w-full items-center justify-center rounded-md bg-secondary/50">
-                <Film className="h-5 w-5 text-muted-foreground" />
-              </div>
-              <p className="mt-2 truncate text-sm text-muted-foreground">데이터 연동 예정</p>
-              <p className="text-xs text-muted-foreground">—</p>
-            </div>
-          ))}
-        </div>
-      </div>
+      {/* 최근 업로드 영상 — 플랫폼 탭 + 우→좌 자동 마퀴(UI-3). 더미 데이터, 실연동은 UI-3b. */}
+      <RecentVideosMarquee />
     </div>
   )
 }
