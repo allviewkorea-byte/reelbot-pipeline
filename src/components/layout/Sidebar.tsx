@@ -9,6 +9,7 @@ import {
   PlayCircle,
   Plus,
   ChevronRight,
+  Clapperboard,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Separator } from "@/components/ui/separator"
@@ -59,6 +60,8 @@ export function Sidebar() {
   const archivedChannels = channels.filter((c) => !isRunning(c))
 
   const dashboardActive = pathname === "/dashboard" || pathname === "/"
+  // 사연 제작 — 릴봇 핵심 기능(/sayeon). 사이드바 상시 노출.
+  const sayeonActive = pathname === "/sayeon" || pathname.startsWith("/sayeon/")
   const settingsActive =
     pathname === "/settings" || pathname.startsWith("/settings/")
   const isChannelActive = (id: string) => pathname === `/channels/${id}`
@@ -97,6 +100,25 @@ export function Sidebar() {
             )}
           />
           <span>대시보드</span>
+        </Link>
+
+        {/* 사연 제작 — 릴봇 핵심 기능. 절대 삭제 불가. */}
+        <Link
+          href="/sayeon"
+          className={cn(
+            "mt-1 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150",
+            sayeonActive
+              ? "bg-primary/20 text-white border border-primary/30"
+              : "text-muted-foreground hover:bg-white/5 hover:text-foreground"
+          )}
+        >
+          <Clapperboard
+            className={cn(
+              "h-4 w-4 shrink-0",
+              sayeonActive ? "text-primary" : "text-muted-foreground"
+            )}
+          />
+          <span>사연 제작</span>
         </Link>
       </div>
 
