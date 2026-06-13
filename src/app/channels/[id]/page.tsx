@@ -23,8 +23,11 @@ import {
   RefreshCw,
   Sparkles,
   Wand2,
+  Play,
+  Pause,
+  Square,
+  Settings,
 } from "lucide-react"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useChannels } from "@/components/channels/ChannelProvider"
 import type { TrendItem } from "@/lib/youtube"
 import {
@@ -126,14 +129,14 @@ export default function ChannelDetailPage() {
   const [insight, setInsight] = useState<TrendInsight | null>(null)
   const [insightError, setInsightError] = useState("")
 
-  // ?tab= 으로 진입하면 해당 탭을 연다(예: 영상 제작 화면에서 워크플로 탭으로 복귀).
-  // 서버 렌더 hydration 불일치를 피하려고 마운트 후 적용하고, setState 는
-  // 마이크로태스크로 미뤄 이펙트 본문의 동기 setState 를 피한다.
-  const [tab, setTab] = useState("overview")
+  // 단일 스크롤 대시보드: 스택 설정은 우측 슬라이드 패널(Sheet 형태)로 띄운다.
+  // 기존 ?tab=stack 딥링크(또는 ?stack=1)로 진입하면 패널을 연다(하위호환).
+  // setState 는 마이크로태스크로 미뤄 이펙트 본문의 동기 setState 를 피한다.
+  const [showStack, setShowStack] = useState(false)
   useEffect(() => {
     Promise.resolve().then(() => {
-      const t = new URLSearchParams(window.location.search).get("tab")
-      if (t && ["overview", "stack", "workflow", "history"].includes(t)) setTab(t)
+      const q = new URLSearchParams(window.location.search)
+      if (q.get("stack") === "1" || q.get("tab") === "stack") setShowStack(true)
     })
   }, [])
 
@@ -343,6 +346,15 @@ export default function ChannelDetailPage() {
               <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${TRACK_BADGE[channel.stack.track]}`}>
                 {TRACK_LABELS[channel.stack.track]}
               </span>
+              <span
+                className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+                  channel.statusVariant === "pending"
+                    ? "bg-sky-500/15 text-sky-400"
+                    : "bg-emerald-500/15 text-emerald-400"
+                }`}
+              >
+                {channel.status}
+              </span>
             </div>
             <p className="mt-0.5 text-sm text-muted-foreground">메인 캐릭터 {channel.character}</p>
           </div>
@@ -380,59 +392,114 @@ export default function ChannelDetailPage() {
         />
       )}
 
-      <Tabs value={tab} onValueChange={setTab} className="w-full flex-col" data-horizontal>
-        <div className="max-w-full overflow-x-auto">
-          <TabsList>
-            <TabsTrigger value="overview">개요</TabsTrigger>
-            <TabsTrigger value="stack">스택 설정</TabsTrigger>
-            <TabsTrigger value="workflow">워크플로</TabsTrigger>
-            <TabsTrigger value="history">히스토리</TabsTrigger>
-          </TabsList>
+      {/* 제어 바 — NEXT UP + 워크플로 진입 + (UI 전용) 시작/일시정지/중단 + 스택 설정 */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-4">
+        <div className="min-w-0">
+          {/* NEXT UP — 스케줄 타임스탬프 필드 미존재 → 플레이스홀더(UI-5에서 연결) */}
+          <p className="text-xs text-muted-foreground">NEXT UP</p>
+          <p className="text-sm font-semibold text-foreground">
+            다음 업로드 —
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              (스케줄: {draft.schedule || "미설정"})
+            </span>
+          </p>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* 워크플로 진입(실제 동작 유지): 트랙별 라우팅 startWorkflow */}
+          <button
+            onClick={startWorkflow}
+            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+          >
+            <Clapperboard className="h-4 w-4" />
+            영상 만들기 ({TRACK_LABELS[draft.track]})
+          </button>
+          {/* 아래 3개는 UI 전용 — 실제 동작(백엔드 호출)은 후속 PR */}
+          <button
+            onClick={() => console.log("[channel-control] 시작 — 동작은 후속 PR")}
+            className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90"
+          >
+            <Play className="h-4 w-4" /> 시작
+          </button>
+          <button
+            onClick={() => console.log("[channel-control] 일시정지 — 동작은 후속 PR")}
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary/30"
+          >
+            <Pause className="h-4 w-4" /> 일시정지
+          </button>
+          <button
+            onClick={() => console.log("[channel-control] 중단 — 동작은 후속 PR")}
+            className="flex items-center gap-1.5 rounded-lg border border-red-500/30 px-3 py-2 text-sm font-medium text-red-400 transition-colors hover:bg-red-500/10"
+          >
+            <Square className="h-4 w-4" /> 중단
+          </button>
+          <button
+            onClick={() => setShowStack(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-primary/5"
+          >
+            <Settings className="h-4 w-4" /> 스택 설정
+          </button>
+        </div>
+      </div>
 
-        {/* 탭 1: 개요 */}
-        <TabsContent value="overview" className="mt-4 flex flex-col gap-4">
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            {[
-              { label: "영상 수", value: `${channel.videos}개`, icon: Video },
-              { label: "구독자", value: channel.subscribers, icon: Users },
-              { label: "월 수익", value: `$${channel.revenue}`, icon: DollarSign },
-              { label: "평균 조회수", value: channel.avgViews, icon: Eye },
-            ].map((s) => (
-              <div key={s.label} className="rounded-xl border border-border bg-card p-4">
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <s.icon className="h-4 w-4" />
-                  <span className="text-xs">{s.label}</span>
+      {/* 월간 지표 줄 (기존 데이터·계산 그대로 재사용) */}
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        {[
+          { label: "영상 수", value: `${channel.videos}개`, icon: Video },
+          { label: "구독자", value: channel.subscribers, icon: Users },
+          { label: "월 수익", value: `$${channel.revenue}`, icon: DollarSign },
+          { label: "평균 조회수", value: channel.avgViews, icon: Eye },
+        ].map((s) => (
+          <div key={s.label} className="rounded-xl border border-border bg-card p-4">
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <s.icon className="h-4 w-4" />
+              <span className="text-xs">{s.label}</span>
+            </div>
+            <p className="mt-2 text-xl font-bold text-foreground" style={{ fontFamily: "var(--font-geist-mono)" }}>
+              {s.value}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {/* 최근 영상 — 가로 스크롤 카드 줄(마퀴 자동 애니메이션·플랫폼 필터는 UI-3) */}
+      <div className="rounded-xl border border-border bg-card p-5">
+        <h2 className="mb-3 text-sm font-semibold text-foreground">최근 영상</h2>
+        {recents.length === 0 ? (
+          <p className="text-sm text-muted-foreground">아직 영상이 없습니다.</p>
+        ) : (
+          <div className="flex gap-3 overflow-x-auto pb-1">
+            {recents.map((v) => (
+              <div key={v.id} className="w-44 shrink-0 rounded-lg border border-border/60 p-3">
+                <div className="flex h-24 w-full items-center justify-center rounded-md bg-secondary/50">
+                  <Film className="h-5 w-5 text-muted-foreground" />
                 </div>
-                <p className="mt-2 text-xl font-bold text-foreground" style={{ fontFamily: "var(--font-geist-mono)" }}>
-                  {s.value}
-                </p>
+                <p className="mt-2 truncate text-sm text-foreground">{v.title}</p>
+                <p className="text-xs text-muted-foreground">{v.views}</p>
               </div>
             ))}
           </div>
+        )}
+      </div>
 
-          <div className="rounded-xl border border-border bg-card p-5">
-            <h2 className="mb-3 text-sm font-semibold text-foreground">최근 영상</h2>
-            <div className="flex flex-col gap-2">
-              {recents.length === 0 ? (
-                <p className="text-sm text-muted-foreground">아직 영상이 없습니다.</p>
-              ) : (
-                recents.map((v) => (
-                  <div key={v.id} className="flex items-center gap-3 rounded-lg border border-border/60 p-2.5">
-                    <div className="flex h-10 w-16 shrink-0 items-center justify-center rounded-md bg-secondary/50">
-                      <Film className="h-4 w-4 text-muted-foreground" />
-                    </div>
-                    <span className="flex-1 text-sm text-foreground">{v.title}</span>
-                    <span className="text-xs text-muted-foreground">{v.views}</span>
-                  </div>
-                ))
-              )}
+      {/* 스택 설정 — 우측 슬라이드 패널(Sheet 형태). shadcn Sheet/Dialog 가 ui/* 에
+          없어 기존 디자인 토큰만 쓰는 경량 패널로 구현(ui/* 수정 0). 내용 로직은 보존. */}
+      {showStack && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/50" onClick={() => setShowStack(false)}>
+          <aside
+            className="h-full w-full max-w-xl overflow-y-auto border-l border-border bg-card p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-base font-semibold text-foreground">스택 설정</h2>
+              <button
+                onClick={() => setShowStack(false)}
+                className="text-muted-foreground hover:text-foreground"
+                aria-label="닫기"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
-          </div>
-        </TabsContent>
-
-        {/* 탭 2: 스택 설정 */}
-        <TabsContent value="stack" className="mt-4 flex flex-col gap-4">
+            <div className="flex flex-col gap-4">
           {/* 트랙 선택 */}
           <div className="rounded-xl border border-border bg-card p-5">
             <h2 className="mb-3 text-sm font-semibold text-foreground">트랙</h2>
@@ -770,63 +837,10 @@ export default function ChannelDetailPage() {
               스택 설정 저장
             </button>
           </div>
-        </TabsContent>
-
-        {/* 탭 3: 워크플로 */}
-        <TabsContent value="workflow" className="mt-4 flex flex-col gap-4">
-          <button
-            onClick={startWorkflow}
-            className="flex items-center justify-center gap-2 rounded-xl bg-primary px-6 py-5 text-base font-semibold text-primary-foreground transition-opacity hover:opacity-90"
-          >
-            <Clapperboard className="h-5 w-5" />
-            영상 만들기 ({TRACK_LABELS[draft.track]})
-          </button>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            {TRACKS.map((t) => {
-              const active = draft.track === t.id
-              return (
-                <div
-                  key={t.id}
-                  className={`rounded-xl border bg-card p-4 ${active ? "border-primary/40" : "border-border"}`}
-                >
-                  <div className="flex items-center gap-2">
-                    <t.icon className="h-4 w-4 text-primary" />
-                    <span className="text-sm font-semibold text-foreground">{t.label}</span>
-                    {active && (
-                      <span className="ml-auto rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary">
-                        현재 트랙
-                      </span>
-                    )}
-                  </div>
-                  <p className="mt-2 text-xs text-muted-foreground">{t.desc}</p>
-                </div>
-              )
-            })}
-          </div>
-        </TabsContent>
-
-        {/* 탭 4: 히스토리 */}
-        <TabsContent value="history" className="mt-4">
-          <div className="rounded-xl border border-border bg-card p-5">
-            <h2 className="mb-3 text-sm font-semibold text-foreground">{channel.name} 영상 ({channel.videos}개)</h2>
-            <div className="flex flex-col gap-2">
-              {recents.length === 0 ? (
-                <p className="text-sm text-muted-foreground">아직 생성된 영상이 없습니다.</p>
-              ) : (
-                recents.map((v) => (
-                  <div key={v.id} className="flex items-center gap-3 rounded-lg border border-border/60 p-2.5">
-                    <div className="flex h-10 w-16 shrink-0 items-center justify-center rounded-md bg-secondary/50">
-                      <Film className="h-4 w-4 text-muted-foreground" />
-                    </div>
-                    <span className="flex-1 text-sm text-foreground">{v.title}</span>
-                    <span className="text-xs text-muted-foreground">{v.views}</span>
-                  </div>
-                ))
-              )}
             </div>
-          </div>
-        </TabsContent>
-      </Tabs>
+          </aside>
+        </div>
+      )}
     </div>
   )
 }
