@@ -128,7 +128,8 @@ export function RecentVideosMarquee() {
       ) : (
         // 우→좌 무한 마퀴. 카드 세트를 2벌 복제해 -50% 로 끊김 없이 루프.
         // hover 시 일시정지, prefers-reduced-motion 이면 정지 + 가로 스크롤 폴백.
-        <div className="marquee min-h-0 flex-1">
+        // 카드는 행 높이 주도지만 max-height(상한)로 과확대 방지(선명도↑) + 세로 중앙 정렬.
+        <div className="marquee flex min-h-0 flex-1 items-center">
           <div className="marquee__track">
             {[0, 1].map((copy) =>
               videos.map((v) => <VideoCard key={`${v.id}-${copy}`} v={v} />),
@@ -141,6 +142,7 @@ export function RecentVideosMarquee() {
             .marquee__track {
               display: flex;
               height: 100%;
+              max-height: 330px;
               width: max-content;
               animation: marquee-scroll 30s linear infinite;
             }

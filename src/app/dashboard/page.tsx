@@ -154,10 +154,8 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      {/* 파이프라인 노드그래프 — 활성 job 실시간 점등(UI-4a). /api/jobs/active 폴링. */}
-      <PipelineNodeGraph />
-
-      {/* 좌우 한 줄(6:4) — 왼쪽 오늘의 콘텐츠(캘린더) / 오른쪽 트렌드 분석. 같은 높이. */}
+      {/* 좌우 한 줄(6:4) — 왼쪽 오늘의 콘텐츠(캘린더) / 오른쪽 트렌드 분석. 같은 높이.
+          노드그래프보다 위로 올림(노드그래프는 아래로 swap). */}
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
         {/* 콘텐츠 캘린더 — 기본 '오늘의 콘텐츠'(3슬롯), 전체 보기=월간 */}
         <div className="lg:col-span-3 [&>div]:h-full">
@@ -168,6 +166,9 @@ export default function DashboardPage() {
           <TrendPanel />
         </div>
       </div>
+
+      {/* 파이프라인 노드그래프 — 활성 job 실시간 점등(UI-4a). /api/jobs/active 폴링. */}
+      <PipelineNodeGraph />
 
       {/* 최근 업로드 영상 — 플랫폼 탭 + 우→좌 자동 마퀴(UI-3). 더미 데이터, 실연동은 UI-3b. */}
       <RecentVideosMarquee />
