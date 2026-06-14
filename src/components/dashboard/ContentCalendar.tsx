@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from "react"
 import { ChevronDown, ChevronUp, X, AlertTriangle, Loader2, Trash2 } from "lucide-react"
 import {
   BAEKGOM_CHANNEL_ID,
@@ -306,6 +306,30 @@ function PlanEditor({
     }
   }
 
+  // Enter=저장(기존 save 재사용). IME 한글 조합 중 Enter 는 무시. 저장 진행 중이면 무시.
+  const handleTitleKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "Enter" || e.nativeEvent.isComposing) return
+    e.preventDefault()
+    if (!busy) save()
+  }
+  // 메모: Enter=저장 / Ctrl(Cmd)+Enter=줄바꿈 삽입(일반 textarea 와 반대).
+  const handleMemoKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== "Enter" || e.nativeEvent.isComposing) return
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault()
+      const ta = e.currentTarget
+      const start = ta.selectionStart
+      const end = ta.selectionEnd
+      setMemo(memo.slice(0, start) + "\n" + memo.slice(end))
+      requestAnimationFrame(() => {
+        ta.selectionStart = ta.selectionEnd = start + 1
+      })
+      return
+    }
+    e.preventDefault()
+    if (!busy) save()
+  }
+
   // CloneModal 오버레이 패턴 재사용(Sheet/Dialog 없음).
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
@@ -335,10 +359,22 @@ function PlanEditor({
         </div>
 
         <label className="mb-1.5 block text-xs font-medium text-muted-foreground">제목 (선택)</label>
-        <input className={`${FIELD} mb-4`} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="예: 남친 집에서 발견한…" />
+        <input
+          className={`${FIELD} mb-4`}
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onKeyDown={handleTitleKey}
+          placeholder="예: 남친 집에서 발견한…"
+        />
 
         <label className="mb-1.5 block text-xs font-medium text-muted-foreground">메모 (선택)</label>
-        <textarea className={`${FIELD} mb-4 min-h-16 resize-y`} value={memo} onChange={(e) => setMemo(e.target.value)} />
+        <textarea
+          className={`${FIELD} mb-1 min-h-16 resize-y`}
+          value={memo}
+          onChange={(e) => setMemo(e.target.value)}
+          onKeyDown={handleMemoKey}
+        />
+        <p className="mb-4 text-[11px] text-muted-foreground">Enter 저장 · Ctrl(⌘)+Enter 줄바꿈</p>
 
         <label className="mb-1.5 block text-xs font-medium text-muted-foreground">상태</label>
         <div className="mb-6 flex gap-2">
