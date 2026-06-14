@@ -14,6 +14,7 @@ import {
 import { PLATFORM_BADGE, PLATFORM_LABELS, TRACK_BADGE, TRACK_LABELS } from "@/lib/channels"
 import { RecentVideosMarquee } from "@/components/dashboard/RecentVideosMarquee"
 import { PipelineNodeGraph } from "@/components/dashboard/PipelineNodeGraph"
+import { ContentCalendar } from "@/components/dashboard/ContentCalendar"
 
 // 백곰의 실화보고서 = 유일 운영 채널(트랙 A, /sayeon 엔진). 채널 DB 레코드 없이 고정 표시.
 // 관제 대시보드는 UI-2 채널 대시보드 골격(헤더+제어바+지표+최근영상)을 재사용(복제)한다.
@@ -109,6 +110,9 @@ export default function DashboardPage() {
 
       {/* 파이프라인 노드그래프 — 활성 job 실시간 점등(UI-4a). /api/jobs/active 폴링. */}
       <PipelineNodeGraph />
+
+      {/* 콘텐츠 캘린더 — 수동 입력 그릇(UI-5a). 자동 기획은 UI-5b. */}
+      <ContentCalendar />
 
       {/* 최근 업로드 영상 — 플랫폼 탭 + 우→좌 자동 마퀴(UI-3). 더미 데이터, 실연동은 UI-3b. */}
       <RecentVideosMarquee />
