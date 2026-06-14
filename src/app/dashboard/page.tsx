@@ -40,6 +40,9 @@ export default function DashboardPage() {
   // 실제 자동 업로드(스케줄러 연동)는 후속 작업. 지금은 상태 저장·표시까지.
   const [isActive, setIsActive] = useState(false)
   const [busy, setBusy] = useState(false)
+  // 트렌드 패널 + 월간 계획서 공유 펼침 상태(짝으로 동시 펼침/접힘). 기본 접힘.
+  const [panelExpanded, setPanelExpanded] = useState(false)
+  const togglePanels = () => setPanelExpanded((v) => !v)
 
   // 마운트 시 현재 상태 로드. setState 는 비동기 콜백에서만(effect 본문 직접 호출 회피).
   useEffect(() => {
@@ -154,16 +157,16 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      {/* 좌우 한 줄(6:4) — 왼쪽 오늘의 콘텐츠(캘린더) / 오른쪽 트렌드 분석. 같은 높이.
-          노드그래프보다 위로 올림(노드그래프는 아래로 swap). */}
+      {/* 좌우 한 줄 — 왼쪽 트렌드 분석(2) / 오른쪽 월간계획서·오늘콘텐츠(3). 같은 높이.
+          펼침 상태는 공유(panelExpanded): 어느 버튼을 눌러도 둘 다 동시에 펼침/접힘. */}
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
-        {/* 콘텐츠 캘린더 — 기본 '오늘의 콘텐츠'(3슬롯), 전체 보기=월간 */}
-        <div className="lg:col-span-3 [&>div]:h-full">
-          <ContentCalendar />
-        </div>
-        {/* 트렌드 분석 — 빈 그릇(준비 중). 실제 엔진은 다음 PR. (가짜 데이터 없음) */}
+        {/* 트렌드 분석(왼쪽) — 빈 그릇(준비 중). 실제 엔진은 다음 PR. (가짜 데이터 없음) */}
         <div className="lg:col-span-2 [&>div]:h-full">
-          <TrendPanel />
+          <TrendPanel open={panelExpanded} onToggle={togglePanels} />
+        </div>
+        {/* 콘텐츠 캘린더(오른쪽) — 접힘=오늘의 콘텐츠(3슬롯), 펼침=월간 계획서 */}
+        <div className="lg:col-span-3 [&>div]:h-full">
+          <ContentCalendar monthOpen={panelExpanded} onToggleMonth={togglePanels} />
         </div>
       </div>
 
