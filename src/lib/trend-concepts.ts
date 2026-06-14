@@ -6,6 +6,23 @@ import { CONTENT_CONCEPTS } from "./content-plan"
 
 export type TrendSource = "gpt" | "keyword" | "empty"
 
+// ── 분석 대상 사연 채널(설정) ────────────────────────────────────────
+// 인기차트(mostPopular)는 K-pop·뮤비라 사연이 없어 "기타 100%" 가 됐다(#119 문제).
+// 대신 '사연 채널들의 최근 영상'을 분석한다 → 전부 사연이라 9컨셉으로 분산 분류됨.
+// 핸들(@..)·채널ID(UC..) 혼용 가능. 채널 추가는 이 배열에 넣기만 하면 된다.
+export const TREND_SOURCE_CHANNELS = [
+  "@zunorax-t9p",
+  "UCNGv4Tt-CdawFfVI6DEJzAg",
+  "@ssulgoguma",
+  "@ssulradio1",
+  "UCbiKLLUC3oa52pf4gi_AVcg",
+  "@ssulfactory",
+]
+
+// 채널당 최근 N개 + 전체 상한(토큰·비용 관리).
+export const TREND_PER_CHANNEL_MAX = 20
+export const TREND_TOTAL_MAX = 100
+
 // 분류 입력 1건(유튜브 인기 숏폼에서 추출).
 export interface ClassifyInput {
   title: string

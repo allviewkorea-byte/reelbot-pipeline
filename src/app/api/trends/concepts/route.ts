@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import OpenAI from "openai"
-import { fetchTrending } from "@/lib/youtube"
+import { resolveChannelId, fetchChannelVideoStats } from "@/lib/youtube"
 import { BAEKGOM_CHANNEL_ID, CONTENT_CONCEPTS } from "@/lib/content-plan"
 import { getTrendRanking, saveTrendRanking } from "@/lib/supabase"
 import {
@@ -8,6 +8,9 @@ import {
   classifyByKeywords,
   normalizeConcept,
   todayKST,
+  TREND_SOURCE_CHANNELS,
+  TREND_PER_CHANNEL_MAX,
+  TREND_TOTAL_MAX,
   type ClassifiedItem,
   type ClassifyInput,
   type TrendRankingItem,
@@ -90,20 +93,44 @@ export async function GET(req: NextRequest) {
     })
   }
 
-  // 2) 유튜브 인기 숏폼 수집(KR, mostPopular 1unit). 키 없음/쿼터 → 빈 결과 방어.
-  let inputs: ClassifyInput[] = []
-  try {
-    const trending = await fetchTrending("", "KR")
-    inputs = trending
-      .filter((t) => t.format === "shorts" && t.title)
-      .slice(0, 50)
-      .map((t) => ({ title: t.title, viewCount: t.viewCount }))
-  } catch {
-    inputs = []
+  // 2) 지정 사연 채널들의 최근 영상 수집(전부 사연 → 9컨셉 분산). 핸들→ID 변환.
+  //    채널당 실패는 건너뛰고(전체 안 깨짐), 최근순 정렬 후 전체 상한 적용.
+  const collected: { title: string; viewCount: number; publishedAt: string }[] = []
+  let analyzedChannels = 0
+  for (const ref of TREND_SOURCE_CHANNELS) {
+    try {
+      const id = await resolveChannelId(ref)
+      if (!id) {
+        console.warn(`[trends/concepts] 채널 ID 변환 실패 — 건너뜀: ${ref}`)
+        continue
+      }
+      const vids = await fetchChannelVideoStats(id, TREND_PER_CHANNEL_MAX)
+      if (vids.length > 0) {
+        analyzedChannels++
+        for (const v of vids) {
+          collected.push({ title: v.title, viewCount: v.viewCount, publishedAt: v.publishedAt })
+        }
+      }
+    } catch (e) {
+      console.warn(`[trends/concepts] 채널 수집 실패 — 건너뜀: ${ref}`, e instanceof Error ? e.message : e)
+    }
   }
+  // 최근순 정렬 후 전체 상한(토큰·비용 관리).
+  collected.sort((a, b) => (b.publishedAt || "").localeCompare(a.publishedAt || ""))
+  const inputs: ClassifyInput[] = collected
+    .slice(0, TREND_TOTAL_MAX)
+    .map((c) => ({ title: c.title, viewCount: c.viewCount }))
+
   if (inputs.length === 0) {
     // 수집 실패(키 없음 등) → 빈 랭킹(앱 안 깨짐). 캐시에 저장하지 않아 다음에 재시도.
-    return NextResponse.json({ success: true, cached: false, date, source: "empty", rankings: [] })
+    return NextResponse.json({
+      success: true,
+      cached: false,
+      date,
+      source: "empty",
+      rankings: [],
+      meta: { channels: analyzedChannels, videos: 0 },
+    })
   }
 
   // 3) 분류: GPT 메인 → 실패 시 키워드 룰 폴백.
@@ -124,5 +151,12 @@ export async function GET(req: NextRequest) {
     /* 저장 실패해도 결과 반환 */
   }
 
-  return NextResponse.json({ success: true, cached: false, date, source, rankings })
+  return NextResponse.json({
+    success: true,
+    cached: false,
+    date,
+    source,
+    rankings,
+    meta: { channels: analyzedChannels, videos: inputs.length },
+  })
 }
