@@ -2,10 +2,51 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { useEffect, useState } from "react"
 import { Settings, PlayCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Separator } from "@/components/ui/separator"
 import { HealthIndicator } from "@/components/video/HealthIndicator"
+import { BAEKGOM_CHANNEL_ID } from "@/lib/content-plan"
+import { CHANNEL_STATUS_EVENT, type ChannelStatusDetail } from "@/lib/channel-status"
+
+// 채널별 가동 상태를 읽어 사이드바에 색으로 표시한다. 지금은 백곰 1개라 1개만 폴링하지만,
+// channelId 키로 받으므로 미래 다채널이면 채널 목록을 map 돌려 각각 호출하면 된다.
+function useChannelActive(channelId: string): boolean {
+  const [active, setActive] = useState(false)
+  useEffect(() => {
+    let alive = true
+    const load = () => {
+      fetch(`/api/channel-status?channelId=${channelId}`)
+        .then((r) => r.json())
+        .then((d) => {
+          if (alive) setActive(Boolean(d?.isActive))
+        })
+        .catch(() => {
+          /* 실패 → 기존 상태 유지 */
+        })
+    }
+    load()
+    // 다른 화면 보다가도 반영되게 주기 폴링 + 탭 포커스 복귀 시 갱신.
+    const timer = setInterval(load, 12000)
+    const onFocus = () => load()
+    // 같은 탭에서 토글하면 폴링 기다리지 않고 즉시 반영.
+    const onEvt = (e: Event) => {
+      const detail = (e as CustomEvent<ChannelStatusDetail>).detail
+      if (detail && detail.channelId === channelId) setActive(Boolean(detail.isActive))
+      else load()
+    }
+    window.addEventListener("focus", onFocus)
+    window.addEventListener(CHANNEL_STATUS_EVENT, onEvt)
+    return () => {
+      alive = false
+      clearInterval(timer)
+      window.removeEventListener("focus", onFocus)
+      window.removeEventListener(CHANNEL_STATUS_EVENT, onEvt)
+    }
+  }, [channelId])
+  return active
+}
 
 // 사이드바는 채널 DB(useChannels)와 분리한다. 운영 채널은 "백곰의 실화보고서" 1개뿐이고,
 // 백곰의 메인 화면은 관제 대시보드(/dashboard)다. 고정 항목 하나만 두고 클릭 시
@@ -14,6 +55,7 @@ import { HealthIndicator } from "@/components/video/HealthIndicator"
 //  보존 — 여기서 호출만 안 할 뿐. 미래 재도입 대비.)
 export function Sidebar() {
   const pathname = usePathname()
+  const baekgomLive = useChannelActive(BAEKGOM_CHANNEL_ID)
 
   // 백곰 관제 대시보드 = /dashboard(루트 / 도 리다이렉트). 상단 '대시보드' 메뉴와
   // 중복이므로 별도 대시보드 메뉴는 두지 않고 이 항목으로 통합.
@@ -53,8 +95,14 @@ export function Sidebar() {
           >
             <span className="truncate text-sm font-medium">백곰의 실화보고서</span>
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
-              <span className="truncate">유튜브 · 가동 중</span>
+              {/* 가동 ON=emerald(맥동) · OFF=불 꺼짐(muted). 가동 상태에 따라 실시간 갱신. */}
+              <span
+                className={cn(
+                  "h-1.5 w-1.5 shrink-0 rounded-full",
+                  baekgomLive ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground/40",
+                )}
+              />
+              <span className="truncate">유튜브 · {baekgomLive ? "가동 중" : "대기 중"}</span>
             </span>
           </Link>
         </nav>

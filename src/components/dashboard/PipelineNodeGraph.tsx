@@ -66,7 +66,7 @@ const PX = LAST_X + 95 // 플랫폼 분기 x
 const PLATFORM_Y = [8, 28, 48]
 
 function headerText(job: ActiveJob | null): string {
-  if (!job) return "대기 중 — 진행 중인 작업 없음"
+  if (!job) return "" // 유휴 시 텍스트 없음 — 노드 상태(전부 pending)만으로 충분
   if (job.status === "completed") return "최근 완료 · 100%"
   if (job.status === "failed") return `실패: ${job.current_step || "오류"}`
   return `${job.current_step || "진행 중"} · ${job.progress}%`
@@ -110,7 +110,9 @@ export function PipelineNodeGraph() {
     <div className="rounded-xl border border-border bg-card px-3 py-2">
       <div className="mb-1 flex items-center justify-between gap-3">
         <h2 className="text-sm font-semibold text-foreground">백곰 파이프라인</h2>
-        <span className="text-xs text-muted-foreground">{headerText(job)}</span>
+        {headerText(job) && (
+          <span className="text-xs text-muted-foreground">{headerText(job)}</span>
+        )}
       </div>
 
       <div className="w-full overflow-x-auto">

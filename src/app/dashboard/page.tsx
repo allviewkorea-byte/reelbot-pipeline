@@ -1,9 +1,9 @@
 "use client"
 
 import Link from "next/link"
+import { useEffect, useState } from "react"
 import {
   Play,
-  Pause,
   Square,
   Clapperboard,
   Eye,
@@ -12,6 +12,8 @@ import {
   Video,
 } from "lucide-react"
 import { PLATFORM_BADGE, PLATFORM_LABELS, TRACK_BADGE, TRACK_LABELS } from "@/lib/channels"
+import { BAEKGOM_CHANNEL_ID } from "@/lib/content-plan"
+import { CHANNEL_STATUS_EVENT, type ChannelStatusDetail } from "@/lib/channel-status"
 import { RecentVideosMarquee } from "@/components/dashboard/RecentVideosMarquee"
 import { PipelineNodeGraph } from "@/components/dashboard/PipelineNodeGraph"
 import { ContentCalendar } from "@/components/dashboard/ContentCalendar"
@@ -22,7 +24,6 @@ const BAEKGOM = {
   name: "백곰의 실화보고서",
   platform: "youtube" as const,
   track: "auto" as const,
-  status: "가동 중",
 }
 
 // 월간 지표 — 백곰 실데이터 연동 전이라 플레이스홀더("—"). UI-5 캘린더/연동에서 연결.
@@ -34,6 +35,51 @@ const METRICS = [
 ]
 
 export default function DashboardPage() {
+  // 가동 상태(ON/OFF) — channel_status 저장값. 토글 1개로 제어, 헤더 뱃지·사이드바에 반영.
+  // 실제 자동 업로드(스케줄러 연동)는 후속 작업. 지금은 상태 저장·표시까지.
+  const [isActive, setIsActive] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  // 마운트 시 현재 상태 로드. setState 는 비동기 콜백에서만(effect 본문 직접 호출 회피).
+  useEffect(() => {
+    let alive = true
+    fetch(`/api/channel-status?channelId=${BAEKGOM_CHANNEL_ID}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (alive) setIsActive(Boolean(d?.isActive))
+      })
+      .catch(() => {
+        /* 실패 → 기본 OFF 유지 */
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  // 시작↔중단 토글: 저장(POST) 성공 시 상태 갱신 + 사이드바 즉시 동기화 이벤트 발행.
+  const toggle = async () => {
+    if (busy) return
+    const next = !isActive
+    setBusy(true)
+    try {
+      const res = await fetch("/api/channel-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channelId: BAEKGOM_CHANNEL_ID, isActive: next }),
+      })
+      const d = await res.json()
+      if (res.ok && d?.success) {
+        setIsActive(next)
+        const detail: ChannelStatusDetail = { channelId: BAEKGOM_CHANNEL_ID, isActive: next }
+        window.dispatchEvent(new CustomEvent(CHANNEL_STATUS_EVENT, { detail }))
+      }
+    } catch {
+      /* 실패 → 상태 유지 */
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden p-4">
       {/* 헤더 — 채널명 + 플랫폼/트랙/상태 뱃지 (UI-2 헤더 재사용) */}
@@ -47,15 +93,25 @@ export default function DashboardPage() {
             <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${TRACK_BADGE[BAEKGOM.track]}`}>
               {TRACK_LABELS[BAEKGOM.track]}
             </span>
-            <span className="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-400">
-              {BAEKGOM.status}
+            {/* 가동 상태 뱃지 — 토글/사이드바와 동일 상태. ON=emerald(맥동), OFF=muted */}
+            <span
+              className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors duration-200 ${
+                isActive ? "bg-emerald-500/15 text-emerald-400" : "bg-secondary/50 text-muted-foreground"
+              }`}
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  isActive ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground/50"
+                }`}
+              />
+              {isActive ? "가동 중" : "대기 중"}
             </span>
           </div>
           <p className="mt-0.5 text-sm text-muted-foreground">운영 채널 관제 대시보드</p>
         </div>
       </div>
 
-      {/* 제어 바 — NEXT UP + 사연 제작 열기(실제 진입) + (UI 전용) 시작/일시정지/중단 */}
+      {/* 제어 바 — NEXT UP + 사연 제작 열기(실제 진입) + 가동 시작↔중단 토글 */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-3">
         <div className="min-w-0">
           {/* NEXT UP — 스케줄 타임스탬프 미연동 → 플레이스홀더(UI-5에서 연결) */}
@@ -71,24 +127,20 @@ export default function DashboardPage() {
             <Clapperboard className="h-4 w-4" />
             사연 제작 열기
           </Link>
-          {/* 아래 3개는 UI 전용 — 실제 동작(백엔드 호출)은 후속 PR */}
+          {/* 가동 토글 — OFF→[▶ 시작](emerald), ON→[■ 중단](red). 상태 저장(channel_status).
+              실제 자동 업로드 연결은 후속(스케줄러). 색/아이콘/라벨이 상태따라 부드럽게 전환. */}
           <button
-            onClick={() => console.log("[baekgom-control] 시작 — 동작은 후속 PR")}
-            className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90"
+            onClick={toggle}
+            disabled={busy}
+            aria-pressed={isActive}
+            className={`flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-all duration-200 disabled:opacity-60 ${
+              isActive
+                ? "border border-red-500/30 text-red-400 hover:bg-red-500/10"
+                : "bg-emerald-600 text-white shadow-sm hover:opacity-90"
+            }`}
           >
-            <Play className="h-4 w-4" /> 시작
-          </button>
-          <button
-            onClick={() => console.log("[baekgom-control] 일시정지 — 동작은 후속 PR")}
-            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary/30"
-          >
-            <Pause className="h-4 w-4" /> 일시정지
-          </button>
-          <button
-            onClick={() => console.log("[baekgom-control] 중단 — 동작은 후속 PR")}
-            className="flex items-center gap-1.5 rounded-lg border border-red-500/30 px-3 py-2 text-sm font-medium text-red-400 transition-colors hover:bg-red-500/10"
-          >
-            <Square className="h-4 w-4" /> 중단
+            {isActive ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+            {isActive ? "중단" : "시작"}
           </button>
         </div>
       </div>
