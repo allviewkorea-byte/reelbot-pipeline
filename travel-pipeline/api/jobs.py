@@ -92,6 +92,20 @@ class JobManager:
         with self._lock:
             return self._jobs.get(job_id)
 
+    def active_job(self) -> Job | None:
+        """대시보드 노드그래프용 읽기 전용 조회(기존 로직 무수정).
+
+        진행 중(running/pending) 중 created_at 최신 1건, 없으면 가장 최근 job
+        (완료 포함, 유휴 시 '마지막 완료' 표시용), 아무 job 도 없으면 None.
+        """
+        with self._lock:
+            jobs = list(self._jobs.values())
+        if not jobs:
+            return None
+        running = [j for j in jobs if j.status in (JobStatus.RUNNING, JobStatus.PENDING)]
+        pool = running or jobs
+        return max(pool, key=lambda j: j.created_at)
+
 
 # 싱글톤
 job_manager = JobManager()
