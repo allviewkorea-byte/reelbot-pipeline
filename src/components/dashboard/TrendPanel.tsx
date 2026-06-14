@@ -94,12 +94,15 @@ export function TrendPanel({ open, onToggle }: { open: boolean; onToggle: () => 
         </button>
       </div>
 
-      {/* 분석 메타 한 줄 — 데이터 있을 때만(가짜 없음) */}
-      {hasData && meta && (
+      {/* 분석 메타 — '진짜 분석했다'는 근거. meta 있으면 채널·영상 수, 없으면(캐시 응답엔
+          meta 미포함) 날짜만이라도 표시. 가짜 숫자는 절대 넣지 않음. */}
+      {hasData && (meta || date) && (
         <p className="mt-1 text-[11px] text-muted-foreground">
-          {open
-            ? `채널 ${meta.channels}개 · 영상 ${meta.videos}개 분석${date ? ` · ${date}` : ""}`
-            : `최근 ${meta.videos}개 영상 분석${date ? ` · ${date}` : ""}`}
+          {meta
+            ? open
+              ? `채널 ${meta.channels}개 · 영상 ${meta.videos}개 분석${date ? ` · ${date}` : ""}`
+              : `최근 ${meta.videos}개 영상 분석${date ? ` · ${date}` : ""}`
+            : `분석일 ${date}`}
         </p>
       )}
 
