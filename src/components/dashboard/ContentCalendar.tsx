@@ -117,7 +117,7 @@ export function ContentCalendar() {
   const grid = useMemo(() => monthGrid(viewMonth.y, viewMonth.m), [viewMonth])
 
   return (
-    <div className="rounded-xl border border-border bg-card p-5">
+    <div className="rounded-xl border border-border bg-card p-4">
       <div className="mb-3 flex items-center justify-between gap-3">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
           콘텐츠 캘린더

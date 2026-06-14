@@ -5,7 +5,6 @@ import { useEffect, useState } from "react"
 // 백곰 파이프라인 노드 ↔ orchestrate 진행률(%) 밴드 매핑(실측).
 // BGM·자막·사연자동생성은 별도 진행률이 없어 합쳐서 표현(세분화는 UI-4b).
 type NodeState = "done" | "active" | "pending" | "error"
-type Variant = "tech" | "neon" // A=차분한 테크 / B=화려한 네온
 
 interface PipelineNode {
   id: string
@@ -74,8 +73,6 @@ function headerText(job: ActiveJob | null): string {
 
 export function PipelineNodeGraph() {
   const [job, setJob] = useState<ActiveJob | null>(null)
-  // 비교용 임시 토글(A/B). 스타일 확정 후 제거 예정. 데이터 로직과 무관.
-  const [variant, setVariant] = useState<Variant>("tech")
 
   useEffect(() => {
     let active = true
@@ -105,36 +102,14 @@ export function PipelineNodeGraph() {
   const youtubeDone = Boolean(youtubeUrl) || uploadDone
   const progress = job && job.status === "running" ? job.progress : null
 
-  const isNeon = variant === "neon"
-  const nodeStroke = isNeon ? 2 : 1.4
-  const flowSpeed = isNeon ? "flow-fast" : "flow-slow"
-  const fillOp = isNeon ? 0.2 : 0.1
-  const glowFor = (st: NodeState) =>
-    st === "pending" ? "" : isNeon ? "glow-strong" : st === "active" ? "glow-soft" : ""
+  // 테크 스타일 고정(차분한 회로/전류). 발광은 active 노드만 은은하게.
+  const glowFor = (st: NodeState) => (st === "active" ? "glow-soft" : "")
 
   return (
-    <div className={`rounded-xl border border-border bg-card p-5 ${isNeon ? "neon" : "tech"}`}>
+    <div className="rounded-xl border border-border bg-card p-4">
       <div className="mb-3 flex items-center justify-between gap-3">
         <h2 className="text-sm font-semibold text-foreground">백곰 파이프라인</h2>
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-muted-foreground">{headerText(job)}</span>
-          {/* 비교용 임시 스타일 토글 — 확정 후 제거 예정 */}
-          <div className="flex gap-1">
-            {(["tech", "neon"] as Variant[]).map((v) => (
-              <button
-                key={v}
-                onClick={() => setVariant(v)}
-                className={`rounded-full px-2 py-0.5 text-xs font-medium transition-colors ${
-                  variant === v
-                    ? "bg-primary/20 text-primary border border-primary/30"
-                    : "border border-border text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {v === "tech" ? "테크" : "네온"}
-              </button>
-            ))}
-          </div>
-        </div>
+        <span className="text-xs text-muted-foreground">{headerText(job)}</span>
       </div>
 
       <div className="w-full overflow-x-auto">
@@ -146,7 +121,7 @@ export function PipelineNodeGraph() {
             const flowing = a === "done" && (b === "done" || b === "active")
             const cls = !flowing
               ? "stroke-border"
-              : `flow-line ${flowSpeed} stroke-current ${b === "active" ? "text-primary" : "text-emerald-500"}`
+              : `flow-line stroke-current ${b === "active" ? "text-primary" : "text-emerald-500"}`
             return (
               <line
                 key={`c-${i}`}
@@ -155,7 +130,7 @@ export function PipelineNodeGraph() {
                 x2={cx(i + 1) - NODE_W / 2}
                 y2={CY}
                 className={cls}
-                strokeWidth={flowing ? (isNeon ? 2.5 : 1.8) : 1.5}
+                strokeWidth={flowing ? 1.8 : 1.5}
               />
             )
           })}
@@ -170,7 +145,7 @@ export function PipelineNodeGraph() {
                 y1={CY}
                 x2={PX - 7}
                 y2={py}
-                className={lit ? `flow-line ${flowSpeed} stroke-current text-emerald-500` : "stroke-border"}
+                className={lit ? "flow-line stroke-current text-emerald-500" : "stroke-border"}
                 strokeWidth={1.4}
               />
             )
@@ -185,7 +160,7 @@ export function PipelineNodeGraph() {
                   cx={PX}
                   cy={py}
                   r={6}
-                  className={`fill-current ${lit ? glowFor("done") : ""}`}
+                  className={`fill-current ${lit ? "glow-soft" : ""}`}
                   fillOpacity={lit ? 1 : 0.35}
                   stroke="currentColor"
                   strokeWidth={1.2}
@@ -209,7 +184,7 @@ export function PipelineNodeGraph() {
             )
           })}
 
-          {/* 메인 노드 — 둥근 사각형 카드(테크/네온 공통 지오메트리, 비주얼만 변주) */}
+          {/* 메인 노드 — 둥근 사각형 카드(차분한 테크) */}
           {NODES.map((n, i) => {
             const st = states[i]
             const x = cx(i) - NODE_W / 2
@@ -223,7 +198,7 @@ export function PipelineNodeGraph() {
                     width={NODE_W + 8}
                     height={NODE_H + 8}
                     rx={10}
-                    className={`fill-current pulse-ring ${isNeon ? "pulse-neon" : "pulse-tech"}`}
+                    className="fill-current pulse-tech"
                   />
                 )}
                 <rect
@@ -233,9 +208,9 @@ export function PipelineNodeGraph() {
                   height={NODE_H}
                   rx={8}
                   className={`fill-current ${glowFor(st)}`}
-                  fillOpacity={st === "pending" ? 0.06 : fillOp}
+                  fillOpacity={st === "pending" ? 0.06 : 0.1}
                   stroke="currentColor"
-                  strokeWidth={nodeStroke}
+                  strokeWidth={1.4}
                 />
                 <text
                   x={cx(i)}
@@ -266,38 +241,24 @@ export function PipelineNodeGraph() {
           })}
 
           <style jsx>{`
-            /* 전류 흐름 — 점선 입자가 왼→오로 흐른다(테크=느리게, 네온=빠르게) */
+            /* 전류 흐름 — 점선 입자가 왼→오로 은은하게 흐른다(테크) */
             .flow-line {
               stroke-dasharray: 4 6;
-            }
-            .flow-slow {
               animation: flowDash 1.6s linear infinite;
-            }
-            .flow-fast {
-              animation: flowDash 0.5s linear infinite;
             }
             @keyframes flowDash {
               to {
                 stroke-dashoffset: -10;
               }
             }
-            /* 발광 — currentColor(토큰 색)에서 파생. 테크=은은 / 네온=강렬 */
+            /* 발광 — currentColor(토큰 색)에서 파생. 테크=은은 */
             .glow-soft {
               filter: drop-shadow(0 0 2px currentColor);
             }
-            .glow-strong {
-              filter: drop-shadow(0 0 4px currentColor) drop-shadow(0 0 9px currentColor);
-            }
             /* active 노드 맥동 링 */
-            .pulse-ring {
-              fill-opacity: 0.18;
-            }
             .pulse-tech {
+              fill-opacity: 0.18;
               animation: pulseTech 1.8s ease-in-out infinite;
-            }
-            .pulse-neon {
-              animation: pulseNeon 1s ease-in-out infinite;
-              filter: drop-shadow(0 0 6px currentColor);
             }
             @keyframes pulseTech {
               0%,
@@ -308,20 +269,9 @@ export function PipelineNodeGraph() {
                 fill-opacity: 0.04;
               }
             }
-            @keyframes pulseNeon {
-              0%,
-              100% {
-                fill-opacity: 0.32;
-              }
-              50% {
-                fill-opacity: 0.08;
-              }
-            }
             @media (prefers-reduced-motion: reduce) {
-              .flow-slow,
-              .flow-fast,
-              .pulse-tech,
-              .pulse-neon {
+              .flow-line,
+              .pulse-tech {
                 animation: none;
               }
             }
