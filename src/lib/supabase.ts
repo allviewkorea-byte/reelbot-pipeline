@@ -9,6 +9,7 @@ import {
   type ChannelRow,
 } from "./channels"
 import type { ContentPlan } from "./content-plan"
+import type { TrendRankingRow } from "./trend-concepts"
 
 export const CHARACTER_BUCKET = "character-seeds"
 export const CONTENT_PLANS_TABLE = "content_plans"
@@ -18,6 +19,7 @@ export const CHARACTER_TABLE = "characters"
 export const SAYEON_CHARACTER_TABLE = "sayeon_characters"
 export const CHANNELS_TABLE = "channels"
 export const CHANNEL_STATUS_TABLE = "channel_status"
+export const TREND_RANKINGS_TABLE = "trend_rankings"
 
 let cached: SupabaseClient | null = null
 
@@ -179,5 +181,42 @@ export async function setChannelStatus(channelId: string, isActive: boolean): Pr
     })
     const extra = error.details ? ` | ${error.details}` : ""
     throw new Error(`채널 상태 저장 실패: ${error.message}${extra}`)
+  }
+}
+
+// ── 트렌드 컨셉 랭킹 캐시 (Postgres `trend_rankings` 테이블) ──────────
+// ⚠️ 테이블 생성·GRANT 는 코드가 하지 않는다(SQL 은 PR 설명, 대표가 Supabase 에서 실행).
+//    GRANT 누락 시 permission denied — 반드시 부여. 조회는 미존재/에러에도 null 방어.
+
+export async function getTrendRanking(channelId: string, date: string): Promise<TrendRankingRow | null> {
+  try {
+    const supabase = getSupabaseAdmin()
+    const { data, error } = await supabase
+      .from(TREND_RANKINGS_TABLE)
+      .select("*")
+      .eq("channel_id", channelId)
+      .eq("date", date)
+      .maybeSingle()
+    if (error) return null // 테이블 없음/조회 실패 → 캐시 미스로 처리
+    return (data as TrendRankingRow) ?? null
+  } catch {
+    return null // SUPABASE_* 미설정 등 → 캐시 미스
+  }
+}
+
+export async function saveTrendRanking(row: TrendRankingRow): Promise<void> {
+  const supabase = getSupabaseAdmin()
+  const { error } = await supabase
+    .from(TREND_RANKINGS_TABLE)
+    .upsert(row, { onConflict: "id" })
+  if (error) {
+    console.error("[trend-rankings] upsert 실패:", {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code,
+    })
+    const extra = error.details ? ` | ${error.details}` : ""
+    throw new Error(`트렌드 랭킹 저장 실패: ${error.message}${extra}`)
   }
 }
