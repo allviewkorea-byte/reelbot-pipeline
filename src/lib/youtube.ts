@@ -192,3 +192,62 @@ export async function fetchChannelUploads(channelId: string, max = 10): Promise<
       }
     })
 }
+
+// 핸들(@..) → 채널 ID(UC..). 이미 UC.. 면 그대로. 실패 시 null(호출부에서 건너뜀).
+// channels.list?forHandle= (1 unit). @ 유무 무관하게 처리.
+export async function resolveChannelId(handleOrId: string): Promise<string | null> {
+  const v = (handleOrId ?? "").trim()
+  if (!v) return null
+  if (v.startsWith("UC")) return v
+  const handle = v.startsWith("@") ? v.slice(1) : v
+  try {
+    const data = await ytFetch<YtListResponse<{ id?: string }>>("/channels", {
+      part: "id",
+      forHandle: handle,
+    })
+    return data.items?.[0]?.id ?? null
+  } catch {
+    return null
+  }
+}
+
+// 트렌드 분석용 채널 영상(제목+조회수 숫자). marquee 와 달리 공개필터 없이 통계만.
+export interface ChannelVideoStat {
+  id: string
+  title: string
+  viewCount: number
+  publishedAt: string
+}
+
+// 채널 최근 업로드 영상의 제목·조회수. uploads 재생목록 → playlistItems → videos.list.
+// 쿼터 ~3 unit/호출. 실패는 호출부에서 처리(throw).
+export async function fetchChannelVideoStats(channelId: string, max = 20): Promise<ChannelVideoStat[]> {
+  if (!channelId) return []
+  const ch = await ytFetch<
+    YtListResponse<{ contentDetails?: { relatedPlaylists?: { uploads?: string } } }>
+  >("/channels", { part: "contentDetails", id: channelId })
+  const uploads = ch.items?.[0]?.contentDetails?.relatedPlaylists?.uploads
+  if (!uploads) return []
+
+  const pl = await ytFetch<YtListResponse<{ contentDetails?: { videoId?: string } }>>(
+    "/playlistItems",
+    { part: "contentDetails", playlistId: uploads, maxResults: Math.min(max, 50) },
+  )
+  const ids = (pl.items ?? [])
+    .map((i) => i.contentDetails?.videoId)
+    .filter((v): v is string => Boolean(v))
+  if (ids.length === 0) return []
+
+  const vids = await ytFetch<YtListResponse<RawVideo>>("/videos", {
+    part: "snippet,statistics",
+    id: ids.join(","),
+  })
+  return (vids.items ?? [])
+    .map((v) => ({
+      id: v.id,
+      title: v.snippet?.title ?? "",
+      viewCount: Number(v.statistics?.viewCount ?? 0),
+      publishedAt: v.snippet?.publishedAt ?? "",
+    }))
+    .filter((v) => v.title)
+}
