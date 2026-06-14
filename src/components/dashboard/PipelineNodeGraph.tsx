@@ -22,7 +22,7 @@ const NODES: PipelineNode[] = [
   { id: "upload", label: "업로드", to: 100 },
 ]
 
-const PLATFORMS = ["유튜브", "틱톡", "인스타", "클립"]
+const PLATFORMS = ["유튜브", "틱톡", "인스타"]
 
 interface ActiveJob {
   job_id: string
@@ -55,14 +55,15 @@ const TEXT: Record<NodeState, string> = {
 
 // ── 지오메트리(둥근 사각형 노드 1행) ────────────────────────────────
 const NODE_W = 66
-const NODE_H = 30
-const CY = 36
+const NODE_H = 28
+const CY = 28
 const START_X = 45
 const GAP = 105
 const cx = (i: number) => START_X + i * GAP
 const LAST_X = cx(NODES.length - 1)
 const PX = LAST_X + 95 // 플랫폼 분기 x
-const PLATFORM_Y = [6, 26, 46, 66]
+// 플랫폼 분기 노드 3개(유튜브·틱톡·인스타) — CY(28) 기준 위아래로 대칭 배치. 네이버클립 제거.
+const PLATFORM_Y = [8, 28, 48]
 
 function headerText(job: ActiveJob | null): string {
   if (!job) return "대기 중 — 진행 중인 작업 없음"
@@ -106,14 +107,14 @@ export function PipelineNodeGraph() {
   const glowFor = (st: NodeState) => (st === "active" ? "glow-soft" : "")
 
   return (
-    <div className="rounded-xl border border-border bg-card p-3">
-      <div className="mb-2 flex items-center justify-between gap-3">
+    <div className="rounded-xl border border-border bg-card px-3 py-2">
+      <div className="mb-1 flex items-center justify-between gap-3">
         <h2 className="text-sm font-semibold text-foreground">백곰 파이프라인</h2>
         <span className="text-xs text-muted-foreground">{headerText(job)}</span>
       </div>
 
       <div className="w-full overflow-x-auto">
-        <svg viewBox={`0 0 ${PX + 75} 72`} className="h-auto w-full min-w-[680px]" role="img" aria-label="파이프라인 상태">
+        <svg viewBox={`0 0 ${PX + 75} 56`} className="h-auto w-full min-w-[680px]" role="img" aria-label="파이프라인 상태">
           {/* 노드 간 연결선 — done→done(emerald)·done→active(primary) 구간에 전류 흐름 */}
           {NODES.slice(0, -1).map((_, i) => {
             const a = states[i]
