@@ -24,12 +24,12 @@ const DUMMY_VIDEOS: MarqueeVideo[] = [
   { id: "yt-031", platform: "youtube", title: "사연_031 「엄마가 끝까지 숨긴…」", thumbnailUrl: "", viewCount: "조회 12K", commentCount: "댓글 88", videoUrl: "" },
 ]
 
+// 네이버클립 탭 제거 — 노드그래프 분기(유튜브·틱톡·인스타)와 일관. 네이버는 어디에도 안 보임.
 const TABS: { id: "all" | VideoPlatform; label: string }[] = [
   { id: "all", label: "전체" },
   { id: "youtube", label: "유튜브" },
   { id: "tiktok", label: "틱톡" },
   { id: "instagram", label: "인스타" },
-  { id: "naverclip", label: "네이버클립" },
 ]
 
 function VideoCard({ v }: { v: MarqueeVideo }) {
