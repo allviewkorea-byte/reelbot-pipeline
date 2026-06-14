@@ -16,6 +16,7 @@ import { BAEKGOM_CHANNEL_ID } from "@/lib/content-plan"
 import { CHANNEL_STATUS_EVENT, type ChannelStatusDetail } from "@/lib/channel-status"
 import { RecentVideosMarquee } from "@/components/dashboard/RecentVideosMarquee"
 import { PipelineNodeGraph } from "@/components/dashboard/PipelineNodeGraph"
+import { TrendPanel } from "@/components/dashboard/TrendPanel"
 import { ContentCalendar } from "@/components/dashboard/ContentCalendar"
 
 // 백곰의 실화보고서 = 유일 운영 채널(트랙 A, /sayeon 엔진). 채널 DB 레코드 없이 고정 표시.
@@ -163,7 +164,10 @@ export default function DashboardPage() {
       {/* 파이프라인 노드그래프 — 활성 job 실시간 점등(UI-4a). /api/jobs/active 폴링. */}
       <PipelineNodeGraph />
 
-      {/* 콘텐츠 캘린더 — 수동 입력 그릇(UI-5a). 자동 기획은 UI-5b. */}
+      {/* 트렌드 분석 — 빈 그릇(준비 중). 실제 엔진은 다음 PR. (가짜 데이터 없음) */}
+      <TrendPanel />
+
+      {/* 콘텐츠 캘린더 — 기본 '오늘의 콘텐츠'(3슬롯), 전체 보기=월간. 마퀴 바로 위. */}
       <ContentCalendar />
 
       {/* 최근 업로드 영상 — 플랫폼 탭 + 우→좌 자동 마퀴(UI-3). 더미 데이터, 실연동은 UI-3b. */}
