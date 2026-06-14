@@ -83,7 +83,7 @@ export default function DashboardPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden p-4">
-      {/* 헤더 — 채널명 + 플랫폼/트랙/상태 뱃지 (UI-2 헤더 재사용) */}
+      {/* 헤더 — 채널명+뱃지(왼쪽) / 사연 제작·가동 토글(오른쪽). NEXT UP 줄은 제거됨. */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -110,16 +110,9 @@ export default function DashboardPage() {
           </div>
           <p className="mt-0.5 text-sm text-muted-foreground">운영 채널 관제 대시보드</p>
         </div>
-      </div>
 
-      {/* 제어 바 — NEXT UP + 사연 제작 열기(실제 진입) + 가동 시작↔중단 토글 */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-3">
-        <div className="min-w-0">
-          {/* NEXT UP — 스케줄 타임스탬프 미연동 → 플레이스홀더(UI-5에서 연결) */}
-          <p className="text-xs text-muted-foreground">NEXT UP</p>
-          <p className="text-sm font-semibold text-foreground">다음 업로드 —</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
+        {/* 액션 — 사연 제작 열기 + 가동 시작↔중단 토글(채널명 줄 오른쪽 끝으로 이동) */}
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
           {/* 백곰의 실제 제작 진입점: /sayeon 으로만 이동(파라미터 없음, CLAUDE.md 2단계 원칙) */}
           <Link
             href="/sayeon"
@@ -129,7 +122,7 @@ export default function DashboardPage() {
             사연 제작 열기
           </Link>
           {/* 가동 토글 — OFF→[▶ 시작](emerald), ON→[■ 중단](red). 상태 저장(channel_status).
-              실제 자동 업로드 연결은 후속(스케줄러). 색/아이콘/라벨이 상태따라 부드럽게 전환. */}
+              #112 가동상태 로직(GET/POST + 사이드바 동기화) 그대로 유지. */}
           <button
             onClick={toggle}
             disabled={busy}
@@ -164,11 +157,17 @@ export default function DashboardPage() {
       {/* 파이프라인 노드그래프 — 활성 job 실시간 점등(UI-4a). /api/jobs/active 폴링. */}
       <PipelineNodeGraph />
 
-      {/* 트렌드 분석 — 빈 그릇(준비 중). 실제 엔진은 다음 PR. (가짜 데이터 없음) */}
-      <TrendPanel />
-
-      {/* 콘텐츠 캘린더 — 기본 '오늘의 콘텐츠'(3슬롯), 전체 보기=월간. 마퀴 바로 위. */}
-      <ContentCalendar />
+      {/* 좌우 한 줄(6:4) — 왼쪽 오늘의 콘텐츠(캘린더) / 오른쪽 트렌드 분석. 같은 높이. */}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
+        {/* 콘텐츠 캘린더 — 기본 '오늘의 콘텐츠'(3슬롯), 전체 보기=월간 */}
+        <div className="lg:col-span-3 [&>div]:h-full">
+          <ContentCalendar />
+        </div>
+        {/* 트렌드 분석 — 빈 그릇(준비 중). 실제 엔진은 다음 PR. (가짜 데이터 없음) */}
+        <div className="lg:col-span-2 [&>div]:h-full">
+          <TrendPanel />
+        </div>
+      </div>
 
       {/* 최근 업로드 영상 — 플랫폼 탭 + 우→좌 자동 마퀴(UI-3). 더미 데이터, 실연동은 UI-3b. */}
       <RecentVideosMarquee />
