@@ -14,6 +14,10 @@ import type { TrendRankingItem } from "./trend-concepts"
 // share 0 컨셉도 아주 가끔은 뽑히게(완전 배제 X) — 다양성 확보용 바닥 가중치.
 const CONCEPT_FLOOR = 0.02
 
+// 한 컨셉이 생성 기간 전체에서 차지할 수 있는 최대 비율(쏠림 완화). 조정 쉽게 상수로.
+// 예: 30일×3슬롯=90칸 × 0.30 = 27칸 상한. 트렌드 상위라도 이 이상은 안 뽑힘.
+export const CONCEPT_SHARE_CAP = 0.3
+
 // 트렌드 랭킹 → 컨셉별 가중치. 랭킹 없으면 전부 floor(=균등) → 폴백이 자동.
 export function buildConceptWeights(rankings: TrendRankingItem[] | null): Record<string, number> {
   const w: Record<string, number> = {}
@@ -39,17 +43,18 @@ function weightedPick(weights: Record<string, number>, candidates: string[]): st
   return candidates[candidates.length - 1]
 }
 
-// 한 슬롯 컨셉 선택: 같은 날(sameDay) 제외, ±N일(recent) 회피, 가중 랜덤.
-// 연속 회피로 후보가 0이 되면 회피를 완화(하루 중복 금지는 끝까지 지킴).
+// 한 슬롯 컨셉 선택: exclude(하루 중복·상한 도달) 하드 제외, avoid(±N일) 회피, 가중 랜덤.
+// 회피로 후보가 0이 되면 회피를 완화하고, 그래도 0이면 최후로 전체 허용(하루 중복은
+// exclude 에 sameDay 만 넣고 호출하면 끝까지 유지됨 — 상한은 최후에만 무시).
 export function pickConcept(
   weights: Record<string, number>,
-  sameDay: Set<string>,
-  recent: Set<string>,
+  exclude: Set<string>,
+  avoid: Set<string>,
 ): string {
   const all = CONTENT_CONCEPTS as readonly string[]
-  let candidates = all.filter((c) => !sameDay.has(c) && !recent.has(c))
-  if (candidates.length === 0) candidates = all.filter((c) => !sameDay.has(c)) // ±N일 회피 완화
-  if (candidates.length === 0) candidates = [...all] // 최후
+  let candidates = all.filter((c) => !exclude.has(c) && !avoid.has(c))
+  if (candidates.length === 0) candidates = all.filter((c) => !exclude.has(c)) // ±N일 회피 완화
+  if (candidates.length === 0) candidates = [...all] // 최후(상한·회피 모두 무시)
   return weightedPick(weights, candidates) ?? "기타"
 }
 
@@ -61,18 +66,30 @@ export interface SlotAssignment {
 
 // 하루의 '빈 슬롯'만 컨셉·시각 배정(채워진 슬롯은 호출부가 제외해 전달 → 보존).
 // sameDayConcepts: 그 날 이미 쓰인 컨셉(수동분 포함, 하루 중복 금지). recentConcepts: ±N일.
+// counts/capCount: 컨셉 쏠림 완화 — counts(전 기간 누적, mutate)가 capCount 도달한 컨셉은
+//   후보에서 제외. (counts 미전달 시 상한 미적용 = 기존 동작)
 export function planEmptySlots(opts: {
   filledSlots: Set<ContentSlot>
   sameDayConcepts: Set<string>
   recentConcepts: Set<string>
   weights: Record<string, number>
+  counts?: Map<string, number>
+  capCount?: number
 }): SlotAssignment[] {
   const sameDay = new Set(opts.sameDayConcepts)
+  const counts = opts.counts
+  const capCount = opts.capCount ?? 0
   const out: SlotAssignment[] = []
   for (const s of CONTENT_SLOTS) {
     if (opts.filledSlots.has(s.id)) continue
-    const concept = pickConcept(opts.weights, sameDay, opts.recentConcepts)
+    // 하드 제외 = 같은 날 컨셉 ∪ 상한 도달 컨셉.
+    const exclude = new Set(sameDay)
+    if (counts && capCount > 0) {
+      for (const [c, n] of counts) if (n >= capCount) exclude.add(c)
+    }
+    const concept = pickConcept(opts.weights, exclude, opts.recentConcepts)
     sameDay.add(concept) // 같은 날 다음 슬롯은 다른 컨셉
+    if (counts) counts.set(concept, (counts.get(concept) ?? 0) + 1)
     out.push({ slot: s.id, concept, scheduled_time: randomSlotTime(s.id) })
   }
   return out

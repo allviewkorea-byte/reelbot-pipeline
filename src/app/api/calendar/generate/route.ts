@@ -8,6 +8,7 @@ import {
   isoFromKSTOffset,
   addDaysISO,
   neighborDates,
+  CONCEPT_SHARE_CAP,
 } from "@/lib/calendar-generate"
 
 // 캘린더 롤링 자동 생성(7b): 트렌드 근거로 하루 3슬롯 컨셉 자동 배정 → content_plans 저장.
@@ -32,24 +33,42 @@ export async function POST(req: NextRequest) {
   const offsets = mode === "rollOne" ? [30] : Array.from({ length: 30 }, (_, i) => i)
   const targetDates = offsets.map((o) => isoFromKSTOffset(o)).sort()
 
+  // 쏠림 완화 기준 '분포 구간'. fill30 = 대상 30일. rollOne = 최근 30일(롤링 day 기준).
+  // 이 구간 슬롯 수 × CONCEPT_SHARE_CAP 가 컨셉당 상한.
+  const distributionDates =
+    mode === "rollOne"
+      ? Array.from({ length: 30 }, (_, i) => isoFromKSTOffset(i + 1)) // offsets 1..30
+      : targetDates
+  const distSet = new Set(distributionDates)
+  const capCount = Math.ceil(CONCEPT_SHARE_CAP * distributionDates.length * 3)
+
   try {
     // 1) 트렌드 가중치(오늘 캐시 1회 재사용). 없으면 null → 균등 폴백.
     const ranking = await getTrendRanking(channelId, todayKST())
     const weights = buildConceptWeights(ranking?.rankings ?? null)
 
-    // 2) ±N일 회피·하루중복·수동 보존 판단용으로 대상±버퍼 구간의 기존 plans 조회.
-    const from = addDaysISO(targetDates[0], -4)
-    const to = addDaysISO(targetDates[targetDates.length - 1], 4)
+    // 2) ±N일 회피·하루중복·수동 보존·분포(상한) 판단용 기존 plans 조회.
+    //    분포 구간과 대상±버퍼 둘 다 덮는 넓은 구간을 한 번에.
+    const bounds = [
+      ...distributionDates,
+      addDaysISO(targetDates[0], -4),
+      addDaysISO(targetDates[targetDates.length - 1], 4),
+    ]
+    const from = bounds.reduce((a, b) => (a < b ? a : b))
+    const to = bounds.reduce((a, b) => (a > b ? a : b))
     const existing = await listContentPlans(channelId, from, to)
 
     // 날짜별 사용 컨셉 / 채워진 슬롯 맵(기존 + 생성분 누적).
     const usageByDate = new Map<string, Set<string>>()
     const slotsByDate = new Map<string, Set<ContentSlot>>()
+    // 분포 구간 컨셉 사용 횟수(수동 포함) — 상한 판단용. 생성하며 누적.
+    const counts = new Map<string, number>()
     for (const p of existing) {
       if (!usageByDate.has(p.date)) usageByDate.set(p.date, new Set())
       if (p.concept) usageByDate.get(p.date)!.add(p.concept)
       if (!slotsByDate.has(p.date)) slotsByDate.set(p.date, new Set())
       slotsByDate.get(p.date)!.add((p.slot ?? "morning") as ContentSlot)
+      if (p.concept && distSet.has(p.date)) counts.set(p.concept, (counts.get(p.concept) ?? 0) + 1)
     }
 
     // 3) 날짜순으로 빈 슬롯 채우기.
@@ -62,7 +81,14 @@ export async function POST(req: NextRequest) {
         for (const c of usageByDate.get(nb) ?? []) recentConcepts.add(c)
       }
 
-      const assignments = planEmptySlots({ filledSlots, sameDayConcepts, recentConcepts, weights })
+      const assignments = planEmptySlots({
+        filledSlots,
+        sameDayConcepts,
+        recentConcepts,
+        weights,
+        counts,
+        capCount,
+      })
 
       if (!usageByDate.has(date)) usageByDate.set(date, new Set())
       for (const a of assignments) {
