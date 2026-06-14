@@ -1,13 +1,18 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from "react"
-import { ChevronDown, ChevronUp, X, AlertTriangle, Loader2, Trash2 } from "lucide-react"
+import { ChevronDown, ChevronUp, X, AlertTriangle, Loader2, RefreshCw } from "lucide-react"
 import {
   BAEKGOM_CHANNEL_ID,
   CONTENT_CONCEPTS,
+  CONTENT_SLOTS,
   CONCEPT_CONFLICT_WINDOW_DAYS,
+  SLOT_BY_ID,
+  conceptColor,
+  randomSlotTime,
   type ContentPlan,
   type ContentPlanStatus,
+  type ContentSlot,
 } from "@/lib/content-plan"
 
 const FIELD =
@@ -47,7 +52,15 @@ function monthGrid(year: number, month: number): Date[] {
   return Array.from({ length: 42 }, (_, i) => addDays(start, i))
 }
 
-// 연속 컨셉 감지: 같은 컨셉이 앞뒤 N일 내 다른 날에도 있으면 충돌(plan id 집합).
+type DaySlots = Partial<Record<ContentSlot, ContentPlan>>
+
+// 옛 데이터(slot 없음)는 morning 으로 간주(방어). 같은 슬롯 중복은 첫 행 우선.
+function slotOf(p: ContentPlan): ContentSlot {
+  return (p.slot ?? "morning") as ContentSlot
+}
+
+// 연속 컨셉 감지: 같은 컨셉이 앞뒤 N일 내 '다른 날'에도 있으면 충돌(plan id 집합).
+// 슬롯 도입 후에도 행 단위로 그대로 동작(같은 날 내 중복은 아래 dupDates 로 별도 처리).
 function detectConflicts(plans: ContentPlan[]): Set<string> {
   const conflict = new Set<string>()
   for (let i = 0; i < plans.length; i++) {
@@ -56,6 +69,7 @@ function detectConflicts(plans: ContentPlan[]): Set<string> {
       const a = plans[i]
       const b = plans[j]
       if (!a.concept || a.concept !== b.concept) continue
+      if (a.date === b.date) continue // 같은 날은 dupDates 가 담당
       if (Math.abs(diffDays(a.date, b.date)) <= CONCEPT_CONFLICT_WINDOW_DAYS) {
         conflict.add(a.id)
       }
@@ -99,22 +113,70 @@ export function ContentCalendar() {
     reload()
   }, [reload])
 
-  const byDate = useMemo(() => {
-    const m = new Map<string, ContentPlan>()
-    for (const p of plans) if (!m.has(p.date)) m.set(p.date, p)
+  // 날짜 → 슬롯별 플랜 맵.
+  const byDateSlot = useMemo(() => {
+    const m = new Map<string, DaySlots>()
+    for (const p of plans) {
+      const slot = slotOf(p)
+      if (!m.has(p.date)) m.set(p.date, {})
+      const day = m.get(p.date)!
+      if (!day[slot]) day[slot] = p
+    }
     return m
   }, [plans])
+
   const conflicts = useMemo(() => detectConflicts(plans), [plans])
   const conflictDates = useMemo(
     () => new Set(plans.filter((p) => conflicts.has(p.id)).map((p) => p.date)),
     [plans, conflicts],
   )
+  // 하루 같은 컨셉(슬롯 간 중복) — 경고 표시용.
+  const dupDates = useMemo(() => {
+    const byDate = new Map<string, string[]>()
+    for (const p of plans) {
+      if (!p.concept) continue
+      const arr = byDate.get(p.date) ?? []
+      arr.push(p.concept)
+      byDate.set(p.date, arr)
+    }
+    const s = new Set<string>()
+    for (const [date, concepts] of byDate) {
+      if (new Set(concepts).size !== concepts.length) s.add(date)
+    }
+    return s
+  }, [plans])
 
   const weekDates = useMemo(() => {
     const s = startOfWeek(today)
     return Array.from({ length: 7 }, (_, i) => addDays(s, i))
   }, [today])
   const grid = useMemo(() => monthGrid(viewMonth.y, viewMonth.m), [viewMonth])
+
+  // 셀 안의 슬롯별 컨셉 색 태그(아침→저녁→밤 순). compact: 9px/10px.
+  const slotTags = (iso: string, size: "wk" | "mo") => {
+    const day = byDateSlot.get(iso)
+    if (!day) return null
+    const rows = CONTENT_SLOTS.map((s) => day[s.id]).filter(Boolean) as ContentPlan[]
+    if (rows.length === 0) return null
+    return (
+      <span className="flex flex-col gap-0.5">
+        {rows.map((p) => (
+          <span
+            key={p.id}
+            className={`flex items-center gap-1 truncate leading-tight ${size === "wk" ? "text-[10px]" : "text-[9px]"}`}
+          >
+            <span
+              className="h-1.5 w-1.5 shrink-0 rounded-full"
+              style={{ backgroundColor: conceptColor(p.concept) }}
+            />
+            <span className="truncate" style={{ color: conceptColor(p.concept) }}>
+              {p.concept}
+            </span>
+          </span>
+        ))}
+      </span>
+    )
+  }
 
   return (
     <div className="rounded-xl border border-border bg-card p-3">
@@ -125,6 +187,11 @@ export function ContentCalendar() {
           {conflictDates.size > 0 && (
             <span className="flex items-center gap-1 text-xs font-normal text-amber-400">
               <AlertTriangle className="h-3.5 w-3.5" />연속 컨셉 {conflictDates.size}건
+            </span>
+          )}
+          {dupDates.size > 0 && (
+            <span className="flex items-center gap-1 text-xs font-normal text-red-400">
+              <AlertTriangle className="h-3.5 w-3.5" />하루 중복 {dupDates.size}건
             </span>
           )}
         </h2>
@@ -142,8 +209,9 @@ export function ContentCalendar() {
         <div className="grid grid-cols-7 gap-2">
           {weekDates.map((d, i) => {
             const iso = toISO(d)
-            const plan = byDate.get(iso)
             const isToday = iso === toISO(today)
+            const warn = dupDates.has(iso) || conflictDates.has(iso)
+            const tags = slotTags(iso, "wk")
             return (
               <button
                 key={iso}
@@ -152,17 +220,11 @@ export function ContentCalendar() {
                   isToday ? "border-primary/50 bg-primary/5" : "border-border/60 hover:bg-secondary/30"
                 }`}
               >
-                <span className="text-xs text-muted-foreground">
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  {warn && <AlertTriangle className="h-3 w-3 shrink-0 text-amber-400" />}
                   {WEEKDAYS[i]} {d.getDate()}
                 </span>
-                {plan ? (
-                  <span className="flex items-center gap-1 truncate text-xs font-medium text-foreground">
-                    {conflictDates.has(iso) && <AlertTriangle className="h-3 w-3 shrink-0 text-amber-400" />}
-                    {plan.concept}
-                  </span>
-                ) : (
-                  <span className="text-xs text-muted-foreground/50">—</span>
-                )}
+                {tags ?? <span className="text-xs text-muted-foreground/50">—</span>}
               </button>
             )
           })}
@@ -197,9 +259,9 @@ export function ContentCalendar() {
           <div className="grid grid-cols-7 gap-1">
             {grid.map((d) => {
               const iso = toISO(d)
-              const plan = byDate.get(iso)
               const inMonth = d.getMonth() === viewMonth.m
               const isToday = iso === toISO(today)
+              const warn = dupDates.has(iso) || conflictDates.has(iso)
               return (
                 <button
                   key={iso}
@@ -208,13 +270,11 @@ export function ContentCalendar() {
                     isToday ? "border-primary/50" : "border-border/40"
                   } ${inMonth ? "hover:bg-secondary/30" : "opacity-40"}`}
                 >
-                  <span className="text-[11px] text-muted-foreground">{d.getDate()}</span>
-                  {plan && (
-                    <span className="flex items-center gap-0.5 truncate text-[11px] font-medium text-foreground">
-                      {conflictDates.has(iso) && <AlertTriangle className="h-2.5 w-2.5 shrink-0 text-amber-400" />}
-                      {plan.concept}
-                    </span>
-                  )}
+                  <span className="flex items-center gap-0.5 text-[11px] text-muted-foreground">
+                    {warn && <AlertTriangle className="h-2.5 w-2.5 shrink-0 text-amber-400" />}
+                    {d.getDate()}
+                  </span>
+                  {slotTags(iso, "mo")}
                 </button>
               )
             })}
@@ -243,9 +303,9 @@ export function ContentCalendar() {
       )}
 
       {editDate && (
-        <PlanEditor
+        <DayEditor
           date={editDate}
-          plan={byDate.get(editDate) ?? null}
+          daySlots={byDateSlot.get(editDate) ?? {}}
           onClose={() => setEditDate(null)}
           onSaved={() => {
             setEditDate(null)
@@ -257,157 +317,250 @@ export function ContentCalendar() {
   )
 }
 
-function PlanEditor({
+// 슬롯 1개의 편집 초안.
+interface SlotDraft {
+  enabled: boolean
+  id?: string
+  concept: string
+  title: string
+  memo: string
+  status: ContentPlanStatus
+  time: string // HH:MM
+}
+
+function DayEditor({
   date,
-  plan,
+  daySlots,
   onClose,
   onSaved,
 }: {
   date: string
-  plan: ContentPlan | null
+  daySlots: DaySlots
   onClose: () => void
   onSaved: () => void
 }) {
-  const [concept, setConcept] = useState(plan?.concept || CONTENT_CONCEPTS[0])
-  const [title, setTitle] = useState(plan?.title || "")
-  const [memo, setMemo] = useState(plan?.memo || "")
-  const [status, setStatus] = useState<ContentPlanStatus>(plan?.status || "planned")
+  const [drafts, setDrafts] = useState<Record<ContentSlot, SlotDraft>>(() => {
+    const init = {} as Record<ContentSlot, SlotDraft>
+    for (const s of CONTENT_SLOTS) {
+      const p = daySlots[s.id]
+      init[s.id] = {
+        enabled: Boolean(p),
+        id: p?.id,
+        concept: p?.concept || CONTENT_CONCEPTS[0],
+        title: p?.title || "",
+        memo: p?.memo || "",
+        status: p?.status || "planned",
+        time: p?.scheduled_time || randomSlotTime(s.id),
+      }
+    }
+    return init
+  })
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const patch = (slot: ContentSlot, p: Partial<SlotDraft>) =>
+    setDrafts((prev) => ({ ...prev, [slot]: { ...prev[slot], ...p } }))
+
+  // 하루 같은 컨셉 금지: 켜진 슬롯들의 컨셉이 겹치면 저장 차단.
+  const enabledConcepts = CONTENT_SLOTS.filter((s) => drafts[s.id].enabled).map((s) => drafts[s.id].concept)
+  const dupConcept = enabledConcepts.length !== new Set(enabledConcepts).size
 
   const save = async () => {
+    if (busy || dupConcept) return
     setBusy(true)
+    setError(null)
     try {
-      const res = await fetch("/api/content-plans", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: plan?.id,
-          date,
-          concept,
-          title: title.trim() || null,
-          memo: memo.trim() || null,
-          status,
-        }),
-      })
-      if (res.ok) onSaved()
+      let ok = true
+      for (const s of CONTENT_SLOTS) {
+        const d = drafts[s.id]
+        if (d.enabled) {
+          const res = await fetch("/api/content-plans", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: d.id,
+              date,
+              slot: s.id,
+              scheduled_time: d.time,
+              concept: d.concept,
+              title: d.title.trim() || null,
+              memo: d.memo.trim() || null,
+              status: d.status,
+            }),
+          })
+          if (!res.ok) ok = false
+        } else if (d.id) {
+          // 이전엔 켜져 있던 슬롯 → 끄면 행 삭제.
+          const res = await fetch(`/api/content-plans/${encodeURIComponent(d.id)}`, { method: "DELETE" })
+          if (!res.ok) ok = false
+        }
+      }
+      if (ok) onSaved()
+      else setError("저장 실패 — slot/scheduled_time 컬럼(ALTER) 적용 여부를 확인하세요.")
+    } catch {
+      setError("저장 중 오류가 발생했습니다.")
     } finally {
       setBusy(false)
     }
   }
 
-  const remove = async () => {
-    if (!plan) return
-    setBusy(true)
-    try {
-      const res = await fetch(`/api/content-plans/${encodeURIComponent(plan.id)}`, { method: "DELETE" })
-      if (res.ok) onSaved()
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  // Enter=저장(기존 save 재사용). IME 한글 조합 중 Enter 는 무시. 저장 진행 중이면 무시.
-  const handleTitleKey = (e: KeyboardEvent<HTMLInputElement>) => {
+  // Enter=저장(컨셉 중복 없을 때). IME 한글 조합 중 Enter 무시.
+  const onTitleKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== "Enter" || e.nativeEvent.isComposing) return
     e.preventDefault()
-    if (!busy) save()
+    if (!busy && !dupConcept) save()
   }
-  // 메모: Enter=저장 / Ctrl(Cmd)+Enter=줄바꿈 삽입(일반 textarea 와 반대).
-  const handleMemoKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+  // 메모: Enter=저장 / Ctrl(⌘)+Enter=줄바꿈 삽입.
+  const onMemoKey = (e: KeyboardEvent<HTMLTextAreaElement>, slot: ContentSlot) => {
     if (e.key !== "Enter" || e.nativeEvent.isComposing) return
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault()
       const ta = e.currentTarget
       const start = ta.selectionStart
       const end = ta.selectionEnd
-      setMemo(memo.slice(0, start) + "\n" + memo.slice(end))
+      const memo = drafts[slot].memo
+      patch(slot, { memo: memo.slice(0, start) + "\n" + memo.slice(end) })
       requestAnimationFrame(() => {
         ta.selectionStart = ta.selectionEnd = start + 1
       })
       return
     }
     e.preventDefault()
-    if (!busy) save()
+    if (!busy && !dupConcept) save()
   }
 
   // CloneModal 오버레이 패턴 재사용(Sheet/Dialog 없음).
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-base font-semibold text-foreground">{date}</h3>
+      <div
+        className="max-h-[85vh] w-full max-w-4xl overflow-y-auto rounded-xl border border-border bg-card p-5 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-base font-semibold text-foreground">{date} · 하루 3슬롯</h3>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground" aria-label="닫기">
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <label className="mb-1.5 block text-xs font-medium text-muted-foreground">컨셉</label>
-        <div className="mb-4 flex flex-wrap gap-2">
-          {CONTENT_CONCEPTS.map((c) => (
-            <button
-              key={c}
-              onClick={() => setConcept(c)}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                concept === c
-                  ? "bg-primary/20 text-primary border border-primary/30"
-                  : "border border-border text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {c}
-            </button>
-          ))}
+        {dupConcept && (
+          <div className="mb-3 flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-400">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            하루 같은 컨셉은 안 됩니다 — 슬롯마다 다른 컨셉으로 바꿔주세요.
+          </div>
+        )}
+        {error && (
+          <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-400">
+            {error}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          {CONTENT_SLOTS.map((s) => {
+            const d = drafts[s.id]
+            const def = SLOT_BY_ID[s.id]
+            return (
+              <div
+                key={s.id}
+                className={`flex flex-col gap-2 rounded-lg border p-3 transition-colors ${
+                  d.enabled ? "border-border bg-background/40" : "border-border/40"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-semibold text-foreground">
+                    {def.label}
+                    <span className="ml-1 text-[11px] font-normal text-muted-foreground">
+                      {def.startHour}~{def.endHour}시
+                    </span>
+                  </span>
+                  <button
+                    onClick={() => patch(s.id, { enabled: !d.enabled })}
+                    aria-pressed={d.enabled}
+                    className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                      d.enabled
+                        ? "bg-emerald-500/15 text-emerald-400"
+                        : "border border-border text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {d.enabled ? "사용" : "꺼짐"}
+                  </button>
+                </div>
+
+                {d.enabled && (
+                  <>
+                    {/* 시각 — 구간 내 랜덤 자동. 재생성 가능. */}
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-sm font-semibold text-foreground">{d.time}</span>
+                      <button
+                        onClick={() => patch(s.id, { time: randomSlotTime(s.id) })}
+                        className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        <RefreshCw className="h-3 w-3" />재생성
+                      </button>
+                    </div>
+
+                    {/* 컨셉 — 색으로 구분 */}
+                    <div className="flex flex-wrap gap-1.5">
+                      {CONTENT_CONCEPTS.map((c) => {
+                        const selected = d.concept === c
+                        return (
+                          <button
+                            key={c}
+                            onClick={() => patch(s.id, { concept: c })}
+                            style={selected ? { color: conceptColor(c), borderColor: conceptColor(c) } : undefined}
+                            className={`rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                              selected ? "bg-white/5" : "border-border text-muted-foreground hover:text-foreground"
+                            }`}
+                          >
+                            {c}
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    <input
+                      className={FIELD}
+                      value={d.title}
+                      onChange={(e) => patch(s.id, { title: e.target.value })}
+                      onKeyDown={onTitleKey}
+                      placeholder="제목 (선택)"
+                    />
+
+                    <div className="flex gap-1.5">
+                      {(Object.keys(STATUS_LABEL) as ContentPlanStatus[]).map((st) => (
+                        <button
+                          key={st}
+                          onClick={() => patch(s.id, { status: st })}
+                          className={`rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
+                            d.status === st
+                              ? "bg-primary/20 text-primary border border-primary/30"
+                              : "border border-border text-muted-foreground hover:text-foreground"
+                          }`}
+                        >
+                          {STATUS_LABEL[st]}
+                        </button>
+                      ))}
+                    </div>
+
+                    <textarea
+                      className={`${FIELD} min-h-12 resize-y`}
+                      value={d.memo}
+                      onChange={(e) => patch(s.id, { memo: e.target.value })}
+                      onKeyDown={(e) => onMemoKey(e, s.id)}
+                      placeholder="메모 (선택)"
+                    />
+                  </>
+                )}
+              </div>
+            )
+          })}
         </div>
 
-        <label className="mb-1.5 block text-xs font-medium text-muted-foreground">제목 (선택)</label>
-        <input
-          className={`${FIELD} mb-4`}
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          onKeyDown={handleTitleKey}
-          placeholder="예: 남친 집에서 발견한…"
-        />
-
-        <label className="mb-1.5 block text-xs font-medium text-muted-foreground">메모 (선택)</label>
-        <textarea
-          className={`${FIELD} mb-1 min-h-16 resize-y`}
-          value={memo}
-          onChange={(e) => setMemo(e.target.value)}
-          onKeyDown={handleMemoKey}
-        />
-        <p className="mb-4 text-[11px] text-muted-foreground">Enter 저장 · Ctrl(⌘)+Enter 줄바꿈</p>
-
-        <label className="mb-1.5 block text-xs font-medium text-muted-foreground">상태</label>
-        <div className="mb-6 flex gap-2">
-          {(Object.keys(STATUS_LABEL) as ContentPlanStatus[]).map((s) => (
-            <button
-              key={s}
-              onClick={() => setStatus(s)}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                status === s
-                  ? "bg-primary/20 text-primary border border-primary/30"
-                  : "border border-border text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {STATUS_LABEL[s]}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex items-center justify-between gap-2">
-          {plan ? (
-            <button
-              onClick={remove}
-              disabled={busy}
-              className="flex items-center gap-1.5 rounded-lg border border-red-500/30 px-3 py-2 text-sm font-medium text-red-400 transition-colors hover:bg-red-500/10 disabled:opacity-50"
-            >
-              <Trash2 className="h-4 w-4" />삭제
-            </button>
-          ) : (
-            <span />
-          )}
+        <div className="mt-4 flex items-center justify-between gap-2">
+          <p className="text-[11px] text-muted-foreground">Enter 저장 · Ctrl(⌘)+Enter 줄바꿈 · 시각은 구간 내 랜덤</p>
           <button
             onClick={save}
-            disabled={busy}
+            disabled={busy || dupConcept}
             className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             {busy ? "저장 중…" : "저장"}
