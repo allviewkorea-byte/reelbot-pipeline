@@ -35,17 +35,20 @@ const TABS: { id: "all" | VideoPlatform; label: string }[] = [
 function VideoCard({ v }: { v: MarqueeVideo }) {
   return (
     // 숏폼(세로 9:16) 카드 — B형태: [세로 썸네일] 위 / [텍스트 영역] 아래 분리.
-    // 높이 주도(h-full): 마퀴 행 높이에 맞춰 커지고, 썸네일 너비는 9:16 비율로 파생.
+    // 높이 주도(h-full): 마퀴 행 높이는 그대로, 카드 폭만 9:16(높이×9/16)으로 파생.
+    // 핵심: 텍스트 블록은 w-0 min-w-full 로 카드 폭 계산에 0 기여 → 카드 폭=썸네일 폭.
+    // (그래야 긴 제목이 카드를 넓혀 썸네일이 가로로 늘어나는 현상이 없어진다.)
     <div className="mr-4 flex h-full shrink-0 flex-col">
-      <div className="flex aspect-[9/16] min-h-0 flex-1 items-center justify-center overflow-hidden rounded-lg border border-border/60 bg-secondary/50">
+      <div className="flex aspect-[9/16] min-h-0 w-auto flex-1 items-center justify-center overflow-hidden rounded-lg border border-border/60 bg-secondary/50">
         {v.thumbnailUrl ? (
+          // 16:9 원본을 9:16 영역에 크롭 채움(왜곡 없음).
           // eslint-disable-next-line @next/next/no-img-element
           <img src={v.thumbnailUrl} alt={v.title} className="h-full w-full object-cover" />
         ) : (
           <Film className="h-10 w-10 text-muted-foreground" />
         )}
       </div>
-      <div className="mt-2 shrink-0 px-0.5">
+      <div className="mt-2 w-0 min-w-full shrink-0 px-0.5">
         <p className="line-clamp-2 text-sm font-medium leading-snug text-foreground">{v.title}</p>
         <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
           <span>{v.viewCount}</span>
