@@ -8,8 +8,10 @@ import {
   type Channel,
   type ChannelRow,
 } from "./channels"
+import type { ContentPlan } from "./content-plan"
 
 export const CHARACTER_BUCKET = "character-seeds"
+export const CONTENT_PLANS_TABLE = "content_plans"
 export const CHARACTER_TABLE = "characters"
 // 사연 트랙 전용 캐릭터(CharacterSpec + 시트 URL/앵커). 기존 travel 캐릭터
 // (config/images, front/side/back)와 스키마가 달라 별도 테이블로 둔다.
@@ -86,4 +88,44 @@ export async function deleteChannelRow(id: string): Promise<void> {
   const supabase = getSupabaseAdmin()
   const { error } = await supabase.from(CHANNELS_TABLE).delete().eq("id", id)
   if (error) throw new Error(`채널 삭제 실패: ${error.message}`)
+}
+
+// ── 콘텐츠 캘린더 (Postgres `content_plans` 테이블) ───────────────────
+// ⚠️ 테이블 생성은 코드가 하지 않는다(SQL 은 PR 설명 참고, 대표가 Supabase 에서 실행).
+// 조회는 테이블 미존재/에러/환경변수 미설정에도 빈 배열로 방어 → 캘린더가 안 깨짐.
+
+export async function listContentPlans(
+  channelId: string,
+  fromDate?: string,
+  toDate?: string,
+): Promise<ContentPlan[]> {
+  try {
+    const supabase = getSupabaseAdmin()
+    let q = supabase
+      .from(CONTENT_PLANS_TABLE)
+      .select("*")
+      .eq("channel_id", channelId)
+      .order("date", { ascending: true })
+    if (fromDate) q = q.gte("date", fromDate)
+    if (toDate) q = q.lte("date", toDate)
+    const { data, error } = await q
+    if (error) return [] // 테이블 없음/조회 실패 → 빈 캘린더(앱 안 깨짐)
+    return (data ?? []) as ContentPlan[]
+  } catch {
+    return [] // SUPABASE_* 미설정 등 → 빈 배열 방어
+  }
+}
+
+export async function upsertContentPlan(plan: ContentPlan): Promise<void> {
+  const supabase = getSupabaseAdmin()
+  const { error } = await supabase
+    .from(CONTENT_PLANS_TABLE)
+    .upsert(plan, { onConflict: "id" })
+  if (error) throw new Error(`콘텐츠 플랜 저장 실패: ${error.message}`)
+}
+
+export async function deleteContentPlan(id: string): Promise<void> {
+  const supabase = getSupabaseAdmin()
+  const { error } = await supabase.from(CONTENT_PLANS_TABLE).delete().eq("id", id)
+  if (error) throw new Error(`콘텐츠 플랜 삭제 실패: ${error.message}`)
 }
