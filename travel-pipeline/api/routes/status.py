@@ -21,3 +21,21 @@ def job_status(job_id: str):
         result=job.result,
         error=job.error,
     )
+
+
+@router.get("/jobs/active")
+def active_job():
+    """현재 진행 중(없으면 가장 최근) job 1건 — 대시보드 노드그래프 점등용(읽기 전용).
+
+    유휴(아무 job 없음)면 None 반환. 기존 job 생성·진행 로직은 건드리지 않는다.
+    """
+    job = job_manager.active_job()
+    if job is None:
+        return None
+    return {
+        "job_id": job.job_id,
+        "status": job.status.value,
+        "progress": job.progress,
+        "current_step": job.current_step,
+        "created_at": job.created_at.isoformat(),
+    }
