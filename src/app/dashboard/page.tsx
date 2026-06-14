@@ -35,12 +35,12 @@ const METRICS = [
 
 export default function DashboardPage() {
   return (
-    <div className="flex flex-1 flex-col gap-5 overflow-auto p-6">
+    <div className="flex flex-1 flex-col gap-4 overflow-auto p-5">
       {/* 헤더 — 채널명 + 플랫폼/트랙/상태 뱃지 (UI-2 헤더 재사용) */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold text-foreground truncate">{BAEKGOM.name}</h1>
+            <h1 className="text-lg font-semibold text-foreground truncate">{BAEKGOM.name}</h1>
             <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${PLATFORM_BADGE[BAEKGOM.platform]}`}>
               {PLATFORM_LABELS[BAEKGOM.platform]}
             </span>
@@ -56,7 +56,7 @@ export default function DashboardPage() {
       </div>
 
       {/* 제어 바 — NEXT UP + 사연 제작 열기(실제 진입) + (UI 전용) 시작/일시정지/중단 */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-3">
         <div className="min-w-0">
           {/* NEXT UP — 스케줄 타임스탬프 미연동 → 플레이스홀더(UI-5에서 연결) */}
           <p className="text-xs text-muted-foreground">NEXT UP</p>
@@ -94,14 +94,14 @@ export default function DashboardPage() {
       </div>
 
       {/* 월간 지표 줄 (UI-2 지표 재사용, 값은 플레이스홀더) */}
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {METRICS.map((s) => (
-          <div key={s.label} className="rounded-xl border border-border bg-card p-4">
+          <div key={s.label} className="rounded-xl border border-border bg-card p-3">
             <div className="flex items-center gap-2 text-muted-foreground">
               <s.icon className="h-4 w-4" />
               <span className="text-xs">{s.label}</span>
             </div>
-            <p className="mt-2 text-xl font-bold text-foreground" style={{ fontFamily: "var(--font-geist-mono)" }}>
+            <p className="mt-1.5 text-lg font-bold text-foreground" style={{ fontFamily: "var(--font-geist-mono)" }}>
               {s.value}
             </p>
           </div>
