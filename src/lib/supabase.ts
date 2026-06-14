@@ -143,6 +143,23 @@ export async function deleteContentPlan(id: string): Promise<void> {
   if (error) throw new Error(`콘텐츠 플랜 삭제 실패: ${error.message}`)
 }
 
+// 여러 플랜 일괄 upsert(롤링 자동 생성용 — 30일×최대3슬롯을 한 번에). 빈 배열이면 no-op.
+export async function upsertContentPlans(plans: ContentPlan[]): Promise<void> {
+  if (plans.length === 0) return
+  const supabase = getSupabaseAdmin()
+  const { error } = await supabase.from(CONTENT_PLANS_TABLE).upsert(plans, { onConflict: "id" })
+  if (error) {
+    console.error("[content-plans] 일괄 upsert 실패:", {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code,
+    })
+    const extra = error.details ? ` | ${error.details}` : ""
+    throw new Error(`콘텐츠 플랜 일괄 저장 실패: ${error.message}${extra}`)
+  }
+}
+
 // ── 채널 가동 상태 (Postgres `channel_status` 테이블) ─────────────────
 // ⚠️ 테이블 생성·GRANT 는 코드가 하지 않는다(SQL 은 PR 설명 참고, 대표가 Supabase 에서 실행).
 //    GRANT 누락 시 permission denied 500 — content_plans 때의 함정이라 반드시 부여.
