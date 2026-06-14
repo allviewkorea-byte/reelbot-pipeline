@@ -38,4 +38,6 @@ def active_job():
         "progress": job.progress,
         "current_step": job.current_step,
         "created_at": job.created_at.isoformat(),
+        # 플랫폼 노드 점등용(읽기 전용) — 결과의 youtube_url 만 노출. 기존 로직 무수정.
+        "youtube_url": (job.result or {}).get("youtube_url"),
     }

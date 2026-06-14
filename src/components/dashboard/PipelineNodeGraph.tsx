@@ -29,6 +29,7 @@ interface ActiveJob {
   status: string // pending | running | completed | failed
   progress: number
   current_step: string
+  youtube_url?: string | null // 업로드 성공 시 결과 URL(플랫폼 노드 점등·클릭용)
 }
 
 function computeStates(job: ActiveJob | null): NodeState[] {
@@ -93,6 +94,10 @@ export function PipelineNodeGraph() {
   }, [])
 
   const states = computeStates(job)
+  const uploadDone = states[states.length - 1] === "done"
+  const youtubeUrl = job?.youtube_url ?? null
+  // 실데이터(youtube_url) 우선, 없으면 '업로드 노드 done ⇒ 유튜브 done' 근사(백곰=유튜브 단일).
+  const youtubeDone = Boolean(youtubeUrl) || uploadDone
 
   return (
     <div className="rounded-xl border border-border bg-card p-5">
@@ -103,39 +108,74 @@ export function PipelineNodeGraph() {
 
       <div className="w-full overflow-x-auto">
         <svg viewBox={`0 0 ${PX + 70} 120`} className="h-auto w-full min-w-[640px]" role="img" aria-label="파이프라인 상태">
-          {/* 노드 간 연결선 */}
-          {NODES.slice(0, -1).map((_, i) => (
-            <line
-              key={`c-${i}`}
-              x1={cx(i) + NODE_R}
-              y1={CY}
-              x2={cx(i + 1) - NODE_R}
-              y2={CY}
-              className="stroke-border"
-              strokeWidth={2}
-            />
-          ))}
+          {/* 노드 간 연결선 — done→done(emerald)·done→active(primary) 구간에 전류 흐름 */}
+          {NODES.slice(0, -1).map((_, i) => {
+            const a = states[i]
+            const b = states[i + 1]
+            const flowing =
+              (a === "done" && b === "done") || (a === "done" && b === "active")
+            const cls = !flowing
+              ? "stroke-border"
+              : b === "active"
+                ? "flow-line stroke-primary"
+                : "flow-line stroke-emerald-500"
+            return (
+              <line
+                key={`c-${i}`}
+                x1={cx(i) + NODE_R}
+                y1={CY}
+                x2={cx(i + 1) - NODE_R}
+                y2={CY}
+                className={cls}
+                strokeWidth={flowing ? 2.5 : 2}
+              />
+            )
+          })}
 
-          {/* 끝(업로드) → 플랫폼 분기선 + 노드 */}
-          {PLATFORM_Y.map((py, i) => (
-            <line
-              key={`pl-${i}`}
-              x1={LAST_X + NODE_R}
-              y1={CY}
-              x2={PX - 6}
-              y2={py}
-              className="stroke-border"
-              strokeWidth={1.5}
-            />
-          ))}
-          {PLATFORM_Y.map((py, i) => (
-            <g key={`pn-${i}`}>
-              <circle cx={PX} cy={py} r={5} className="fill-secondary" />
-              <text x={PX + 10} y={py + 3} className="fill-muted-foreground" fontSize={9}>
-                {PLATFORMS[i]}
-              </text>
-            </g>
-          ))}
+          {/* 끝(업로드) → 플랫폼 분기선 — 실제 업로드된 유튜브(i=0)만 전류 흐름 */}
+          {PLATFORM_Y.map((py, i) => {
+            const lit = i === 0 && youtubeDone
+            return (
+              <line
+                key={`pl-${i}`}
+                x1={LAST_X + NODE_R}
+                y1={CY}
+                x2={PX - 6}
+                y2={py}
+                className={lit ? "flow-line stroke-emerald-500" : "stroke-border"}
+                strokeWidth={1.5}
+              />
+            )
+          })}
+          {/* 플랫폼 노드 — 유튜브(i=0)만 업로드 시 점등(+✓, youtube_url 있으면 클릭 이동) */}
+          {PLATFORM_Y.map((py, i) => {
+            const lit = i === 0 && youtubeDone
+            const node = (
+              <g className={i === 0 && youtubeUrl ? "cursor-pointer" : undefined}>
+                <circle cx={PX} cy={py} r={6} className={lit ? "fill-emerald-500" : "fill-secondary"} />
+                {lit && (
+                  <text x={PX} y={py + 3} textAnchor="middle" fontSize={8} className="fill-white">
+                    ✓
+                  </text>
+                )}
+                <text
+                  x={PX + 12}
+                  y={py + 3}
+                  className={lit ? "fill-foreground" : "fill-muted-foreground"}
+                  fontSize={9}
+                >
+                  {PLATFORMS[i]}
+                </text>
+              </g>
+            )
+            return i === 0 && youtubeUrl ? (
+              <a key={`pn-${i}`} href={youtubeUrl} target="_blank" rel="noreferrer">
+                {node}
+              </a>
+            ) : (
+              <g key={`pn-${i}`}>{node}</g>
+            )
+          })}
 
           {/* 메인 노드 */}
           {NODES.map((n, i) => {
@@ -174,6 +214,11 @@ export function PipelineNodeGraph() {
               opacity: 0.35;
               animation: nodePulse 1.5s ease-in-out infinite;
             }
+            /* 전류 흐름 — 점선이 왼→오로 은은하게 흐른다 */
+            .flow-line {
+              stroke-dasharray: 5 5;
+              animation: flowDash 0.9s linear infinite;
+            }
             @keyframes nodePulse {
               0%,
               100% {
@@ -183,8 +228,14 @@ export function PipelineNodeGraph() {
                 opacity: 0.1;
               }
             }
+            @keyframes flowDash {
+              to {
+                stroke-dashoffset: -10;
+              }
+            }
             @media (prefers-reduced-motion: reduce) {
-              .pulse-ring {
+              .pulse-ring,
+              .flow-line {
                 animation: none;
               }
             }
