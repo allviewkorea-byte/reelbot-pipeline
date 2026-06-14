@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from "react"
-import { ChevronDown, ChevronUp, X, AlertTriangle, Loader2, RefreshCw, Eye, EyeOff } from "lucide-react"
+import { ChevronDown, ChevronUp, X, AlertTriangle, Loader2, RefreshCw } from "lucide-react"
 import {
   BAEKGOM_CHANNEL_ID,
   CONTENT_CONCEPTS,
@@ -200,14 +200,38 @@ export function ContentCalendar({
             </span>
           )}
         </h2>
-        <button
-          onClick={onToggleMonth}
-          aria-expanded={monthOpen}
-          className="flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-primary/5"
-        >
-          {monthOpen ? "접기" : "전체 보기"}
-          {monthOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-        </button>
+        <div className="flex items-center gap-2">
+          {/* 연속 경고 ON/OFF 스위치 — 월간 계획서에서만, '접기' 버튼 바로 왼쪽. 기본 꺼짐. */}
+          {monthOpen && (
+            <button
+              onClick={() => setShowConflicts((v) => !v)}
+              role="switch"
+              aria-checked={showConflicts}
+              className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+            >
+              연속 경고
+              <span
+                className={`relative h-4 w-7 shrink-0 rounded-full transition-colors ${
+                  showConflicts ? "bg-primary" : "bg-secondary"
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${
+                    showConflicts ? "left-3.5" : "left-0.5"
+                  }`}
+                />
+              </span>
+            </button>
+          )}
+          <button
+            onClick={onToggleMonth}
+            aria-expanded={monthOpen}
+            className="flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-primary/5"
+          >
+            {monthOpen ? "접기" : "전체 보기"}
+            {monthOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          </button>
+        </div>
       </div>
 
       {/* 오늘의 콘텐츠 — 오늘 날짜 3슬롯(아침/저녁/밤). status 로 완료/미완료 색 구분. */}
@@ -286,17 +310,6 @@ export function ContentCalendar({
               className="rounded px-2 py-1 text-sm text-muted-foreground hover:text-foreground"
             >
               ›
-            </button>
-          </div>
-          {/* 연속 경고 표시 토글 — 기본 꺼짐. 켜면 상단 배지 + 날짜별 ⚠ 표시. */}
-          <div className="mb-1 flex justify-end">
-            <button
-              onClick={() => setShowConflicts((v) => !v)}
-              aria-pressed={showConflicts}
-              className="flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
-            >
-              {showConflicts ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
-              연속 경고 {showConflicts ? "켜짐" : "꺼짐"}
             </button>
           </div>
           <div className="mb-1 grid grid-cols-7 gap-1 text-center text-xs text-muted-foreground">
