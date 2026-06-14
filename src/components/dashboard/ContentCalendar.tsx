@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from "react"
-import { ChevronDown, ChevronUp, X, AlertTriangle, Loader2, RefreshCw } from "lucide-react"
+import { ChevronDown, ChevronUp, X, AlertTriangle, Loader2, RefreshCw, Eye, EyeOff } from "lucide-react"
 import {
   BAEKGOM_CHANNEL_ID,
   CONTENT_CONCEPTS,
@@ -95,6 +95,9 @@ export function ContentCalendar({
   const [plans, setPlans] = useState<ContentPlan[]>([])
   const [loading, setLoading] = useState(true)
   const [editDate, setEditDate] = useState<string | null>(null)
+  // 연속 컨셉 경고(⚠ + "연속 컨셉 N건") 표시 토글 — 자동 생성엔 거슬려 기본 꺼짐.
+  // detectConflicts 계산은 그대로, 표시 여부만 제어. (하루 중복 경고는 항상 표시)
+  const [showConflicts, setShowConflicts] = useState(false)
 
   // 가시 범위(현재 달 ±1주)를 넉넉히 조회 — 주간 스트립 + 월간 그리드 모두 커버.
   const range = useMemo(() => {
@@ -186,7 +189,7 @@ export function ContentCalendar({
         <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
           {monthOpen ? "월간 계획서" : "오늘의 콘텐츠"}
           {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
-          {conflictDates.size > 0 && (
+          {showConflicts && conflictDates.size > 0 && (
             <span className="flex items-center gap-1 text-xs font-normal text-amber-400">
               <AlertTriangle className="h-3.5 w-3.5" />연속 컨셉 {conflictDates.size}건
             </span>
@@ -285,6 +288,17 @@ export function ContentCalendar({
               ›
             </button>
           </div>
+          {/* 연속 경고 표시 토글 — 기본 꺼짐. 켜면 상단 배지 + 날짜별 ⚠ 표시. */}
+          <div className="mb-1 flex justify-end">
+            <button
+              onClick={() => setShowConflicts((v) => !v)}
+              aria-pressed={showConflicts}
+              className="flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+            >
+              {showConflicts ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+              연속 경고 {showConflicts ? "켜짐" : "꺼짐"}
+            </button>
+          </div>
           <div className="mb-1 grid grid-cols-7 gap-1 text-center text-xs text-muted-foreground">
             {WEEKDAYS.map((w) => (
               <span key={w}>{w}</span>
@@ -295,7 +309,7 @@ export function ContentCalendar({
               const iso = toISO(d)
               const inMonth = d.getMonth() === viewMonth.m
               const isToday = iso === toISO(today)
-              const warn = dupDates.has(iso) || conflictDates.has(iso)
+              const warn = dupDates.has(iso) || (showConflicts && conflictDates.has(iso))
               return (
                 <button
                   key={iso}
