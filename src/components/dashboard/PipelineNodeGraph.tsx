@@ -5,6 +5,7 @@ import { useEffect, useState } from "react"
 // 백곰 파이프라인 노드 ↔ orchestrate 진행률(%) 밴드 매핑(실측).
 // BGM·자막·사연자동생성은 별도 진행률이 없어 합쳐서 표현(세분화는 UI-4b).
 type NodeState = "done" | "active" | "pending" | "error"
+type Variant = "tech" | "neon" // A=차분한 테크 / B=화려한 네온
 
 interface PipelineNode {
   id: string
@@ -45,22 +46,24 @@ function computeStates(job: ActiveJob | null): NodeState[] {
   })
 }
 
-// 노드 채움색 — 기존 디자인 토큰만(새 색 금지).
-const FILL: Record<NodeState, string> = {
-  done: "fill-emerald-500",
-  active: "fill-primary",
-  pending: "fill-secondary",
-  error: "fill-red-500",
+// 상태 → currentColor 토큰(기존 토큰만). 발광/채움은 이 currentColor 를 파생해 쓴다.
+const TEXT: Record<NodeState, string> = {
+  done: "text-emerald-500",
+  active: "text-primary",
+  pending: "text-muted-foreground",
+  error: "text-red-500",
 }
 
-const NODE_R = 15
-const CY = 55
-const START_X = 40
+// ── 지오메트리(둥근 사각형 노드 1행) ────────────────────────────────
+const NODE_W = 66
+const NODE_H = 34
+const CY = 50
+const START_X = 45
 const GAP = 105
 const cx = (i: number) => START_X + i * GAP
 const LAST_X = cx(NODES.length - 1)
-const PX = LAST_X + 100 // 플랫폼 분기 x
-const PLATFORM_Y = [18, 42, 66, 90]
+const PX = LAST_X + 95 // 플랫폼 분기 x
+const PLATFORM_Y = [16, 38, 60, 82]
 
 function headerText(job: ActiveJob | null): string {
   if (!job) return "대기 중 — 진행 중인 작업 없음"
@@ -71,6 +74,8 @@ function headerText(job: ActiveJob | null): string {
 
 export function PipelineNodeGraph() {
   const [job, setJob] = useState<ActiveJob | null>(null)
+  // 비교용 임시 토글(A/B). 스타일 확정 후 제거 예정. 데이터 로직과 무관.
+  const [variant, setVariant] = useState<Variant>("tech")
 
   useEffect(() => {
     let active = true
@@ -98,36 +103,59 @@ export function PipelineNodeGraph() {
   const youtubeUrl = job?.youtube_url ?? null
   // 실데이터(youtube_url) 우선, 없으면 '업로드 노드 done ⇒ 유튜브 done' 근사(백곰=유튜브 단일).
   const youtubeDone = Boolean(youtubeUrl) || uploadDone
+  const progress = job && job.status === "running" ? job.progress : null
+
+  const isNeon = variant === "neon"
+  const nodeStroke = isNeon ? 2 : 1.4
+  const flowSpeed = isNeon ? "flow-fast" : "flow-slow"
+  const fillOp = isNeon ? 0.2 : 0.1
+  const glowFor = (st: NodeState) =>
+    st === "pending" ? "" : isNeon ? "glow-strong" : st === "active" ? "glow-soft" : ""
 
   return (
-    <div className="rounded-xl border border-border bg-card p-5">
+    <div className={`rounded-xl border border-border bg-card p-5 ${isNeon ? "neon" : "tech"}`}>
       <div className="mb-3 flex items-center justify-between gap-3">
         <h2 className="text-sm font-semibold text-foreground">백곰 파이프라인</h2>
-        <span className="text-xs text-muted-foreground">{headerText(job)}</span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-muted-foreground">{headerText(job)}</span>
+          {/* 비교용 임시 스타일 토글 — 확정 후 제거 예정 */}
+          <div className="flex gap-1">
+            {(["tech", "neon"] as Variant[]).map((v) => (
+              <button
+                key={v}
+                onClick={() => setVariant(v)}
+                className={`rounded-full px-2 py-0.5 text-xs font-medium transition-colors ${
+                  variant === v
+                    ? "bg-primary/20 text-primary border border-primary/30"
+                    : "border border-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {v === "tech" ? "테크" : "네온"}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className="w-full overflow-x-auto">
-        <svg viewBox={`0 0 ${PX + 70} 120`} className="h-auto w-full min-w-[640px]" role="img" aria-label="파이프라인 상태">
+        <svg viewBox={`0 0 ${PX + 75} 110`} className="h-auto w-full min-w-[680px]" role="img" aria-label="파이프라인 상태">
           {/* 노드 간 연결선 — done→done(emerald)·done→active(primary) 구간에 전류 흐름 */}
           {NODES.slice(0, -1).map((_, i) => {
             const a = states[i]
             const b = states[i + 1]
-            const flowing =
-              (a === "done" && b === "done") || (a === "done" && b === "active")
+            const flowing = a === "done" && (b === "done" || b === "active")
             const cls = !flowing
               ? "stroke-border"
-              : b === "active"
-                ? "flow-line stroke-primary"
-                : "flow-line stroke-emerald-500"
+              : `flow-line ${flowSpeed} stroke-current ${b === "active" ? "text-primary" : "text-emerald-500"}`
             return (
               <line
                 key={`c-${i}`}
-                x1={cx(i) + NODE_R}
+                x1={cx(i) + NODE_W / 2}
                 y1={CY}
-                x2={cx(i + 1) - NODE_R}
+                x2={cx(i + 1) - NODE_W / 2}
                 y2={CY}
                 className={cls}
-                strokeWidth={flowing ? 2.5 : 2}
+                strokeWidth={flowing ? (isNeon ? 2.5 : 1.8) : 1.5}
               />
             )
           })}
@@ -138,104 +166,162 @@ export function PipelineNodeGraph() {
             return (
               <line
                 key={`pl-${i}`}
-                x1={LAST_X + NODE_R}
+                x1={LAST_X + NODE_W / 2}
                 y1={CY}
-                x2={PX - 6}
+                x2={PX - 7}
                 y2={py}
-                className={lit ? "flow-line stroke-emerald-500" : "stroke-border"}
-                strokeWidth={1.5}
+                className={lit ? `flow-line ${flowSpeed} stroke-current text-emerald-500` : "stroke-border"}
+                strokeWidth={1.4}
               />
             )
           })}
+
           {/* 플랫폼 노드 — 유튜브(i=0)만 업로드 시 점등(+✓, youtube_url 있으면 클릭 이동) */}
           {PLATFORM_Y.map((py, i) => {
             const lit = i === 0 && youtubeDone
-            const node = (
-              <g className={i === 0 && youtubeUrl ? "cursor-pointer" : undefined}>
-                <circle cx={PX} cy={py} r={6} className={lit ? "fill-emerald-500" : "fill-secondary"} />
+            const inner = (
+              <g className={`${lit ? "text-emerald-500" : "text-muted-foreground"} ${i === 0 && youtubeUrl ? "cursor-pointer" : ""}`}>
+                <circle
+                  cx={PX}
+                  cy={py}
+                  r={6}
+                  className={`fill-current ${lit ? glowFor("done") : ""}`}
+                  fillOpacity={lit ? 1 : 0.35}
+                  stroke="currentColor"
+                  strokeWidth={1.2}
+                />
                 {lit && (
                   <text x={PX} y={py + 3} textAnchor="middle" fontSize={8} className="fill-white">
                     ✓
                   </text>
                 )}
-                <text
-                  x={PX + 12}
-                  y={py + 3}
-                  className={lit ? "fill-foreground" : "fill-muted-foreground"}
-                  fontSize={9}
-                >
+                <text x={PX + 12} y={py + 3} className="fill-current" fontSize={9}>
                   {PLATFORMS[i]}
                 </text>
               </g>
             )
             return i === 0 && youtubeUrl ? (
               <a key={`pn-${i}`} href={youtubeUrl} target="_blank" rel="noreferrer">
-                {node}
+                {inner}
               </a>
             ) : (
-              <g key={`pn-${i}`}>{node}</g>
+              <g key={`pn-${i}`}>{inner}</g>
             )
           })}
 
-          {/* 메인 노드 */}
+          {/* 메인 노드 — 둥근 사각형 카드(테크/네온 공통 지오메트리, 비주얼만 변주) */}
           {NODES.map((n, i) => {
             const st = states[i]
+            const x = cx(i) - NODE_W / 2
+            const y = CY - NODE_H / 2
             return (
-              <g key={n.id}>
+              <g key={n.id} className={TEXT[st]}>
                 {st === "active" && (
-                  <circle cx={cx(i)} cy={CY} r={NODE_R + 7} className="pulse-ring fill-primary" />
+                  <rect
+                    x={x - 4}
+                    y={y - 4}
+                    width={NODE_W + 8}
+                    height={NODE_H + 8}
+                    rx={10}
+                    className={`fill-current pulse-ring ${isNeon ? "pulse-neon" : "pulse-tech"}`}
+                  />
                 )}
-                <circle cx={cx(i)} cy={CY} r={NODE_R} className={FILL[st]} />
+                <rect
+                  x={x}
+                  y={y}
+                  width={NODE_W}
+                  height={NODE_H}
+                  rx={8}
+                  className={`fill-current ${glowFor(st)}`}
+                  fillOpacity={st === "pending" ? 0.06 : fillOp}
+                  stroke="currentColor"
+                  strokeWidth={nodeStroke}
+                />
+                <text
+                  x={cx(i)}
+                  y={CY + 3.5}
+                  textAnchor="middle"
+                  fontSize={10}
+                  className={st === "pending" ? "fill-muted-foreground" : "fill-current"}
+                >
+                  {n.label}
+                </text>
                 {st === "done" && (
-                  <text x={cx(i)} y={CY + 4} textAnchor="middle" fontSize={13} className="fill-white">
+                  <text x={x + NODE_W - 9} y={y + 11} textAnchor="middle" fontSize={9} className="fill-current">
                     ✓
                   </text>
                 )}
                 {st === "error" && (
-                  <text x={cx(i)} y={CY + 4} textAnchor="middle" fontSize={13} className="fill-white">
+                  <text x={x + NODE_W - 9} y={y + 11} textAnchor="middle" fontSize={9} className="fill-current">
                     !
                   </text>
                 )}
-                <text
-                  x={cx(i)}
-                  y={CY + 33}
-                  textAnchor="middle"
-                  fontSize={11}
-                  className={st === "pending" ? "fill-muted-foreground" : "fill-foreground"}
-                >
-                  {n.label}
-                </text>
+                {st === "active" && progress !== null && (
+                  <text x={cx(i)} y={CY + NODE_H / 2 + 12} textAnchor="middle" fontSize={9} className="fill-current">
+                    {progress}%
+                  </text>
+                )}
               </g>
             )
           })}
 
           <style jsx>{`
-            .pulse-ring {
-              opacity: 0.35;
-              animation: nodePulse 1.5s ease-in-out infinite;
-            }
-            /* 전류 흐름 — 점선이 왼→오로 은은하게 흐른다 */
+            /* 전류 흐름 — 점선 입자가 왼→오로 흐른다(테크=느리게, 네온=빠르게) */
             .flow-line {
-              stroke-dasharray: 5 5;
-              animation: flowDash 0.9s linear infinite;
+              stroke-dasharray: 4 6;
             }
-            @keyframes nodePulse {
-              0%,
-              100% {
-                opacity: 0.35;
-              }
-              50% {
-                opacity: 0.1;
-              }
+            .flow-slow {
+              animation: flowDash 1.6s linear infinite;
+            }
+            .flow-fast {
+              animation: flowDash 0.5s linear infinite;
             }
             @keyframes flowDash {
               to {
                 stroke-dashoffset: -10;
               }
             }
+            /* 발광 — currentColor(토큰 색)에서 파생. 테크=은은 / 네온=강렬 */
+            .glow-soft {
+              filter: drop-shadow(0 0 2px currentColor);
+            }
+            .glow-strong {
+              filter: drop-shadow(0 0 4px currentColor) drop-shadow(0 0 9px currentColor);
+            }
+            /* active 노드 맥동 링 */
+            .pulse-ring {
+              fill-opacity: 0.18;
+            }
+            .pulse-tech {
+              animation: pulseTech 1.8s ease-in-out infinite;
+            }
+            .pulse-neon {
+              animation: pulseNeon 1s ease-in-out infinite;
+              filter: drop-shadow(0 0 6px currentColor);
+            }
+            @keyframes pulseTech {
+              0%,
+              100% {
+                fill-opacity: 0.16;
+              }
+              50% {
+                fill-opacity: 0.04;
+              }
+            }
+            @keyframes pulseNeon {
+              0%,
+              100% {
+                fill-opacity: 0.32;
+              }
+              50% {
+                fill-opacity: 0.08;
+              }
+            }
             @media (prefers-reduced-motion: reduce) {
-              .pulse-ring,
-              .flow-line {
+              .flow-slow,
+              .flow-fast,
+              .pulse-tech,
+              .pulse-neon {
                 animation: none;
               }
             }
