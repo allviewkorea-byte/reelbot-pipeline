@@ -146,10 +146,6 @@ export function ContentCalendar() {
     return s
   }, [plans])
 
-  const weekDates = useMemo(() => {
-    const s = startOfWeek(today)
-    return Array.from({ length: 7 }, (_, i) => addDays(s, i))
-  }, [today])
   const grid = useMemo(() => monthGrid(viewMonth.y, viewMonth.m), [viewMonth])
 
   // 셀 안의 슬롯별 컨셉 색 태그(아침→저녁→밤 순). compact: 9px/10px.
@@ -182,7 +178,7 @@ export function ContentCalendar() {
     <div className="rounded-xl border border-border bg-card p-3">
       <div className="mb-2 flex items-center justify-between gap-3">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-          콘텐츠 캘린더
+          {monthOpen ? "월간 계획서" : "오늘의 콘텐츠"}
           {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
           {conflictDates.size > 0 && (
             <span className="flex items-center gap-1 text-xs font-normal text-amber-400">
@@ -199,32 +195,63 @@ export function ContentCalendar() {
           onClick={() => setMonthOpen((v) => !v)}
           className="flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-primary/5"
         >
-          {monthOpen ? "주간 보기" : "전체 보기"}
+          {monthOpen ? "오늘 보기" : "전체 보기"}
           {monthOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
         </button>
       </div>
 
-      {/* 주간 스트립 */}
+      {/* 오늘의 콘텐츠 — 오늘 날짜 3슬롯(아침/저녁/밤). status 로 완료/미완료 색 구분. */}
       {!monthOpen && (
-        <div className="grid grid-cols-7 gap-2">
-          {weekDates.map((d, i) => {
-            const iso = toISO(d)
-            const isToday = iso === toISO(today)
-            const warn = dupDates.has(iso) || conflictDates.has(iso)
-            const tags = slotTags(iso, "wk")
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          {CONTENT_SLOTS.map((s) => {
+            const p = (byDateSlot.get(toISO(today)) ?? {})[s.id]
+            const st = p?.status
+            const cardCls = !p
+              ? "border-dashed border-border/50 hover:bg-secondary/20"
+              : st === "done"
+                ? "border-emerald-500/40 bg-emerald-500/10"
+                : st === "skipped"
+                  ? "border-border/40 opacity-50"
+                  : "border-border/60 hover:bg-secondary/30"
+            const statusCls =
+              st === "done"
+                ? "text-emerald-400"
+                : st === "skipped"
+                  ? "text-muted-foreground/60"
+                  : "text-muted-foreground"
             return (
               <button
-                key={iso}
-                onClick={() => setEditDate(iso)}
-                className={`flex min-h-[52px] flex-col gap-1 rounded-lg border p-2 text-left transition-colors ${
-                  isToday ? "border-primary/50 bg-primary/5" : "border-border/60 hover:bg-secondary/30"
-                }`}
+                key={s.id}
+                onClick={() => setEditDate(toISO(today))}
+                className={`flex min-h-[52px] flex-col gap-1 rounded-lg border p-2.5 text-left transition-colors ${cardCls}`}
               >
-                <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                  {warn && <AlertTriangle className="h-3 w-3 shrink-0 text-amber-400" />}
-                  {WEEKDAYS[i]} {d.getDate()}
-                </span>
-                {tags ?? <span className="text-xs text-muted-foreground/50">—</span>}
+                <div className="flex items-center justify-between gap-1">
+                  <span className="text-xs font-medium text-foreground">
+                    {s.label}
+                    <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+                      {s.startHour}~{s.endHour}시
+                    </span>
+                  </span>
+                  {p && <span className={`text-[10px] font-medium ${statusCls}`}>{STATUS_LABEL[st!]}</span>}
+                </div>
+                {p ? (
+                  <span className="flex items-center gap-1.5 truncate text-xs">
+                    <span
+                      className="h-1.5 w-1.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: conceptColor(p.concept) }}
+                    />
+                    <span className="truncate font-medium" style={{ color: conceptColor(p.concept) }}>
+                      {p.concept}
+                    </span>
+                    {p.scheduled_time && (
+                      <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground">
+                        {p.scheduled_time}
+                      </span>
+                    )}
+                  </span>
+                ) : (
+                  <span className="text-xs text-muted-foreground/50">미정</span>
+                )}
               </button>
             )
           })}
