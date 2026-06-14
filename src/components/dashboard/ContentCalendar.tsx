@@ -117,8 +117,8 @@ export function ContentCalendar() {
   const grid = useMemo(() => monthGrid(viewMonth.y, viewMonth.m), [viewMonth])
 
   return (
-    <div className="rounded-xl border border-border bg-card p-4">
-      <div className="mb-3 flex items-center justify-between gap-3">
+    <div className="rounded-xl border border-border bg-card p-3">
+      <div className="mb-2 flex items-center justify-between gap-3">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
           콘텐츠 캘린더
           {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
@@ -148,7 +148,7 @@ export function ContentCalendar() {
               <button
                 key={iso}
                 onClick={() => setEditDate(iso)}
-                className={`flex min-h-[72px] flex-col gap-1 rounded-lg border p-2 text-left transition-colors ${
+                className={`flex min-h-[52px] flex-col gap-1 rounded-lg border p-2 text-left transition-colors ${
                   isToday ? "border-primary/50 bg-primary/5" : "border-border/60 hover:bg-secondary/30"
                 }`}
               >

@@ -34,17 +34,18 @@ const TABS: { id: "all" | VideoPlatform; label: string }[] = [
 
 function VideoCard({ v }: { v: MarqueeVideo }) {
   return (
-    // 숏폼(세로 9:16) 카드 — B형태: [세로 썸네일] 위 / [텍스트 영역] 아래 분리. (약 1.5배)
-    <div className="mr-4 w-48 shrink-0">
-      <div className="flex aspect-[9/16] w-full items-center justify-center overflow-hidden rounded-lg border border-border/60 bg-secondary/50">
+    // 숏폼(세로 9:16) 카드 — B형태: [세로 썸네일] 위 / [텍스트 영역] 아래 분리.
+    // 높이 주도(h-full): 마퀴 행 높이에 맞춰 커지고, 썸네일 너비는 9:16 비율로 파생.
+    <div className="mr-4 flex h-full shrink-0 flex-col">
+      <div className="flex aspect-[9/16] min-h-0 flex-1 items-center justify-center overflow-hidden rounded-lg border border-border/60 bg-secondary/50">
         {v.thumbnailUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={v.thumbnailUrl} alt={v.title} className="h-full w-full object-cover" />
         ) : (
-          <Film className="h-9 w-9 text-muted-foreground" />
+          <Film className="h-10 w-10 text-muted-foreground" />
         )}
       </div>
-      <div className="mt-2.5 px-0.5">
+      <div className="mt-2 shrink-0 px-0.5">
         <p className="line-clamp-2 text-sm font-medium leading-snug text-foreground">{v.title}</p>
         <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
           <span>{v.viewCount}</span>
@@ -85,8 +86,8 @@ export function RecentVideosMarquee() {
   const videos = tab === "all" ? source : source.filter((v) => v.platform === tab)
 
   return (
-    <div className="rounded-xl border border-border bg-card p-5">
-      <div className="mb-3 flex items-center justify-between gap-3">
+    <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-card p-3">
+      <div className="mb-2 flex shrink-0 items-center justify-between gap-3">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
           최근 업로드 영상
           {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
@@ -116,7 +117,7 @@ export function RecentVideosMarquee() {
       ) : (
         // 우→좌 무한 마퀴. 카드 세트를 2벌 복제해 -50% 로 끊김 없이 루프.
         // hover 시 일시정지, prefers-reduced-motion 이면 정지 + 가로 스크롤 폴백.
-        <div className="marquee">
+        <div className="marquee min-h-0 flex-1">
           <div className="marquee__track">
             {[0, 1].map((copy) =>
               videos.map((v) => <VideoCard key={`${v.id}-${copy}`} v={v} />),
@@ -128,6 +129,7 @@ export function RecentVideosMarquee() {
             }
             .marquee__track {
               display: flex;
+              height: 100%;
               width: max-content;
               animation: marquee-scroll 30s linear infinite;
             }
