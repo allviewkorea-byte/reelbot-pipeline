@@ -157,15 +157,15 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      {/* 좌우 한 줄 — 왼쪽 트렌드 분석(2) / 오른쪽 월간계획서·오늘콘텐츠(3). 같은 높이.
+      {/* 좌우 한 줄 — 왼쪽 트렌드 분석 / 오른쪽 월간계획서·오늘콘텐츠. 정확히 5:5(반반). 같은 높이.
           펼침 상태는 공유(panelExpanded): 어느 버튼을 눌러도 둘 다 동시에 펼침/접힘. */}
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         {/* 트렌드 분석(왼쪽) — 빈 그릇(준비 중). 실제 엔진은 다음 PR. (가짜 데이터 없음) */}
-        <div className="lg:col-span-2 [&>div]:h-full">
+        <div className="[&>div]:h-full">
           <TrendPanel open={panelExpanded} onToggle={togglePanels} />
         </div>
         {/* 콘텐츠 캘린더(오른쪽) — 접힘=오늘의 콘텐츠(3슬롯), 펼침=월간 계획서 */}
-        <div className="lg:col-span-3 [&>div]:h-full">
+        <div className="[&>div]:h-full">
           <ContentCalendar monthOpen={panelExpanded} onToggleMonth={togglePanels} />
         </div>
       </div>
