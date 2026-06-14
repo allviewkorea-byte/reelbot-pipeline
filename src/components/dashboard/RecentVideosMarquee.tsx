@@ -35,11 +35,19 @@ const TABS: { id: "all" | VideoPlatform; label: string }[] = [
 function VideoCard({ v }: { v: MarqueeVideo }) {
   return (
     // 숏폼(세로 9:16) 카드 — B형태: [세로 썸네일] 위 / [텍스트 영역] 아래 분리.
-    // 높이 주도(h-full): 마퀴 행 높이는 그대로, 카드 폭만 9:16(높이×9/16)으로 파생.
-    // 핵심: 텍스트 블록은 w-0 min-w-full 로 카드 폭 계산에 0 기여 → 카드 폭=썸네일 폭.
-    // (그래야 긴 제목이 카드를 넓혀 썸네일이 가로로 늘어나는 현상이 없어진다.)
-    <div className="mr-4 flex h-full shrink-0 flex-col">
-      <div className="flex aspect-[9/16] min-h-0 w-auto flex-1 items-center justify-center overflow-hidden rounded-lg border border-border/60 bg-secondary/50">
+    // 높이 주도: 카드 높이(h-full)는 그대로. 썸네일 높이를 '확정값'으로 만든 뒤
+    // aspect-[9/16]로 폭을 파생 → 카드 폭 = 썸네일 높이 × 9/16 (진짜 세로 9:16).
+    //
+    // 이전(#108) 실패 원인: 썸네일 높이를 flex-1 로 뒀다. flex 메인축(세로) 크기는
+    // '레이아웃 단계'에서 정해지는데, 트랙의 width:max-content 가 카드 '폭'을 계산하는
+    // 시점엔 아직 높이가 미정 → aspect 가 높이→폭 변환을 못 해 폭이 9:16으로 안 묶였다.
+    // (w-0 min-w-full 은 '텍스트'만 0 기여로 만들 뿐, 썸네일 높이 미정 문제는 못 고침.)
+    //
+    // 해결: 썸네일 높이를 h-[calc(100%-4.5rem)] (=확정된 카드 높이 기반)로 고정 →
+    // aspect 가 폭을 확정. items-center 로 stretch(폭 강제 늘림)도 차단,
+    // 텍스트는 w-0 min-w-full 로 폭 계산에 0 기여 → 카드 폭 = 썸네일 폭.
+    <div className="mr-4 flex h-full shrink-0 flex-col items-center">
+      <div className="flex aspect-[9/16] h-[calc(100%_-_4.5rem)] w-auto items-center justify-center overflow-hidden rounded-lg border border-border/60 bg-secondary/50">
         {v.thumbnailUrl ? (
           // 16:9 원본을 9:16 영역에 크롭 채움(왜곡 없음).
           // eslint-disable-next-line @next/next/no-img-element
@@ -48,7 +56,7 @@ function VideoCard({ v }: { v: MarqueeVideo }) {
           <Film className="h-10 w-10 text-muted-foreground" />
         )}
       </div>
-      <div className="mt-2 w-0 min-w-full shrink-0 px-0.5">
+      <div className="mt-2 h-16 w-0 min-w-full shrink-0 overflow-hidden px-0.5">
         <p className="line-clamp-2 text-sm font-medium leading-snug text-foreground">{v.title}</p>
         <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
           <span>{v.viewCount}</span>
