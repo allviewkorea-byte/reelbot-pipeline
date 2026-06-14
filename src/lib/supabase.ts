@@ -121,7 +121,17 @@ export async function upsertContentPlan(plan: ContentPlan): Promise<void> {
   const { error } = await supabase
     .from(CONTENT_PLANS_TABLE)
     .upsert(plan, { onConflict: "id" })
-  if (error) throw new Error(`콘텐츠 플랜 저장 실패: ${error.message}`)
+  if (error) {
+    // Supabase 에러 전문을 로그+메시지에 드러내 다음 원인 파악을 쉽게(삼키지 않음).
+    console.error("[content-plans] upsert 실패:", {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code,
+    })
+    const extra = error.details ? ` | ${error.details}` : ""
+    throw new Error(`콘텐츠 플랜 저장 실패: ${error.message}${extra}`)
+  }
 }
 
 export async function deleteContentPlan(id: string): Promise<void> {

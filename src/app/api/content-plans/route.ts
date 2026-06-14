@@ -27,15 +27,16 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     )
   }
+  // id: 유효한 UUID 로 생성(텍스트/uuid 컬럼 모두 호환). created_at 은 보내지 않고
+  // DB default(now())에 맡긴다 — 정상 동작하는 channels 저장 패턴과 동일하게.
   const plan: ContentPlan = {
-    id: body.id || `cp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    id: body.id || crypto.randomUUID(),
     channel_id: body.channel_id || BAEKGOM_CHANNEL_ID,
     date: body.date,
     concept: body.concept,
     title: body.title ?? null,
     status: body.status || "planned",
     memo: body.memo ?? null,
-    created_at: body.created_at || new Date().toISOString(),
   }
   try {
     await upsertContentPlan(plan)
