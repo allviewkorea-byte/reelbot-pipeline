@@ -78,13 +78,19 @@ function detectConflicts(plans: ContentPlan[]): Set<string> {
   return conflict
 }
 
-export function ContentCalendar() {
+// 펼침(월간) 상태는 상위(page)가 소유 — 트렌드 패널과 짝으로 동시 펼침/접힘(controlled).
+export function ContentCalendar({
+  monthOpen,
+  onToggleMonth,
+}: {
+  monthOpen: boolean
+  onToggleMonth: () => void
+}) {
   const [today] = useState(() => {
     const d = new Date()
     d.setHours(0, 0, 0, 0)
     return d
   })
-  const [monthOpen, setMonthOpen] = useState(false)
   const [viewMonth, setViewMonth] = useState(() => ({ y: today.getFullYear(), m: today.getMonth() }))
   const [plans, setPlans] = useState<ContentPlan[]>([])
   const [loading, setLoading] = useState(true)
@@ -192,10 +198,11 @@ export function ContentCalendar() {
           )}
         </h2>
         <button
-          onClick={() => setMonthOpen((v) => !v)}
+          onClick={onToggleMonth}
+          aria-expanded={monthOpen}
           className="flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-primary/5"
         >
-          {monthOpen ? "오늘 보기" : "전체 보기"}
+          {monthOpen ? "접기" : "전체 보기"}
           {monthOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
         </button>
       </div>
