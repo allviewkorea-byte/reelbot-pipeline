@@ -17,6 +17,7 @@ export const CHARACTER_TABLE = "characters"
 // (config/images, front/side/back)와 스키마가 달라 별도 테이블로 둔다.
 export const SAYEON_CHARACTER_TABLE = "sayeon_characters"
 export const CHANNELS_TABLE = "channels"
+export const CHANNEL_STATUS_TABLE = "channel_status"
 
 let cached: SupabaseClient | null = null
 
@@ -138,4 +139,45 @@ export async function deleteContentPlan(id: string): Promise<void> {
   const supabase = getSupabaseAdmin()
   const { error } = await supabase.from(CONTENT_PLANS_TABLE).delete().eq("id", id)
   if (error) throw new Error(`콘텐츠 플랜 삭제 실패: ${error.message}`)
+}
+
+// ── 채널 가동 상태 (Postgres `channel_status` 테이블) ─────────────────
+// ⚠️ 테이블 생성·GRANT 는 코드가 하지 않는다(SQL 은 PR 설명 참고, 대표가 Supabase 에서 실행).
+//    GRANT 누락 시 permission denied 500 — content_plans 때의 함정이라 반드시 부여.
+// 조회는 테이블 미존재/에러/환경변수 미설정에도 안전 기본값(false) → 앱 안 깨짐.
+
+export async function getChannelStatus(channelId: string): Promise<boolean> {
+  try {
+    const supabase = getSupabaseAdmin()
+    const { data, error } = await supabase
+      .from(CHANNEL_STATUS_TABLE)
+      .select("is_active")
+      .eq("channel_id", channelId)
+      .maybeSingle()
+    if (error) return false // 테이블 없음/조회 실패 → 기본 OFF
+    return Boolean(data?.is_active)
+  } catch {
+    return false // SUPABASE_* 미설정 등 → 기본 OFF
+  }
+}
+
+export async function setChannelStatus(channelId: string, isActive: boolean): Promise<void> {
+  const supabase = getSupabaseAdmin()
+  const { error } = await supabase
+    .from(CHANNEL_STATUS_TABLE)
+    .upsert(
+      { channel_id: channelId, is_active: isActive, updated_at: new Date().toISOString() },
+      { onConflict: "channel_id" },
+    )
+  if (error) {
+    // Supabase 에러 전문을 로그+메시지에 드러내 원인 파악을 쉽게(삼키지 않음).
+    console.error("[channel-status] upsert 실패:", {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code,
+    })
+    const extra = error.details ? ` | ${error.details}` : ""
+    throw new Error(`채널 상태 저장 실패: ${error.message}${extra}`)
+  }
 }
