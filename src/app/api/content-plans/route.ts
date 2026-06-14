@@ -38,6 +38,10 @@ export async function POST(req: NextRequest) {
     status: body.status || "planned",
     memo: body.memo ?? null,
   }
+  // slot/scheduled_time 은 '제공된 경우에만' 포함 → 옛 호출(슬롯 없음)은 키를 안 보내
+  // 컬럼 미존재(ALTER 전) 상황에서도 기존 저장이 깨지지 않게(방어).
+  if (body.slot !== undefined) plan.slot = body.slot
+  if (body.scheduled_time !== undefined) plan.scheduled_time = body.scheduled_time
   try {
     await upsertContentPlan(plan)
     return NextResponse.json({ success: true, plan })
