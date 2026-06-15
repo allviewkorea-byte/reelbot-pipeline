@@ -94,7 +94,8 @@ export default function DashboardPage() {
   }, [])
 
   // 화면 없이 흰곰 영상 제작 트리거 — 가동 ON 시 호출. 캐릭터는 흰곰 자동(코드 보장).
-  // 컨셉은 랜덤(트렌드 연결은 PR-2). privacy 는 /api/sayeon/generate 프록시가 모드로 주입(#129).
+  // 컨셉은 트렌드 가중 랜덤(pick-topic): 트렌드 있으면 가중 컨셉, 없으면 랜덤 폴백.
+  // privacy 는 /api/sayeon/generate 프록시가 모드로 주입(#129).
   const startProduction = async () => {
     setProducing(true)
     try {
@@ -104,7 +105,15 @@ export default function DashboardPage() {
         setProducing(false)
         return
       }
-      const { script } = await generateSayeonScript({}) // 랜덤 topic(현행) — 트렌드는 PR-2
+      // 트렌드 가중 컨셉 1개(없거나 실패 시 빈 topic → 백엔드 _TOPIC_POOL 랜덤 폴백).
+      let topic = ""
+      try {
+        const t = await fetch(`/api/sayeon/pick-topic?channelId=${BAEKGOM_CHANNEL_ID}`).then((r) => r.json())
+        if (typeof t?.topic === "string") topic = t.topic
+      } catch {
+        /* pick-topic 실패 → 빈 topic 폴백(제작은 계속) */
+      }
+      const { script } = await generateSayeonScript(topic ? { topic } : {})
       const params: SayeonGenerateParams = { script }
       if (char.sheet_url && char.anchor) {
         params.sheet_url = char.sheet_url
