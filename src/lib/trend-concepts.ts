@@ -23,6 +23,11 @@ export const TREND_SOURCE_CHANNELS = [
 export const TREND_PER_CHANNEL_MAX = 20
 export const TREND_TOTAL_MAX = 100
 
+// finalize 가 GPT 1회로 분류하는 최대 영상 수(타임아웃 방지). 수집·표본(TREND_TOTAL_MAX)은
+// 그대로 두고, 분류는 조회수 상위 N개만 → 출력 토큰↓로 함수/크론 한도 안에 끝남.
+// (share 는 조회수 가중이라 상위 조회수 영상이 랭킹 신호 대부분을 차지)
+export const FINALIZE_CLASSIFY_MAX = 30
+
 // 분류 입력 1건(유튜브 인기 숏폼에서 추출).
 export interface ClassifyInput {
   title: string
