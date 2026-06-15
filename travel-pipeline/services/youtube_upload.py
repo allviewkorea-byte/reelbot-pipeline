@@ -107,6 +107,7 @@ def upload_video(
     description: str,
     thumbnail_path: str | None = None,
     tags: list[str] | None = None,
+    privacy: str | None = None,
 ) -> dict:
     """영상 1개를 업로드하고 (가능하면) 썸네일을 첨부. Returns {video_id, video_url}.
 
@@ -135,7 +136,8 @@ def upload_video(
         # 일반 계정: 토큰 채널이 목표 브랜드 채널인지 검증(아니면 차단).
         _verify_channel(youtube)
 
-    privacy = (os.getenv("YOUTUBE_PRIVACY_STATUS") or "public").strip().lower()
+    # 우선순위: 명시 인자(채널 모드) > env(YOUTUBE_PRIVACY_STATUS) > 'public'.
+    privacy = (privacy or os.getenv("YOUTUBE_PRIVACY_STATUS") or "public").strip().lower()
     body = {
         "snippet": {
             "title": title[:100],
@@ -188,7 +190,7 @@ def upload_video(
 
 
 def publish_to_youtube(
-    video_url: str, thumbnail_url: str, hook_text: str, script: str
+    video_url: str, thumbnail_url: str, hook_text: str, script: str, privacy: str | None = None
 ) -> dict:
     """완성 영상(URL/로컬) + 썸네일 → 메타데이터 생성 → 업로드. Returns {video_id, video_url}.
 
@@ -223,7 +225,7 @@ def publish_to_youtube(
                 logger.warning("[youtube-debug] 썸네일 다운로드 실패(영상만 업로드): %s\n%s", e, traceback.format_exc())
 
         try:
-            result = upload_video(str(local_video), title, description, local_thumb, tags)
+            result = upload_video(str(local_video), title, description, local_thumb, tags, privacy=privacy)
             logger.warning("[youtube-debug] 업로드 성공: %s", result.get("video_url"))
             return result
         except Exception as e:  # noqa: BLE001

@@ -10,3 +10,10 @@ export interface ChannelStatusDetail {
   channelId: string
   isActive: boolean
 }
+
+// 업로드 모드 — auto=유튜브 공개, semi(반자동)=유튜브 비공개. 기본 semi(안전).
+export type ChannelMode = "auto" | "semi"
+
+export function modeToPrivacy(mode: ChannelMode): "public" | "private" {
+  return mode === "auto" ? "public" : "private"
+}
