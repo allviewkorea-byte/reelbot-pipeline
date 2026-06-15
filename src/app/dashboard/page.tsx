@@ -2,13 +2,10 @@
 
 import Link from "next/link"
 import { useEffect, useState } from "react"
-import { toast } from "sonner"
 import {
   Play,
   Square,
   Clapperboard,
-  Wand2,
-  Loader2,
   Eye,
   DollarSign,
   Users,
@@ -17,13 +14,6 @@ import {
 import { PLATFORM_BADGE, PLATFORM_LABELS, TRACK_BADGE, TRACK_LABELS } from "@/lib/channels"
 import { BAEKGOM_CHANNEL_ID } from "@/lib/content-plan"
 import { CHANNEL_STATUS_EVENT, type ChannelStatusDetail, type ChannelMode } from "@/lib/channel-status"
-import {
-  generateSayeon,
-  generateSayeonScript,
-  getDefaultSayeonCharacter,
-  pollJobStatus,
-  type SayeonGenerateParams,
-} from "@/lib/api"
 import { RecentVideosMarquee } from "@/components/dashboard/RecentVideosMarquee"
 import { PipelineNodeGraph } from "@/components/dashboard/PipelineNodeGraph"
 import { TrendPanel } from "@/components/dashboard/TrendPanel"
@@ -92,67 +82,6 @@ export default function DashboardPage() {
       /* 실패 → 유지 */
     } finally {
       setModeBusy(false)
-    }
-  }
-
-  // 즉석 제작 — 진행 중이면 버튼 비활성. 진행 중인 job 이 있으면(새로고침 포함) 반영.
-  const [producing, setProducing] = useState(false)
-  useEffect(() => {
-    let stop = () => {}
-    fetch("/api/jobs/active")
-      .then((r) => r.json())
-      .then((d) => {
-        if (d && typeof d.job_id === "string" && (d.status === "running" || d.status === "pending")) {
-          setProducing(true)
-          stop = pollJobStatus(d.job_id, (s) => {
-            if (s.status === "completed" || s.status === "failed") setProducing(false)
-          })
-        }
-      })
-      .catch(() => {})
-    return () => stop()
-  }, [])
-
-  // 대시보드 제작 트리거 — 화면 안 거치고 [자동 생성]과 동일한 호출을 한다:
-  // 백곰 기본 캐릭터(is_default) 로드 → 랜덤 컨셉 사연 자동작성 → 영상 제작.
-  // 캐릭터는 [자동 생성]과 똑같이 getDefaultSayeonCharacter 가 책임진다(별도 발명 X,
-  // 여자20대 폴백으로 때우지 않음 — 백곰이 is_default 여야 함). privacy 는 프록시가 모드로 주입(#129).
-  const produce = async () => {
-    if (producing) return
-    setProducing(true)
-    try {
-      const char = await getDefaultSayeonCharacter()
-      if (!char) {
-        toast.error("백곰 기본 캐릭터를 불러오지 못했습니다. 사연 제작 화면에서 한 번 제작해 기본 캐릭터를 만들어 주세요.")
-        setProducing(false)
-        return
-      }
-      // 사연 자동작성(랜덤 컨셉) — [자동 생성]처럼 화자 성별/나이만 힌트로 전달.
-      const { script } = await generateSayeonScript({
-        character: char.spec ? { gender: char.spec.gender, age: char.spec.age } : null,
-      })
-      // [자동 생성] runGenerate 와 동일: 시트 있으면 재사용, 없으면 스펙으로 시트 생성.
-      const params: SayeonGenerateParams = { script }
-      if (char.sheet_url && char.anchor) {
-        params.sheet_url = char.sheet_url
-        params.anchor = char.anchor
-      } else if (char.spec) {
-        params.character_spec = char.spec
-      }
-      const { job_id } = await generateSayeon(params)
-      toast.success("제작을 시작했습니다 — 파이프라인에서 진행 상황을 확인하세요.")
-      pollJobStatus(job_id, (s) => {
-        if (s.status === "completed") {
-          setProducing(false)
-          toast.success("영상 제작 완료")
-        } else if (s.status === "failed") {
-          setProducing(false)
-          toast.error(`제작 실패: ${s.error || "알 수 없는 오류"}`)
-        }
-      })
-    } catch (e) {
-      setProducing(false)
-      toast.error(e instanceof Error ? e.message : "제작 시작 실패")
     }
   }
 
@@ -235,15 +164,6 @@ export default function DashboardPage() {
                 }`}
               />
             </span>
-          </button>
-          {/* 즉석 제작 — 화면 안 거치고 랜덤 컨셉으로 바로 제작. 진행 중 비활성. */}
-          <button
-            onClick={produce}
-            disabled={producing}
-            className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
-          >
-            {producing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
-            {producing ? "제작 중…" : "지금 제작"}
           </button>
           {/* 백곰의 실제 제작 진입점: /sayeon 으로만 이동(파라미터 없음, CLAUDE.md 2단계 원칙) */}
           <Link
