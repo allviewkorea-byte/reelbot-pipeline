@@ -113,25 +113,34 @@ export default function DashboardPage() {
     return () => stop()
   }, [])
 
-  // 시작(즉석 제작): 화면 안 거치고 랜덤 컨셉 대본 → 영상 제작. privacy 는 프록시가 모드로 주입(#129).
-  // 캐릭터는 백곰 기본 캐릭터 재사용(sheet_url+anchor 있으면 시트 생성 스킵). 진행은 노드그래프가 표시.
+  // 대시보드 제작 트리거 — 화면 안 거치고 [자동 생성]과 동일한 호출을 한다:
+  // 백곰 기본 캐릭터(is_default) 로드 → 랜덤 컨셉 사연 자동작성 → 영상 제작.
+  // 캐릭터는 [자동 생성]과 똑같이 getDefaultSayeonCharacter 가 책임진다(별도 발명 X,
+  // 여자20대 폴백으로 때우지 않음 — 백곰이 is_default 여야 함). privacy 는 프록시가 모드로 주입(#129).
   const produce = async () => {
     if (producing) return
     setProducing(true)
     try {
       const char = await getDefaultSayeonCharacter()
-      const { script } = await generateSayeonScript({ character: char?.spec ?? null })
+      if (!char) {
+        toast.error("백곰 기본 캐릭터를 불러오지 못했습니다. 사연 제작 화면에서 한 번 제작해 기본 캐릭터를 만들어 주세요.")
+        setProducing(false)
+        return
+      }
+      // 사연 자동작성(랜덤 컨셉) — [자동 생성]처럼 화자 성별/나이만 힌트로 전달.
+      const { script } = await generateSayeonScript({
+        character: char.spec ? { gender: char.spec.gender, age: char.spec.age } : null,
+      })
+      // [자동 생성] runGenerate 와 동일: 시트 있으면 재사용, 없으면 스펙으로 시트 생성.
       const params: SayeonGenerateParams = { script }
-      if (char?.sheet_url && char?.anchor) {
+      if (char.sheet_url && char.anchor) {
         params.sheet_url = char.sheet_url
         params.anchor = char.anchor
-      } else if (char?.spec) {
+      } else if (char.spec) {
         params.character_spec = char.spec
-      } else {
-        throw new Error("백곰 캐릭터가 없습니다. 사연 제작 화면에서 캐릭터를 먼저 저장하세요.")
       }
       const { job_id } = await generateSayeon(params)
-      toast.success("즉석 제작을 시작했습니다 — 파이프라인에서 진행 상황을 확인하세요.")
+      toast.success("제작을 시작했습니다 — 파이프라인에서 진행 상황을 확인하세요.")
       pollJobStatus(job_id, (s) => {
         if (s.status === "completed") {
           setProducing(false)
@@ -143,7 +152,7 @@ export default function DashboardPage() {
       })
     } catch (e) {
       setProducing(false)
-      toast.error(e instanceof Error ? e.message : "즉석 제작 시작 실패")
+      toast.error(e instanceof Error ? e.message : "제작 시작 실패")
     }
   }
 
