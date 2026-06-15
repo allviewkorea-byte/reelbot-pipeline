@@ -55,6 +55,23 @@ export interface TrendRankingRow {
   created_at?: string
 }
 
+// 채널 1개 분석 결과(분류 전 원시 영상) — 7c 채널별 분할 부분저장용.
+export interface RawTrendVideo {
+  title: string
+  viewCount: number
+  publishedAt: string
+}
+
+// Supabase trend_channel_videos 행(채널별 부분결과). id = `${date}_${index}`.
+export interface ChannelVideosRow {
+  id: string
+  channel_id: string // 운영 채널(baekgom)
+  date: string // KST YYYY-MM-DD
+  source_ref: string // @handle 또는 UC.. (분석 대상)
+  videos: RawTrendVideo[]
+  created_at?: string
+}
+
 // ── 키워드 룰 사전(폴백) ─────────────────────────────────────────────
 // GPT 실패/키 없음 시 제목 부분일치로 분류. "기타"는 키워드 없이 최종 폴백.
 // 한 곳에서 관리(확장 쉽게). 컨셉 키는 CONTENT_CONCEPTS 와 동일 문자열.
