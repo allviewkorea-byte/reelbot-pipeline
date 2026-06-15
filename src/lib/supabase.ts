@@ -9,7 +9,7 @@ import {
   type ChannelRow,
 } from "./channels"
 import type { ContentPlan } from "./content-plan"
-import type { TrendRankingRow } from "./trend-concepts"
+import type { TrendRankingRow, ChannelVideosRow } from "./trend-concepts"
 
 export const CHARACTER_BUCKET = "character-seeds"
 export const CONTENT_PLANS_TABLE = "content_plans"
@@ -20,6 +20,7 @@ export const SAYEON_CHARACTER_TABLE = "sayeon_characters"
 export const CHANNELS_TABLE = "channels"
 export const CHANNEL_STATUS_TABLE = "channel_status"
 export const TREND_RANKINGS_TABLE = "trend_rankings"
+export const TREND_CHANNEL_VIDEOS_TABLE = "trend_channel_videos"
 
 let cached: SupabaseClient | null = null
 
@@ -235,5 +236,55 @@ export async function saveTrendRanking(row: TrendRankingRow): Promise<void> {
     })
     const extra = error.details ? ` | ${error.details}` : ""
     throw new Error(`트렌드 랭킹 저장 실패: ${error.message}${extra}`)
+  }
+}
+
+// ── 채널별 부분결과 (Postgres `trend_channel_videos` 테이블) ─────────
+// 7c 채널별 분할 수집의 임시 저장. ⚠️ 테이블·GRANT 는 대표가 SQL 로 실행(아래 PR).
+// 조회는 미존재/에러에도 빈 배열 방어.
+
+export async function saveChannelVideos(row: ChannelVideosRow): Promise<void> {
+  const supabase = getSupabaseAdmin()
+  const { error } = await supabase
+    .from(TREND_CHANNEL_VIDEOS_TABLE)
+    .upsert(row, { onConflict: "id" })
+  if (error) {
+    console.error("[trend-channel-videos] upsert 실패:", {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code,
+    })
+    const extra = error.details ? ` | ${error.details}` : ""
+    throw new Error(`채널 부분결과 저장 실패: ${error.message}${extra}`)
+  }
+}
+
+export async function listChannelVideos(channelId: string, date: string): Promise<ChannelVideosRow[]> {
+  try {
+    const supabase = getSupabaseAdmin()
+    const { data, error } = await supabase
+      .from(TREND_CHANNEL_VIDEOS_TABLE)
+      .select("*")
+      .eq("channel_id", channelId)
+      .eq("date", date)
+    if (error) return []
+    return (data ?? []) as ChannelVideosRow[]
+  } catch {
+    return []
+  }
+}
+
+// 오래된 부분결과 정리(finalize 후 호출). 실패해도 무시(베스트 에포트).
+export async function deleteOldChannelVideos(channelId: string, beforeDate: string): Promise<void> {
+  try {
+    const supabase = getSupabaseAdmin()
+    await supabase
+      .from(TREND_CHANNEL_VIDEOS_TABLE)
+      .delete()
+      .eq("channel_id", channelId)
+      .lt("date", beforeDate)
+  } catch {
+    /* 정리는 실패해도 무시 */
   }
 }
