@@ -64,15 +64,21 @@ def _select_thumbnail_image(
     return image_by_index.get(chosen["index"])
 
 
-def _maybe_publish_youtube(video_url: str, thumbnail_url: str, hook_text: str, script: str):
-    """YOUTUBE_AUTO_PUBLISH=true 일 때만 유튜브 자동 업로드. 실패해도 None 반환(안 멈춤)."""
+def _maybe_publish_youtube(
+    video_url: str, thumbnail_url: str, hook_text: str, script: str, privacy: str | None = None
+):
+    """YOUTUBE_AUTO_PUBLISH=true 일 때만 유튜브 자동 업로드. 실패해도 None 반환(안 멈춤).
+
+    privacy: 채널 모드로 결정된 'public'|'private'. None 이면 youtube_upload 가 env 폴백.
+    (업로드 여부 게이트는 YOUTUBE_AUTO_PUBLISH env 그대로 — privacy 만 추가로 전달.)
+    """
     logger.info("[youtube-debug] YOUTUBE_AUTO_PUBLISH=%s", os.getenv("YOUTUBE_AUTO_PUBLISH"))
     if (os.getenv("YOUTUBE_AUTO_PUBLISH") or "").strip().lower() != "true":
         return None
     try:
         from services.youtube_upload import publish_to_youtube
 
-        result = publish_to_youtube(video_url, thumbnail_url, hook_text, script)
+        result = publish_to_youtube(video_url, thumbnail_url, hook_text, script, privacy=privacy)
         logger.info("유튜브 자동 업로드 완료: %s", result.get("video_url"))
         return result.get("video_url")
     except Exception as e:  # noqa: BLE001
@@ -99,6 +105,7 @@ def generate_full(
     num_scenes: int | None = None,
     gap_sec: float = 0.4,
     thumbnail_scene_index: int | None = None,
+    privacy: str | None = None,
     progress_cb=None,
 ) -> dict:
     """사연 글 → 완성 영상 + 썸네일. 6개 서비스를 순서대로 체인한다.
@@ -199,7 +206,7 @@ def generate_full(
 
     # g. 유튜브 자동 게시 (옵션) — YOUTUBE_AUTO_PUBLISH=true 일 때만, 실패해도 안 멈춤.
     youtube_url = _maybe_publish_youtube(
-        video_url, thumbnail_url, thumb.get("hook_text", ""), script
+        video_url, thumbnail_url, thumb.get("hook_text", ""), script, privacy=privacy
     )
     if youtube_url:
         report(99, "유튜브 업로드 완료")

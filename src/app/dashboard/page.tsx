@@ -13,7 +13,7 @@ import {
 } from "lucide-react"
 import { PLATFORM_BADGE, PLATFORM_LABELS, TRACK_BADGE, TRACK_LABELS } from "@/lib/channels"
 import { BAEKGOM_CHANNEL_ID } from "@/lib/content-plan"
-import { CHANNEL_STATUS_EVENT, type ChannelStatusDetail } from "@/lib/channel-status"
+import { CHANNEL_STATUS_EVENT, type ChannelStatusDetail, type ChannelMode } from "@/lib/channel-status"
 import { RecentVideosMarquee } from "@/components/dashboard/RecentVideosMarquee"
 import { PipelineNodeGraph } from "@/components/dashboard/PipelineNodeGraph"
 import { TrendPanel } from "@/components/dashboard/TrendPanel"
@@ -40,6 +40,9 @@ export default function DashboardPage() {
   // 실제 자동 업로드(스케줄러 연동)는 후속 작업. 지금은 상태 저장·표시까지.
   const [isActive, setIsActive] = useState(false)
   const [busy, setBusy] = useState(false)
+  // 업로드 모드 — auto=공개 / semi(반자동)=비공개. 기본 semi(안전). 제작 시 privacy 결정.
+  const [mode, setMode] = useState<ChannelMode>("semi")
+  const [modeBusy, setModeBusy] = useState(false)
   // 트렌드 패널 + 월간 계획서 공유 펼침 상태(짝으로 동시 펼침/접힘). 기본 접힘.
   const [panelExpanded, setPanelExpanded] = useState(false)
   const togglePanels = () => setPanelExpanded((v) => !v)
@@ -50,15 +53,37 @@ export default function DashboardPage() {
     fetch(`/api/channel-status?channelId=${BAEKGOM_CHANNEL_ID}`)
       .then((r) => r.json())
       .then((d) => {
-        if (alive) setIsActive(Boolean(d?.isActive))
+        if (!alive) return
+        setIsActive(Boolean(d?.isActive))
+        setMode(d?.mode === "auto" ? "auto" : "semi")
       })
       .catch(() => {
-        /* 실패 → 기본 OFF 유지 */
+        /* 실패 → 기본(OFF·반자동) 유지 */
       })
     return () => {
       alive = false
     }
   }, [])
+
+  // 업로드 모드 토글(auto↔semi). 저장만 — 사이드바와 무관해 이벤트는 발행 안 함.
+  const toggleMode = async () => {
+    if (modeBusy) return
+    const next: ChannelMode = mode === "auto" ? "semi" : "auto"
+    setModeBusy(true)
+    try {
+      const res = await fetch("/api/channel-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channelId: BAEKGOM_CHANNEL_ID, mode: next }),
+      })
+      const d = await res.json()
+      if (res.ok && d?.success) setMode(next)
+    } catch {
+      /* 실패 → 유지 */
+    } finally {
+      setModeBusy(false)
+    }
+  }
 
   // 시작↔중단 토글: 저장(POST) 성공 시 상태 갱신 + 사이드바 즉시 동기화 이벤트 발행.
   const toggle = async () => {
@@ -114,8 +139,32 @@ export default function DashboardPage() {
           <p className="mt-0.5 text-sm text-muted-foreground">운영 채널 관제 대시보드</p>
         </div>
 
-        {/* 액션 — 사연 제작 열기 + 가동 시작↔중단 토글(채널명 줄 오른쪽 끝으로 이동) */}
+        {/* 액션 — 업로드 모드 토글 + 사연 제작 열기 + 가동 시작↔중단 토글 */}
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          {/* 업로드 모드 — auto(공개)↔semi(비공개) 스위치. 제작 시 이 모드로 유튜브 privacy 결정. */}
+          <button
+            onClick={toggleMode}
+            disabled={modeBusy}
+            role="switch"
+            aria-checked={mode === "auto"}
+            title="자동=유튜브 공개 업로드 / 반자동=비공개 업로드"
+            className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-2 text-xs font-medium transition-colors hover:border-primary/40 disabled:opacity-60"
+          >
+            <span className={mode === "auto" ? "text-emerald-400" : "text-muted-foreground"}>
+              {mode === "auto" ? "자동·공개" : "반자동·비공개"}
+            </span>
+            <span
+              className={`relative h-4 w-7 shrink-0 rounded-full transition-colors ${
+                mode === "auto" ? "bg-emerald-600" : "bg-secondary"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${
+                  mode === "auto" ? "left-3.5" : "left-0.5"
+                }`}
+              />
+            </span>
+          </button>
           {/* 백곰의 실제 제작 진입점: /sayeon 으로만 이동(파라미터 없음, CLAUDE.md 2단계 원칙) */}
           <Link
             href="/sayeon"

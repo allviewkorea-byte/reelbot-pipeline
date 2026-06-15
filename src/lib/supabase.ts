@@ -10,6 +10,7 @@ import {
 } from "./channels"
 import type { ContentPlan } from "./content-plan"
 import type { TrendRankingRow, ChannelVideosRow } from "./trend-concepts"
+import type { ChannelMode } from "./channel-status"
 
 export const CHARACTER_BUCKET = "character-seeds"
 export const CONTENT_PLANS_TABLE = "content_plans"
@@ -166,29 +167,42 @@ export async function upsertContentPlans(plans: ContentPlan[]): Promise<void> {
 //    GRANT 누락 시 permission denied 500 — content_plans 때의 함정이라 반드시 부여.
 // 조회는 테이블 미존재/에러/환경변수 미설정에도 안전 기본값(false) → 앱 안 깨짐.
 
-export async function getChannelStatus(channelId: string): Promise<boolean> {
+export interface ChannelStatusState {
+  isActive: boolean
+  mode: ChannelMode
+}
+
+export async function getChannelStatus(channelId: string): Promise<ChannelStatusState> {
   try {
     const supabase = getSupabaseAdmin()
     const { data, error } = await supabase
       .from(CHANNEL_STATUS_TABLE)
-      .select("is_active")
+      .select("is_active, mode")
       .eq("channel_id", channelId)
       .maybeSingle()
-    if (error) return false // 테이블 없음/조회 실패 → 기본 OFF
-    return Boolean(data?.is_active)
+    if (error) return { isActive: false, mode: "semi" } // 테이블 없음/조회 실패 → 기본(OFF·반자동)
+    return {
+      isActive: Boolean(data?.is_active),
+      mode: data?.mode === "auto" ? "auto" : "semi", // 미설정/이상값 → semi(안전: 비공개)
+    }
   } catch {
-    return false // SUPABASE_* 미설정 등 → 기본 OFF
+    return { isActive: false, mode: "semi" } // SUPABASE_* 미설정 등 → 기본
   }
 }
 
-export async function setChannelStatus(channelId: string, isActive: boolean): Promise<void> {
+// isActive / mode 중 제공된 것만 갱신(부분 upsert). 둘 다 없으면 no-op.
+export async function setChannelStatus(
+  channelId: string,
+  patch: { isActive?: boolean; mode?: ChannelMode },
+): Promise<void> {
+  if (patch.isActive === undefined && patch.mode === undefined) return
   const supabase = getSupabaseAdmin()
+  const row: Record<string, unknown> = { channel_id: channelId, updated_at: new Date().toISOString() }
+  if (patch.isActive !== undefined) row.is_active = patch.isActive
+  if (patch.mode !== undefined) row.mode = patch.mode
   const { error } = await supabase
     .from(CHANNEL_STATUS_TABLE)
-    .upsert(
-      { channel_id: channelId, is_active: isActive, updated_at: new Date().toISOString() },
-      { onConflict: "channel_id" },
-    )
+    .upsert(row, { onConflict: "channel_id" })
   if (error) {
     // Supabase 에러 전문을 로그+메시지에 드러내 원인 파악을 쉽게(삼키지 않음).
     console.error("[channel-status] upsert 실패:", {
