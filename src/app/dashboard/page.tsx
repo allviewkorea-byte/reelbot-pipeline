@@ -9,7 +9,7 @@ import {
   Loader2,
   Clapperboard,
   Eye,
-  DollarSign,
+  BarChart3,
   Users,
   Video,
 } from "lucide-react"
@@ -36,13 +36,21 @@ const BAEKGOM = {
   track: "auto" as const,
 }
 
-// 월간 지표 — 백곰 실데이터 연동 전이라 플레이스홀더("—"). UI-5 캘린더/연동에서 연결.
-const METRICS = [
-  { label: "월 조회수", value: "—", icon: Eye },
-  { label: "월 수익", value: "—", icon: DollarSign },
-  { label: "구독자", value: "—", icon: Users },
-  { label: "평균 조회수", value: "—", icon: Video },
-]
+// 채널 통계 응답(/api/channel-stats). 값 없으면 null → 카드에 "—".
+interface ChannelStats {
+  subscriberCount: number | null
+  viewCount: number | null
+  videoCount: number | null
+  averageViews: number | null
+}
+
+// 한국어 단위 포맷(만/억). null/undefined → "—"(가짜 숫자 금지). 실제 0 → "0".
+function fmtCount(n: number | null | undefined): string {
+  if (n == null) return "—"
+  if (n >= 100_000_000) return `${(n / 100_000_000).toFixed(1).replace(/\.0$/, "")}억`
+  if (n >= 10_000) return `${(n / 10_000).toFixed(1).replace(/\.0$/, "")}만`
+  return n.toLocaleString("ko-KR")
+}
 
 export default function DashboardPage() {
   // 가동 상태(ON/OFF) — channel_status 저장값. 토글 1개로 제어, 헤더 뱃지·사이드바에 반영.
@@ -54,9 +62,27 @@ export default function DashboardPage() {
   // 업로드 모드 — auto=공개 / semi(반자동)=비공개. 기본 semi(안전). 제작 시 privacy 결정.
   const [mode, setMode] = useState<ChannelMode>("semi")
   const [modeBusy, setModeBusy] = useState(false)
+  // 채널 KPI 통계(구독자·총조회수·영상수·평균). 로딩/실패/null → 카드 "—".
+  const [stats, setStats] = useState<ChannelStats | null>(null)
   // 트렌드 패널 + 월간 계획서 공유 펼침 상태(짝으로 동시 펼침/접힘). 기본 접힘.
   const [panelExpanded, setPanelExpanded] = useState(false)
   const togglePanels = () => setPanelExpanded((v) => !v)
+
+  // 마운트 시 채널 통계 로드(서버 라우트, YOUTUBE_API_KEY 서버 전용). 실패/미설정 → null 유지("—").
+  useEffect(() => {
+    let alive = true
+    fetch("/api/channel-stats")
+      .then((r) => r.json())
+      .then((d) => {
+        if (alive && d && !d.error) setStats(d as ChannelStats)
+      })
+      .catch(() => {
+        /* 실패 → null 유지("—") */
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
 
   // 마운트 시 현재 상태 로드. setState 는 비동기 콜백에서만(effect 본문 직접 호출 회피).
   useEffect(() => {
@@ -187,6 +213,14 @@ export default function DashboardPage() {
     }
   }
 
+  // KPI 카드 — 라벨/아이콘 고정, 값은 실데이터(없으면 "—"). 카드 디자인은 그대로.
+  const cards = [
+    { label: "구독자", icon: Users, value: fmtCount(stats?.subscriberCount) },
+    { label: "총 조회수", icon: Eye, value: fmtCount(stats?.viewCount) },
+    { label: "평균 조회수", icon: BarChart3, value: fmtCount(stats?.averageViews) },
+    { label: "영상 수", icon: Video, value: fmtCount(stats?.videoCount) },
+  ]
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden p-4">
       {/* 헤더 — 채널명+뱃지(왼쪽) / 사연 제작·가동 토글(오른쪽). NEXT UP 줄은 제거됨. */}
@@ -275,9 +309,9 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* 월간 지표 줄 (UI-2 지표 재사용, 값은 플레이스홀더) */}
+      {/* 채널 KPI 줄 — /api/channel-stats 실데이터(구독자·총조회수·평균·영상수) */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        {METRICS.map((s) => (
+        {cards.map((s) => (
           <div key={s.label} className="rounded-xl border border-border bg-card p-2.5">
             <div className="flex items-center gap-2 text-muted-foreground">
               <s.icon className="h-4 w-4" />
