@@ -5,7 +5,7 @@ import { BAEKGOM_CHANNEL_ID } from "@/lib/content-plan"
 import { getSupabaseAdmin, SAYEON_CAST_TABLE } from "@/lib/supabase"
 
 // GET /api/cast — 사연 동물 캐스트(8) 통합 조회.
-//  · 바이블 메타 + R2 시트 URL(있으면) = 백엔드(/sayeon/cast, R2 소유).
+//  · 바이블 메타 + 아스펙트 URL(있으면) + colors + relative_height = 백엔드(/sayeon/cast, R2 소유).
 //  · 승인 상태(status) = Supabase(sayeon_cast 테이블, 프론트 소유).
 // 둘을 role 로 병합해 한 목록으로 내려준다. 어느 한쪽이 비어도 화면이 깨지지 않게 방어.
 export const dynamic = "force-dynamic"
@@ -15,7 +15,9 @@ interface CastEntry {
   name: string
   animal: string
   personality: string
-  filename: string
+  colors: string[]
+  relative_height: number
+  aspects: Record<string, string>
   sheet_url: string | null
   status: "draft" | "approved"
 }
@@ -54,7 +56,9 @@ export async function GET(req: NextRequest) {
       name: c.name,
       animal: c.animal,
       personality: c.personality,
-      filename: c.filename,
+      colors: Array.isArray(c.colors) ? c.colors : [],
+      relative_height: typeof c.relative_height === "number" ? c.relative_height : 0.6,
+      aspects: c.aspects && typeof c.aspects === "object" ? c.aspects : {},
       sheet_url: c.sheet_url ?? null,
       status: statusMap[c.role] ?? "draft",
     }))

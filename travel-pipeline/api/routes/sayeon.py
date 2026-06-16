@@ -34,7 +34,12 @@ from api.schemas import (
 )
 from services.sayeon_assemble import generate_assemble
 from services.sayeon_autoscript import generate_script as generate_auto_script
-from services.sayeon_cast import generate_cast_aspects, list_cast
+from services.sayeon_cast import (
+    get_cast_entry,
+    get_cast_progress,
+    list_cast,
+    run_cast_generation,
+)
 from services.sayeon_character import generate_character_sheet
 from services.sayeon_orchestrate import generate_full
 from services.sayeon_scene import generate_scenes
@@ -132,18 +137,23 @@ def cast(channel_id: str = "baekgom"):
 
 
 @router.post("/cast-sheet")
-def cast_sheet(req: SayeonCastSheetRequest):
-    """역할별 멀티 아스펙트(정면+반측면+측면+표정4 = 7장)를 동기 생성·R2 저장한다.
+def cast_sheet(req: SayeonCastSheetRequest, background: BackgroundTasks):
+    """역할별 멀티 아스펙트(정면+반측면+측면+표정4 = 7장)를 **논블로킹** 생성한다.
 
-    정면을 먼저 만들고 그 정면을 레퍼런스로 나머지를 생성한다(부분 실패 허용).
-    관리 화면에서 1건씩 생성/재생성하는 용도라 동기 응답(job 큐 불필요).
+    7장 생성은 수십 초~수 분이라 즉시 status=running 으로 반환하고 백그라운드로
+    돌린다. 진행은 GET /sayeon/cast-status?role= 로 폴링하고, 아스펙트는 R2에
+    차오르는 대로 GET /sayeon/cast 에 반영된다(부분 실패 허용).
     """
-    try:
-        return generate_cast_aspects(req.role)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+    if not get_cast_entry(req.role):
+        raise HTTPException(status_code=400, detail=f"알 수 없는 캐스트 역할입니다: {req.role}")
+    background.add_task(run_cast_generation, req.role)
+    return {"role": req.role, "status": "running"}
+
+
+@router.get("/cast-status")
+def cast_status(role: str):
+    """역할별 멀티 아스펙트 생성 진행상태(idle|running|done|failed + generated/failed/total)."""
+    return get_cast_progress(role)
 
 
 def _run_scenes(
