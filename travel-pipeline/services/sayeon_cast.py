@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
+import subprocess
 import threading
 from pathlib import Path
 
@@ -158,11 +160,20 @@ def get_cast_entry(role: str) -> dict | None:
 
 
 # ── 프롬프트 빌더 ────────────────────────────────────────────────────────
+# 누끼(투명 배경)를 위해 캐릭터에 없는 키 색(크로마 그린)으로 배경을 강제 생성하고,
+# 업로드 직전 ffmpeg colorkey 로 그 색만 제거한다(방식B). 캐스트 8종에 그린 없음 →
+# 밝은(흰곰·토끼·펭귄) 캐릭터도 안 깎인다.
+_KEY_BG = (
+    "a solid uniform evenly-lit pure chroma-key GREEN background "
+    "(bright green, RGB 0 255 0), no gradient, no shadow, no props"
+)
+
+
 def _front_prompt(core: str) -> str:
     """정면(t2i) — 단일 캐릭터 전신 정면(레퍼런스 소스). 텍스트 없음."""
     return (
-        "Full-body FRONT view of ONE single mascot character on a plain light-gray "
-        f"background. Character: {core}. Facing the camera directly, neutral friendly "
+        f"Full-body FRONT view of ONE single mascot character on {_KEY_BG}. "
+        f"Character: {core}. Facing the camera directly, neutral friendly "
         "expression, standing, the whole body visible head to toe with margin. "
         f"{POLAR_BEAR_ART_STYLE}. No text, no labels, no watermark."
     )
@@ -174,7 +185,7 @@ def _view_prompt(core: str, view_desc: str) -> str:
         "Using the reference image as the EXACT same character, render the SAME single "
         f"mascot in a {view_desc}. Character: {core}. Keep identical fur color, markings, "
         "nose, ears, body proportions and features as the reference — change ONLY the "
-        "viewing angle. Full body on a plain light-gray background. "
+        f"viewing angle. Full body on {_KEY_BG}. "
         f"{POLAR_BEAR_ART_STYLE}. No text, no labels, no watermark."
     )
 
@@ -186,7 +197,7 @@ def _expr_prompt(core: str, expr_desc: str) -> str:
         "mascot as a front-facing head-and-shoulders (bust) close-up with this facial "
         f"expression: {expr_desc}. Character: {core}. Keep identical fur color, markings, "
         "nose, ears and features as the reference — change ONLY the facial expression. "
-        f"Plain light-gray background. {POLAR_BEAR_ART_STYLE}. No text, no labels, no watermark."
+        f"Background: {_KEY_BG}. {POLAR_BEAR_ART_STYLE}. No text, no labels, no watermark."
     )
 
 
@@ -220,8 +231,47 @@ def list_cast(channel_id: str = "") -> list[dict]:
     return [_public_entry(entry) for entry in CAST_BIBLE]
 
 
+# 누끼: 생성 배경(크로마 그린)만 ffmpeg colorkey 로 제거 → 투명 PNG.
+_KEY_COLOR_HEX = "0x00FF00"
+
+
+def _cutout_bg(src: Path) -> Path:
+    """크로마키 그린 배경을 ffmpeg colorkey 로 제거해 투명 PNG 경로 반환. 실패 시 원본.
+
+    rembg(모델·onnxruntime) 대신 기존 의존성 ffmpeg 만 사용 → Railway Hobby 메모리
+    안전. 키 색만 제거하므로 밝은(흰곰·토끼·펭귄) 캐릭터는 깎이지 않는다.
+    ffmpeg 미존재/오류 시 원본 경로를 그대로 반환(graceful — 누끼 없이 표시).
+    """
+    if shutil.which("ffmpeg") is None:
+        logger.warning("ffmpeg 없음 — 누끼 생략(원본 표시).")
+        return src
+    out = src.with_name(f"{src.stem}_cut.png")
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y", "-i", str(src),
+                # similarity 0.30(키 색 허용 폭) / blend 0.12(가장자리 페더링).
+                "-vf", f"colorkey={_KEY_COLOR_HEX}:0.30:0.12,format=rgba",
+                "-frames:v", "1", str(out),
+            ],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0 or not out.exists():
+            logger.warning("누끼 ffmpeg 실패(원본 사용): %s", result.stderr[-500:])
+            return src
+        return out
+    except Exception as e:  # noqa: BLE001
+        logger.warning("누끼 처리 예외(원본 사용): %s", e)
+        return src
+
+
 def _persist_aspect(local_path: Path, role: str, aspect: str, source_url: str | None) -> str:
-    """로컬 아스펙트를 R2(cast/{role}/{aspect}.png)에 올리고 URL 반환. 실패 시 CDN 폴백."""
+    """로컬 아스펙트를 누끼 처리 후 R2(cast/{role}/{aspect}.png)에 올리고 URL 반환.
+
+    누끼 실패 시 원본을 올린다(graceful). R2 실패 시 CDN 폴백.
+    """
+    cut = _cutout_bg(local_path)
+    local_path = cut
     if r2_storage.is_available():
         try:
             return r2_storage.upload_cast_aspect(str(local_path), role, aspect)

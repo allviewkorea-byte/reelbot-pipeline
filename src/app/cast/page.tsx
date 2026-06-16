@@ -307,39 +307,39 @@ export default function CastPage() {
       ) : (
         <>
           {/* 메인 3존 — 명단(C) / 중앙(A+B) / 테스트 영상 */}
-          <div className="grid min-h-0 flex-1 grid-cols-[180px_minmax(0,1fr)_280px] gap-2 overflow-hidden">
-            {/* ── C: 역할 명단 ──────────────────────────────────────── */}
-            <div className="flex min-h-0 flex-col gap-1 overflow-y-auto rounded-xl border border-border bg-card p-2">
+          <div className="grid min-h-0 flex-1 grid-cols-[220px_minmax(0,1fr)_280px] gap-2 overflow-hidden">
+            {/* ── C: 역할 명단 (세로로 꽉 채움) ──────────────────────── */}
+            <div className="flex min-h-0 flex-col gap-1.5 overflow-hidden rounded-xl border border-border bg-card p-2">
               {cast.map((c) => {
                 const active = c.role === selectedRole
                 return (
                   <button
                     key={c.role}
                     onClick={() => setSelectedRole(c.role)}
-                    className={`flex shrink-0 items-center gap-2 rounded-lg border px-2 py-1.5 text-left transition-colors ${
+                    className={`flex min-h-0 flex-1 items-center gap-2.5 rounded-lg border px-2 py-1.5 text-left transition-colors ${
                       active
                         ? "border-primary/40 bg-primary/15"
                         : "border-transparent hover:bg-white/5"
                     }`}
                   >
-                    <div className="relative h-10 w-8 shrink-0 overflow-hidden rounded bg-secondary/30">
+                    <div className="relative h-full w-auto shrink-0 overflow-hidden rounded bg-secondary/30 aspect-[3/4]">
                       {c.aspects.front ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={c.aspects.front} alt={c.name} className="h-full w-full object-cover" />
+                        <img src={c.aspects.front} alt={c.name} className="h-full w-full object-contain" />
                       ) : (
                         <div className="flex h-full w-full items-center justify-center">
-                          <ImageIcon className="h-3.5 w-3.5 text-muted-foreground/30" />
+                          <ImageIcon className="h-4 w-4 text-muted-foreground/30" />
                         </div>
                       )}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-xs font-medium text-foreground">{c.name}</p>
-                      <p className="truncate text-[10px] text-muted-foreground">{c.animal}</p>
+                      <p className="truncate text-sm font-medium text-foreground">{c.name}</p>
+                      <p className="truncate text-[11px] text-muted-foreground">{c.animal}</p>
                     </div>
                     {generatingRole === c.role ? (
-                      <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" />
+                      <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
                     ) : (
-                      <span className={`h-2 w-2 shrink-0 rounded-full ${statusDot(c)}`} />
+                      <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${statusDot(c)}`} />
                     )}
                   </button>
                 )
