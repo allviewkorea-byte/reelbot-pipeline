@@ -8,6 +8,7 @@ import {
   Loader2,
   Check,
   CheckCircle2,
+  X,
   ImageIcon,
   Clapperboard,
 } from "lucide-react"
@@ -198,19 +199,20 @@ export default function CastPage() {
     }
   }
 
-  async function handleApprove(role: string) {
+  // 확정 ↔ 확정 해제 토글. next 로 목표 상태를 보낸다(즉시 로컬 반영).
+  async function handleApproveToggle(role: string, next: "approved" | "draft") {
     try {
       const res = await fetch("/api/cast/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role }),
+        body: JSON.stringify({ role, status: next }),
       })
       const data = await res.json()
-      if (!res.ok || !data.success) throw new Error(data.error ?? "확정 실패")
-      setCast((prev) => prev.map((c) => (c.role === role ? { ...c, status: "approved" } : c)))
-      toast.success("캐릭터를 확정했어요")
+      if (!res.ok || !data.success) throw new Error(data.error ?? "처리 실패")
+      setCast((prev) => prev.map((c) => (c.role === role ? { ...c, status: next } : c)))
+      toast.success(next === "approved" ? "캐릭터를 확정했어요" : "확정을 해제했어요")
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "확정 중 오류가 발생했어요")
+      toast.error(err instanceof Error ? err.message : "처리 중 오류가 발생했어요")
     }
   }
 
@@ -394,14 +396,25 @@ export default function CastPage() {
                             ? "다시 생성"
                             : "생성"}
                       </button>
-                      <button
-                        onClick={() => handleApprove(selected.role)}
-                        disabled={!selected.aspects.front || selected.status === "approved" || selGenerating}
-                        className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-40"
-                      >
-                        <Check className="h-3.5 w-3.5" />
-                        확정
-                      </button>
+                      {selected.status === "approved" ? (
+                        <button
+                          onClick={() => handleApproveToggle(selected.role, "draft")}
+                          disabled={selGenerating}
+                          className="flex items-center gap-1.5 rounded-lg border border-emerald-500/40 px-3 py-1.5 text-xs font-semibold text-emerald-400 transition-colors hover:bg-emerald-500/10 disabled:opacity-40"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                          확정 해제
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleApproveToggle(selected.role, "approved")}
+                          disabled={!selected.aspects.front || selGenerating}
+                          className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-40"
+                        >
+                          <Check className="h-3.5 w-3.5" />
+                          확정
+                        </button>
+                      )}
                     </div>
                   </div>
                   <p className="mt-1 shrink-0 truncate text-[11px] text-muted-foreground">{selected.personality}</p>
