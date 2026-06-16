@@ -65,14 +65,21 @@ export function Sidebar() {
 
   return (
     <aside className="flex h-screen w-64 shrink-0 flex-col bg-sidebar border-r border-border">
-      {/* Logo */}
-      <div className="flex h-16 items-center gap-2.5 px-4 border-b border-border">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/20 border border-primary/30">
-          <PlayCircle className="h-4 w-4 text-primary" />
-        </div>
-        <span className="text-base font-semibold tracking-tight text-foreground">
-          ReelBot
-        </span>
+      {/* Logo — 클릭 시 현재 화면 새로고침(캐스트 등 클라이언트 데이터 재조회) */}
+      <div className="flex h-16 items-center px-4 border-b border-border">
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          title="새로고침"
+          className="flex items-center gap-2.5"
+        >
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/20 border border-primary/30">
+            <PlayCircle className="h-4 w-4 text-primary" />
+          </div>
+          <span className="text-base font-semibold tracking-tight text-foreground">
+            ReelBot
+          </span>
+        </button>
       </div>
 
       {/* 내 채널 — 채널 DB와 분리한 고정 항목(백곰의 실화보고서 → 관제 대시보드 /dashboard) */}
