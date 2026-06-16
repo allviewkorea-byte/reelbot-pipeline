@@ -397,27 +397,27 @@ export default function SayeonPage() {
         <ResultView result={result} onReset={reset} />
       ) : (
         <div className="flex max-w-3xl flex-col gap-6">
-          {/* 사연 대본 */}
+          {/* 사연 대본 — 자동 모드에선 숨김(자동이 대본을 생성·사용). state 는 보존(모드 왕복 복원). */}
+          {mode !== "auto" && (
           <div className={CARD}>
             <div className="mb-2 flex items-center justify-between">
               <span className="text-xs font-medium text-muted-foreground">
                 사연 대본 (필수)
               </span>
-              {mode !== "auto" && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleAutoScript}
-                  disabled={autoLoading}
-                >
-                  {autoLoading ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    "🎲"
-                  )}
-                  사연 자동 생성
-                </Button>
-              )}
+              {/* 반자동·수동에서만 이 섹션이 렌더되므로(자동은 위에서 숨김) 별도 mode 분기 불필요 */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleAutoScript}
+                disabled={autoLoading}
+              >
+                {autoLoading ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  "🎲"
+                )}
+                사연 자동 생성
+              </Button>
             </div>
             <textarea
               className={`${FIELD} min-h-40 resize-y`}
@@ -426,8 +426,10 @@ export default function SayeonPage() {
               onChange={(e) => setScript(e.target.value)}
             />
           </div>
+          )}
 
-          {/* 캐릭터 */}
+          {/* 캐릭터 — 자동 모드에선 숨김(자동은 기본 백곰 캐릭터 사용). state 는 보존. */}
+          {mode !== "auto" && (
           <div className={CARD}>
             <p className="mb-3 text-sm font-semibold text-foreground">캐릭터</p>
 
@@ -507,6 +509,7 @@ export default function SayeonPage() {
               </TabsContent>
             </Tabs>
           </div>
+          )}
 
           {/* 고급 (접이식) */}
           <div className={CARD}>
