@@ -15,7 +15,12 @@ import random
 
 from openai import OpenAI
 
-_OPENAI_MODEL = "gpt-4o-mini"
+# 기본값 = 현재 동작 그대로(플래그 미설정 시 v1·gpt-4o-mini·temp 0.95 유지).
+# Railway env 로만 켜고/끄고/롤백한다(코드 머지만으론 동작 불변).
+_DEFAULT_MODEL = "gpt-4o-mini"
+_DEFAULT_TEMPERATURE = "0.95"
+# 폭주·잘림 방지 가드(300~360자 사연 + JSON 여유에 충분). 상수.
+_MAX_TOKENS = 900
 
 # 랜덤 주제 풀 — 자극적이되 선정적이지 않게, 감성·반전 여지가 큰 소재.
 _TOPIC_POOL = [
@@ -64,8 +69,21 @@ def _speaker_hint(character: dict | None) -> str:
     return hint or "20대"
 
 
-def _build_system_prompt(speaker: str, formula_name: str, formula_desc: str) -> str:
-    return (
+# v2 에서만 추가되는 [흐름] 블록(매끄러운 연결·인과). v1 은 이 블록 없이 그대로.
+_FLOW_BLOCK_V2 = (
+    "[흐름 — 매끄러운 연결]\n"
+    "- 줄과 줄 사이를 자연스럽게 이어라. 갑작스러운 화제 전환·논리 비약 금지 — 앞 줄의 "
+    "감정/상황을 받아 다음 줄로 매끄럽게 넘어간다.\n"
+    "- 각 전개가 '왜' 일어났는지 바로 앞 줄에서 납득되게, 인과를 분명히 한다.\n"
+)
+# 삽입 기준점([길이] 블록 바로 앞). v2 일 때만 그 앞에 _FLOW_BLOCK_V2 를 끼운다.
+_LENGTH_ANCHOR = "[길이 — 약 90초]\n"
+
+
+def _build_system_prompt(
+    speaker: str, formula_name: str, formula_desc: str, prompt_version: str = "v1"
+) -> str:
+    base = (
         "너는 한국 숏폼 '사연' 채널의 1급 작가다. AI 티가 전혀 안 나게, 진짜 사람이 자기 "
         "경험을 털어놓는 **1인칭 고백체** 한국어 입말로 사연을 쓴다. 목표는 도파민·체류시간·댓글이다.\n\n"
         "[톤 — 사실성]\n"
@@ -129,6 +147,10 @@ def _build_system_prompt(speaker: str, formula_name: str, formula_desc: str) -> 
         '"title":"강한 후킹 제목"}\n'
         "script 는 줄바꿈(\\n)으로 구분된 12~16줄 한 문자열."
     )
+    if prompt_version == "v2":
+        # v1 문자열은 그대로 두고 [길이] 블록 앞에 [흐름] 블록만 삽입.
+        return base.replace(_LENGTH_ANCHOR, _FLOW_BLOCK_V2 + _LENGTH_ANCHOR, 1)
+    return base
 
 
 def generate_script(topic: str = "", character: dict | None = None) -> dict:
@@ -143,11 +165,23 @@ def generate_script(topic: str = "", character: dict | None = None) -> dict:
     chosen = topic.strip() or random.choice(_TOPIC_POOL)
     formula_name, formula_desc = random.choice(_CONFLICT_FORMULAS)  # 갈등 공식 뼈대(부록 E)
     speaker = _speaker_hint(character)
+
+    # 품질 플래그(전부 env, 기본값=현재 동작). 롤백 = env 원복/삭제 후 재시작.
+    model = (os.getenv("SAYEON_SCRIPT_MODEL") or _DEFAULT_MODEL).strip() or _DEFAULT_MODEL
+    try:
+        temperature = float(os.getenv("SAYEON_SCRIPT_TEMPERATURE") or _DEFAULT_TEMPERATURE)
+    except ValueError:
+        temperature = float(_DEFAULT_TEMPERATURE)
+    prompt_version = (os.getenv("SAYEON_SCRIPT_PROMPT_VERSION") or "v1").strip() or "v1"
+
     client = OpenAI(api_key=api_key)
     resp = client.chat.completions.create(
-        model=_OPENAI_MODEL,
+        model=model,
         messages=[
-            {"role": "system", "content": _build_system_prompt(speaker, formula_name, formula_desc)},
+            {
+                "role": "system",
+                "content": _build_system_prompt(speaker, formula_name, formula_desc, prompt_version),
+            },
             {
                 "role": "user",
                 "content": (
@@ -157,7 +191,8 @@ def generate_script(topic: str = "", character: dict | None = None) -> dict:
             },
         ],
         response_format={"type": "json_object"},
-        temperature=0.95,  # 다양성 확보(반복 방지)
+        temperature=temperature,  # 기본 0.95(현재) — SAYEON_SCRIPT_TEMPERATURE 로 조정
+        max_tokens=_MAX_TOKENS,  # 폭주·잘림 방지 가드
     )
     content = resp.choices[0].message.content or "{}"
     try:
