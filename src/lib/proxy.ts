@@ -5,7 +5,7 @@ import { TIMEOUT } from "./api-timeout"
 // uvicorn은 IPv4(0.0.0.0)에만 바인딩되므로 ::1 연결이 무한 대기하다
 // undici 기본 headersTimeout(5분) 후에야 끊기는 문제가 있다.
 // 환경변수에 localhost가 들어와도 IPv4 루프백으로 정규화한다.
-const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000").replace(
+export const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000").replace(
   "://localhost",
   "://127.0.0.1",
 )

@@ -21,6 +21,7 @@ from api.schemas import (
     SayeonAssembleRequest,
     SayeonAutoScriptRequest,
     SayeonAutoScriptResponse,
+    SayeonCastSheetRequest,
     SayeonGenerateRequest,
     SayeonJobResponse,
     SayeonScenesRequest,
@@ -33,6 +34,7 @@ from api.schemas import (
 )
 from services.sayeon_assemble import generate_assemble
 from services.sayeon_autoscript import generate_script as generate_auto_script
+from services.sayeon_cast import generate_cast_sheet, list_cast
 from services.sayeon_character import generate_character_sheet
 from services.sayeon_orchestrate import generate_full
 from services.sayeon_scene import generate_scenes
@@ -118,6 +120,26 @@ def character_sheet(req: SayeonSheetRequest, background: BackgroundTasks):
         req.sheet_model,
     )
     return SayeonJobResponse(job_id=job.job_id, status=job.status.value)
+
+
+@router.get("/cast")
+def cast(channel_id: str = "baekgom"):
+    """사연 동물 캐스트(8) 메타 + R2 시트 URL(있으면) 목록. 상태(status)는 프론트가 병합."""
+    return {"cast": list_cast(channel_id)}
+
+
+@router.post("/cast-sheet")
+def cast_sheet(req: SayeonCastSheetRequest):
+    """역할별 캐스트 시트 1장을 동기 생성하고 R2(역할별 고정 파일명)에 저장한다.
+
+    관리 화면에서 1건씩 생성/재생성하는 용도라 동기 응답(job 큐 불필요).
+    """
+    try:
+        return generate_cast_sheet(req.channel_id, req.role)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 def _run_scenes(
