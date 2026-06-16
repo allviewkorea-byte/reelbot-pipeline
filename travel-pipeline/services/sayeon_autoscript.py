@@ -10,10 +10,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import random
 
 from openai import OpenAI
+
+from services.sayeon_formulas import select_for_concept
+
+logger = logging.getLogger(__name__)
 
 # 기본값 = 현재 동작 그대로(플래그 미설정 시 v1·gpt-4o-mini·temp 0.95 유지).
 # Railway env 로만 켜고/끄고/롤백한다(코드 머지만으론 동작 불변).
@@ -76,8 +81,20 @@ _FLOW_BLOCK_V2 = (
     "감정/상황을 받아 다음 줄로 매끄럽게 넘어간다.\n"
     "- 각 전개가 '왜' 일어났는지 바로 앞 줄에서 납득되게, 인과를 분명히 한다.\n"
 )
-# 삽입 기준점([길이] 블록 바로 앞). v2 일 때만 그 앞에 _FLOW_BLOCK_V2 를 끼운다.
+# 삽입 기준점([길이] 블록 바로 앞). v2/v3 일 때 그 앞에 블록을 끼운다.
 _LENGTH_ANCHOR = "[길이 — 약 90초]\n"
+
+# v3 에서만 추가되는 [도파민] 규칙 블록(작업지시서 3단계). v1/v2 는 이 블록 없이 그대로.
+_DOPAMINE_BLOCK_V3 = (
+    "[도파민 — v3]\n"
+    "- 훅(첫 1~2문장)=정보 격차: 충격적 결과를 먼저 흘리고 원인·전말은 뒤로 미룬다.\n"
+    "- 공분 포인트: 빌런이 '선을 넘는 결정적 한마디/행동'을 최소 1개 분명히 박는다.\n"
+    "- 다단계 에스컬레이션: 갈등을 최소 2번 고조시킨다(중간에 한 번 더 뒤집기).\n"
+    "- 구체 디테일: 숫자·기간·실제 대사로 현실성(예: 200만원, 3년, 읽씹 5일).\n"
+    "- 엔딩 의도: 사이다(통쾌) 또는 고구마(여운) 중 하나를 분명히 잡고, 마지막은 "
+    "'여러분이라면?' 판단 질문으로 닫는다.\n"
+    "- 금지선: 욕설·선정성·혐오·잔혹묘사·실명·특정집단 비하 금지. 자극은 공분·반전·정보격차로만.\n"
+)
 
 
 def _build_system_prompt(
@@ -147,9 +164,11 @@ def _build_system_prompt(
         '"title":"강한 후킹 제목"}\n'
         "script 는 줄바꿈(\\n)으로 구분된 12~16줄 한 문자열."
     )
-    if prompt_version == "v2":
-        # v1 문자열은 그대로 두고 [길이] 블록 앞에 [흐름] 블록만 삽입.
-        return base.replace(_LENGTH_ANCHOR, _FLOW_BLOCK_V2 + _LENGTH_ANCHOR, 1)
+    # v1 문자열은 그대로 두고, [길이] 블록 앞에 버전별 블록을 삽입.
+    if prompt_version in ("v2", "v3"):
+        base = base.replace(_LENGTH_ANCHOR, _FLOW_BLOCK_V2 + _LENGTH_ANCHOR, 1)
+    if prompt_version == "v3":
+        base = base.replace(_LENGTH_ANCHOR, _DOPAMINE_BLOCK_V3 + _LENGTH_ANCHOR, 1)
     return base
 
 
@@ -162,17 +181,39 @@ def generate_script(topic: str = "", character: dict | None = None) -> dict:
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY 미설정 — 사연을 생성할 수 없습니다.")
 
-    chosen = topic.strip() or random.choice(_TOPIC_POOL)
-    formula_name, formula_desc = random.choice(_CONFLICT_FORMULAS)  # 갈등 공식 뼈대(부록 E)
     speaker = _speaker_hint(character)
 
-    # 품질 플래그(전부 env, 기본값=현재 동작). 롤백 = env 원복/삭제 후 재시작.
+    # 품질·다양성 플래그(전부 env, 기본값=현재 동작). 롤백 = env 원복/삭제 후 재시작.
     model = (os.getenv("SAYEON_SCRIPT_MODEL") or _DEFAULT_MODEL).strip() or _DEFAULT_MODEL
     try:
         temperature = float(os.getenv("SAYEON_SCRIPT_TEMPERATURE") or _DEFAULT_TEMPERATURE)
     except ValueError:
         temperature = float(_DEFAULT_TEMPERATURE)
     prompt_version = (os.getenv("SAYEON_SCRIPT_PROMPT_VERSION") or "v1").strip() or "v1"
+    formula_mode = (os.getenv("SAYEON_FORMULA_MODE") or "legacy").strip().lower()
+    try:
+        antirepeat_n = int(os.getenv("SAYEON_FORMULA_ANTIREPEAT_N") or "5")
+    except ValueError:
+        antirepeat_n = 5
+
+    # 컨셉 기반 선택: FORMULA_MODE=concept + topic 이 9컨셉 키일 때만(produce-due/pick-topic 이
+    # 컨셉을 topic 으로 그대로 넘김). 그 외엔 legacy(현재 동작 100% 보존).
+    selected = select_for_concept(topic, antirepeat_n) if formula_mode == "concept" else None
+    if selected:
+        formula_desc_text, subtopic = selected
+        formula_name = (topic or "").strip()  # 프롬프트 '공식' 라벨 = 컨셉명
+        formula_desc = formula_desc_text       # 선택된 공식 뼈대
+        chosen = subtopic                      # 소재 결 = 서브토픽(컨셉 디테일 강화)
+        ret_formula = formula_desc_text        # 반환 formula = 선택된 공식 문자열
+        logger.info(
+            "[autoscript] concept=%s formula=%r subtopic=%r (antirepeat_n=%d, prompt=%s)",
+            formula_name, formula_desc_text, subtopic, antirepeat_n, prompt_version,
+        )
+    else:
+        # legacy — 현재 동작 그대로.
+        chosen = topic.strip() or random.choice(_TOPIC_POOL)
+        formula_name, formula_desc = random.choice(_CONFLICT_FORMULAS)  # 갈등 공식 뼈대(부록 E)
+        ret_formula = formula_name
 
     client = OpenAI(api_key=api_key)
     resp = client.chat.completions.create(
@@ -207,5 +248,5 @@ def generate_script(topic: str = "", character: dict | None = None) -> dict:
         "script": script,
         "title": str(data.get("title", "")).strip(),
         "topic": chosen,
-        "formula": formula_name,  # 사용한 갈등 공식(추적용)
+        "formula": ret_formula,  # 사용한 갈등 공식(legacy=이름 / concept=선택된 공식 문자열)
     }
