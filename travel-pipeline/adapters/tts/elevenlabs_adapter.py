@@ -61,11 +61,17 @@ class ElevenLabsTTSAdapter(TTSAdapter):
             f"model_id={self.model_id!r} voice_id={self.voice_id!r}"
         )
 
+        # stability 만 env 화(기본 0.5=현재). 0.6~0.7 로 올리면 라인 간 음색 흔들림↓.
+        try:
+            stability = float(os.getenv("SAYEON_TTS_STABILITY") or "0.5")
+        except ValueError:
+            stability = 0.5
+        stability = min(1.0, max(0.0, stability))
         payload = {
             "text": text,
             "model_id": self.model_id,
             "voice_settings": {
-                "stability": 0.5,
+                "stability": stability,
                 "similarity_boost": 0.75,
                 "style": 0.0,
                 "use_speaker_boost": True,
