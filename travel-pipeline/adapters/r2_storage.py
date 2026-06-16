@@ -247,3 +247,47 @@ def character_sheet_exists(channel_id: str, filename: str = "sheet.png") -> bool
         return True
     except Exception:  # noqa: BLE001 - 없음/권한/네트워크 → 미존재로 처리
         return False
+
+
+# ── 캐스트 아스펙트(멀티 아스펙트) — 역할별·아스펙트별 고정 키 ─────────────
+# 키: cast/{role}/{aspect}.png  (채널 무관, 역할 스코프). 나중에 영상 씬 멀티레퍼런스가
+# 읽을 규칙이므로 역할·아스펙트별 고정명을 유지한다. 캐릭터 시트와 같은 전용 버킷
+# (R2_CHARACTER_BUCKET, Lifecycle 없음)을 쓴다.
+def _cast_aspect_key(role: str, aspect: str) -> str:
+    return f"cast/{role}/{aspect}.png"
+
+
+def upload_cast_aspect(file_path: str, role: str, aspect: str) -> str:
+    """캐스트 아스펙트 1장을 R2(cast/{role}/{aspect}.png)에 업로드하고 공개 URL 반환."""
+    bucket = os.environ.get("R2_CHARACTER_BUCKET")
+    public_base = os.environ.get("R2_CHARACTER_PUBLIC_BASE_URL")
+    if not bucket:
+        logger.warning(
+            "R2_CHARACTER_BUCKET 미설정 — 기본 버킷 사용. 7일 Lifecycle 로 캐스트 시트가 "
+            "삭제될 수 있으니 Lifecycle 없는 전용 버킷 설정을 권장합니다."
+        )
+    return upload_image(
+        file_path,
+        _cast_aspect_key(role, aspect),
+        bucket=bucket,
+        public_base_url=public_base,
+        content_type="image/png",
+    )
+
+
+def cast_aspect_url(role: str, aspect: str) -> str:
+    """저장 규칙과 동일한 공개 URL(존재 확인 후 재사용용)."""
+    return f"{_character_public_base()}/{_cast_aspect_key(role, aspect)}"
+
+
+def cast_aspect_exists(role: str, aspect: str) -> bool:
+    """cast/{role}/{aspect}.png 가 R2에 이미 있는지. 미설정/오류 시 False."""
+    if not is_available():
+        return False
+    try:
+        _get_client().head_object(
+            Bucket=_character_bucket(), Key=_cast_aspect_key(role, aspect)
+        )
+        return True
+    except Exception:  # noqa: BLE001 - 없음/권한/네트워크 → 미존재로 처리
+        return False
