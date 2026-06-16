@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from pathlib import Path
 
 from adapters import (
@@ -232,17 +233,26 @@ def _persist_aspect(local_path: Path, role: str, aspect: str, source_url: str | 
     raise RuntimeError(f"아스펙트 {role}/{aspect} 저장 실패(R2 미설정·CDN 없음)")
 
 
-def generate_cast_aspects(role: str, output_dir: str | None = None) -> dict:
+def generate_cast_aspects(
+    role: str, output_dir: str | None = None, on_progress=None
+) -> dict:
     """역할별 멀티 아스펙트(정면+반측면+측면+표정4)를 생성하고 R2에 저장한다.
 
     정면을 먼저 t2i 로 생성하고, 그 정면을 레퍼런스로 나머지 6장을 Kontext 로 만든다.
     아스펙트별로 try/except — 일부 실패해도 나머지는 계속·저장(부분 성공 허용).
+    on_progress(generated, failed): 아스펙트 1개 완료/실패마다 호출(진행상태 폴링용).
 
     Returns:
         {"role","name","animal","filename","aspects":{key:url},
          "generated":[key...],"failed":[key...],"colors","relative_height"}
     정면 생성 자체가 실패하면 의존 아스펙트는 건너뛴다(전부 failed).
     """
+    def _tick(generated: list[str], failed: list[str]) -> None:
+        if on_progress:
+            try:
+                on_progress(list(generated), list(failed))
+            except Exception:  # noqa: BLE001 - 진행 콜백 오류는 생성에 영향 주지 않음
+                pass
     entry = get_cast_entry(role)
     if not entry:
         raise ValueError(f"알 수 없는 캐스트 역할입니다: {role}")
@@ -276,9 +286,11 @@ def generate_cast_aspects(role: str, output_dir: str | None = None) -> dict:
         )
         aspects["front"] = _persist_aspect(front_local, role, "front", result.source_url)
         generated.append("front")
+        _tick(generated, failed)
     except Exception as e:  # noqa: BLE001
         logger.warning("정면 생성 실패(%s) — 의존 아스펙트 건너뜀: %s", role, e)
         failed = list(ASPECT_KEYS)
+        _tick(generated, failed)
         return {
             "role": entry["role"], "name": entry["name"], "animal": entry["animal"],
             "filename": "front.png", "aspects": aspects, "sheet_url": None,
@@ -310,6 +322,7 @@ def generate_cast_aspects(role: str, output_dir: str | None = None) -> dict:
         except Exception as e:  # noqa: BLE001
             logger.warning("아스펙트 생성 실패(%s/%s): %s", role, key, e)
             failed.append(key)
+        _tick(generated, failed)
 
     return {
         "role": entry["role"],
@@ -323,3 +336,63 @@ def generate_cast_aspects(role: str, output_dir: str | None = None) -> dict:
         "colors": entry["colors"],
         "relative_height": entry["relative_height"],
     }
+
+
+# ── 비동기 생성 진행상태(인메모리) ──────────────────────────────────────
+# 멀티 아스펙트 생성은 수십 초~수 분이라 BackgroundTasks 로 논블로킹 실행하고,
+# 진행상태를 역할별 인메모리 dict 에 적재한다. ⚠️ Railway 재시작 시 소실(JobManager 와
+# 동일한 MVP 한계) — 단, 아스펙트 자체는 R2 에 영구 저장되므로 새로고침으로 복구된다.
+ASPECT_TOTAL = len(ASPECT_KEYS)  # 7
+_PROGRESS_LOCK = threading.Lock()
+_PROGRESS: dict[str, dict] = {}
+
+
+def _set_progress(role: str, **kw) -> None:
+    with _PROGRESS_LOCK:
+        cur = _PROGRESS.get(role) or {
+            "status": "idle", "generated": [], "failed": [], "total": ASPECT_TOTAL,
+        }
+        cur.update(kw)
+        cur["total"] = ASPECT_TOTAL
+        _PROGRESS[role] = cur
+
+
+def get_cast_progress(role: str) -> dict:
+    """역할별 생성 진행상태. 없으면 idle. status: idle|running|done|failed."""
+    with _PROGRESS_LOCK:
+        cur = _PROGRESS.get(role)
+        if not cur:
+            return {
+                "role": role, "status": "idle",
+                "generated": [], "failed": [], "total": ASPECT_TOTAL,
+            }
+        return {
+            "role": role,
+            "status": cur["status"],
+            "generated": list(cur["generated"]),
+            "failed": list(cur["failed"]),
+            "total": cur["total"],
+        }
+
+
+def run_cast_generation(role: str) -> None:
+    """BackgroundTasks 진입점 — 진행상태를 갱신하며 멀티 아스펙트를 생성한다.
+
+    role 검증은 호출부(라우트)에서 끝났다고 가정. 1장이라도 성공하면 done,
+    전무하면 failed. 부분 실패는 failed 목록으로 노출된다.
+    """
+    _set_progress(role, status="running", generated=[], failed=[])
+
+    def cb(generated: list[str], failed: list[str]) -> None:
+        _set_progress(role, generated=generated, failed=failed)
+
+    try:
+        result = generate_cast_aspects(role, on_progress=cb)
+        status = "done" if result["generated"] else "failed"
+        _set_progress(
+            role, status=status,
+            generated=result["generated"], failed=result["failed"],
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("캐스트 생성 백그라운드 실패(%s): %s", role, e)
+        _set_progress(role, status="failed")
