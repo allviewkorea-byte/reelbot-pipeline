@@ -191,6 +191,65 @@ def build_sheet_prompt(spec: CharacterSpec, tone: str = "light") -> str:
     )
 
 
+# ── 보조 캐릭터(갈색곰) 시트 — 파일럿(SAYEON_SUPPORTING_SHEETS) ──────────
+# 흰곰과 베이스 색·실루엣이 확실히 다른 마스코트(섞임 방지). 시트 구조·STYLE 은 흰곰과 동일.
+_BROWN_BEAR_CORE = (
+    "a chubby round brown bear mascot with short stubby limbs "
+    "(NOT adult-bear proportions), warm milk-chocolate brown fur, a small round black "
+    "nose, small rounded ears, and large round friendly eyes"
+)
+_SUPPORTING_SHEET_NAME = "brownbear.png"
+
+
+def build_supporting_sheet_prompt(character_core: str) -> str:
+    """보조 캐릭터 레퍼런스 시트 프롬프트(build_sheet_prompt 와 동일 구조)."""
+    return (
+        "Character reference sheet (model sheet) of ONE single mascot character. "
+        f"Character: {character_core}. "
+        "Show the SAME character three times on a plain light-gray background: "
+        "full-body front view, side profile, and a bust shot with a gentle expression. "
+        "Identical face, fur, nose, ears, and body proportions across all three. "
+        "Character turnaround / model sheet layout. No text, no labels, no watermark. "
+        f"{POLAR_BEAR_ART_STYLE}."
+    )
+
+
+def ensure_brownbear_sheet(channel_id: str, output_dir: str | None = None) -> str | None:
+    """갈색곰 보조 시트 URL — R2에 있으면 재사용, 없으면 1회 생성·업로드. 실패 시 None.
+
+    채널 단위 안정 키(sayeon/characters/{channel_id}/brownbear.png)로 영상마다 재사용한다
+    (매 영상 재생성 금지). R2 미설정/생성 실패 시 None → 호출부는 기존 텍스트 렌더로 폴백.
+    """
+    try:
+        if r2_storage.is_available() and r2_storage.character_sheet_exists(
+            channel_id, _SUPPORTING_SHEET_NAME
+        ):
+            return r2_storage.character_sheet_url(channel_id, _SUPPORTING_SHEET_NAME)
+
+        adapter = WavespeedImageAdapter(model_id=DEFAULT_SHEET_MODEL)
+        if not adapter.is_available():
+            return None
+        out_dir = Path(output_dir or f"output/sayeon/characters/{channel_id}")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        local_path = out_dir / _SUPPORTING_SHEET_NAME
+        prompt = build_supporting_sheet_prompt(_BROWN_BEAR_CORE)
+        result = asyncio.run(
+            adapter.generate(
+                ImageGenerationRequest(
+                    prompt=prompt, aspect_ratio="9:16", output_path=str(local_path)
+                )
+            )
+        )
+        if r2_storage.is_available():
+            return r2_storage.upload_character_sheet(
+                str(local_path), channel_id, filename=_SUPPORTING_SHEET_NAME
+            )
+        return result.source_url  # R2 미설정 → CDN 폴백(임시)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("갈색곰 보조 시트 확보 실패(텍스트 렌더 폴백): %s", e)
+        return None
+
+
 def generate_character_sheet(
     channel_id: str,
     spec: CharacterSpec | dict,

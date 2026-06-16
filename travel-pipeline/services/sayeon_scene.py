@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from pathlib import Path
 
 import httpx
@@ -25,12 +26,22 @@ from services.sayeon_character import (
     bear_expression,
     build_protagonist_character,
     cast_supporting_animal,
+    ensure_brownbear_sheet,
 )
 
 logger = logging.getLogger(__name__)
 
 # 시트 reference(주인공 곰)를 항상 쓰는 피사체 유형.
 _BEAR_REF_SUBJECTS = ("protagonist", "two_shot", "flashback")
+
+# 보조 시트 파일럿(SAYEON_SUPPORTING_SHEETS): 갈색곰으로 캐스팅되는 two_shot 역할.
+_BROWN_BEAR_ROLES = {"friend", "advisor", "family"}
+# 멀티 레퍼런스 시 두 캐릭터 매칭·섞임 방지 지시(레퍼런스1=흰곰 / 레퍼런스2=갈색곰).
+_MULTI_REF_NOTE = (
+    " Reference image 1 is the white polar bear (the protagonist); reference image 2 is the "
+    "brown bear (the other character). Match each animal to its own reference and keep them as "
+    "two clearly distinct animals — do NOT blend, merge, or swap their fur colors or features."
+)
 
 
 def bear_in_frame(subject_type: str, include_protagonist: bool) -> bool:
@@ -175,6 +186,15 @@ def generate_scenes(
     # 사물/배경(detail/mood) 컷용 t2i 어댑터 — 시트 reference 없이 생성해 곰 미등장 보장.
     t2i_adapter = get_image_adapter()
 
+    # 보조 시트 파일럿(기본 off=현재 동작). on 일 때만 갈색곰 two_shot 에 2번째 레퍼런스 추가.
+    supporting_sheets_on = (os.getenv("SAYEON_SUPPORTING_SHEETS") or "").strip().lower() in (
+        "1", "true", "on", "yes",
+    )
+    # 채널 단위 안정 키로 갈색곰 시트 재사용(영상마다 재생성 금지). 처음 필요할 때 1회 확보.
+    supporting_channel = (os.getenv("SAYEON_CHANNEL_ID") or "baekgom").strip() or "baekgom"
+    brown_sheet_url: str | None = None
+    brown_tried = False
+
     for idx, scene in enumerate(scenes, 1):
         index = scene.get("index", idx)
         subject = str(scene.get("subject_type", "protagonist")).strip().lower()
@@ -222,9 +242,24 @@ def generate_scenes(
             extra: dict = {"num_images": num_images}
             if seed is not None and seed >= 0:
                 extra["seed"] = seed
+            refs = [sheet_url]
+            scene_prompt = prompt
+            # 파일럿: 갈색곰(friend/advisor/family) two_shot 에 갈색곰 시트를 2번째 레퍼런스로.
+            if (
+                supporting_sheets_on
+                and subject == "two_shot"
+                and other_role.lower() in _BROWN_BEAR_ROLES
+            ):
+                if not brown_tried:
+                    brown_tried = True
+                    brown_sheet_url = ensure_brownbear_sheet(supporting_channel)
+                if brown_sheet_url:
+                    refs = [sheet_url, brown_sheet_url]
+                    scene_prompt = prompt + _MULTI_REF_NOTE  # 매칭·섞임 방지 지시 추가
+                    logger.info("씬 %s: 멀티 레퍼런스(흰곰+갈색곰) 적용", index)
             request = ImageGenerationRequest(
-                prompt=prompt,
-                reference_images=[sheet_url],
+                prompt=scene_prompt,
+                reference_images=refs,
                 aspect_ratio="9:16",
                 output_path=str(out_dir / f"scene_{index}_1.png"),
                 extra_params=extra,
