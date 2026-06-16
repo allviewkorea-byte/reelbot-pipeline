@@ -277,13 +277,14 @@ export default function DashboardPage() {
               />
             </span>
           </button>
-          {/* 백곰의 실제 제작 진입점: /sayeon 으로만 이동(파라미터 없음, CLAUDE.md 2단계 원칙) */}
+          {/* 캐릭터 시트 관리 화면(/cast) 진입 — 8캐스트 시트 생성·확정 + 테스트 영상.
+              (/sayeon 제작 엔진은 무수정·유지. 메인 진입에서만 /cast 로 변경.) */}
           <Link
-            href="/sayeon"
+            href="/cast"
             className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
           >
             <Clapperboard className="h-4 w-4" />
-            사연 제작 열기
+            캐릭터 시트
           </Link>
           {/* 가동 토글 — OFF→[▶ 시작](emerald), ON→[■ 중단](red). 상태 저장(channel_status).
               #112 가동상태 로직(GET/POST + 사이드바 동기화) 그대로 유지. */}

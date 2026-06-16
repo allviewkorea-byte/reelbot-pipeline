@@ -18,6 +18,9 @@ export const CHARACTER_TABLE = "characters"
 // 사연 트랙 전용 캐릭터(CharacterSpec + 시트 URL/앵커). 기존 travel 캐릭터
 // (config/images, front/side/back)와 스키마가 달라 별도 테이블로 둔다.
 export const SAYEON_CHARACTER_TABLE = "sayeon_characters"
+// 사연 동물 캐스트(8) 상태 메타. 시트 이미지 자체는 R2(SoT)에 있고, 여기엔
+// role(PK)·표시 메타·승인 상태만 둔다. ⚠️ 테이블 생성·GRANT 는 대표가 SQL 로 실행.
+export const SAYEON_CAST_TABLE = "sayeon_cast"
 export const CHANNELS_TABLE = "channels"
 export const CHANNEL_STATUS_TABLE = "channel_status"
 export const TREND_RANKINGS_TABLE = "trend_rankings"

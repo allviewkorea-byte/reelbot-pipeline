@@ -103,6 +103,11 @@ class SayeonSheetRequest(BaseModel):
     sheet_model: str | None = None
 
 
+class SayeonCastSheetRequest(BaseModel):
+    channel_id: str
+    role: str  # 캐스트 바이블 역할 키(protagonist/narrator/male_lead/...)
+
+
 class SayeonTtsRequest(BaseModel):
     scenes: list[dict]  # [{"index", "narration"}, ...] (S1 출력)
     voice_id: str | None = None
