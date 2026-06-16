@@ -194,10 +194,11 @@ def download_bgm(object_key: str, dest: str) -> str:
     return dest
 
 
-def upload_character_sheet(file_path: str, channel_id: str) -> str:
+def upload_character_sheet(file_path: str, channel_id: str, filename: str = "sheet.png") -> str:
     """캐릭터 시트(채널당 1회, 영구 보존)를 R2에 업로드.
 
-    오브젝트 키: sayeon/characters/{channel_id}/sheet.png
+    오브젝트 키: sayeon/characters/{channel_id}/{filename}
+    filename 기본 sheet.png(주인공). 보조 캐릭터는 신규 키(예 brownbear.png) 로 충돌 방지.
 
     ⚠️ videos 버킷에는 7일 자동삭제 Lifecycle 이 걸려 있어 시트가 사라질 수 있다.
     Lifecycle 이 없는 전용 버킷(R2_CHARACTER_BUCKET)을 권장하며, 미설정 시 기본
@@ -210,7 +211,7 @@ def upload_character_sheet(file_path: str, channel_id: str) -> str:
             "R2_CHARACTER_BUCKET 미설정 — 기본 버킷 사용. 7일 Lifecycle 로 시트가 "
             "삭제될 수 있으니 Lifecycle 없는 전용 버킷 설정을 권장합니다."
         )
-    object_key = f"sayeon/characters/{channel_id}/sheet.png"
+    object_key = f"sayeon/characters/{channel_id}/{filename}"
     return upload_image(
         file_path,
         object_key,
@@ -218,3 +219,31 @@ def upload_character_sheet(file_path: str, channel_id: str) -> str:
         public_base_url=public_base,
         content_type="image/png",
     )
+
+
+def _character_bucket() -> str:
+    return os.environ.get("R2_CHARACTER_BUCKET") or os.environ.get("R2_BUCKET", "videos")
+
+
+def _character_public_base() -> str:
+    return (
+        os.environ.get("R2_CHARACTER_PUBLIC_BASE_URL")
+        or os.environ.get("R2_PUBLIC_BASE_URL", "")
+    ).rstrip("/")
+
+
+def character_sheet_url(channel_id: str, filename: str = "sheet.png") -> str:
+    """저장 규칙과 동일한 공개 URL(존재 확인 후 재사용용)."""
+    return f"{_character_public_base()}/sayeon/characters/{channel_id}/{filename}"
+
+
+def character_sheet_exists(channel_id: str, filename: str = "sheet.png") -> bool:
+    """해당 키가 R2에 이미 있는지(head_object). 미설정/오류 시 False(→ 호출부가 생성)."""
+    if not is_available():
+        return False
+    key = f"sayeon/characters/{channel_id}/{filename}"
+    try:
+        _get_client().head_object(Bucket=_character_bucket(), Key=key)
+        return True
+    except Exception:  # noqa: BLE001 - 없음/권한/네트워크 → 미존재로 처리
+        return False
