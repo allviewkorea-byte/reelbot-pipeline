@@ -102,6 +102,9 @@ export function PipelineNodeGraph() {
   // 실데이터(youtube_url) 우선, 없으면 '업로드 노드 done ⇒ 유튜브 done' 근사(백곰=유튜브 단일).
   const youtubeDone = Boolean(youtubeUrl) || uploadDone
   const progress = job && job.status === "running" ? job.progress : null
+  // 전류(움직이는 점선)는 ★진행 중(running/pending)일 때만. 완료/유휴 시 정지(연결은
+  // done 색으로 정적 표시). is_active 와 무관 — 진행 중 job 유무로만 애니메이션.
+  const inProgress = job?.status === "running" || job?.status === "pending"
 
   // 테크 스타일 고정(차분한 회로/전류). 발광은 active 노드만 은은하게.
   const glowFor = (st: NodeState) => (st === "active" ? "glow-soft" : "")
@@ -121,10 +124,12 @@ export function PipelineNodeGraph() {
           {NODES.slice(0, -1).map((_, i) => {
             const a = states[i]
             const b = states[i + 1]
-            const flowing = a === "done" && (b === "done" || b === "active")
-            const cls = !flowing
+            // lit = 연결 색(done 흐름 구간), animated = 그 중 진행 중일 때만 점선 흐름.
+            const lit = a === "done" && (b === "done" || b === "active")
+            const animated = inProgress && lit
+            const cls = !lit
               ? "stroke-border"
-              : `flow-line stroke-current ${b === "active" ? "text-primary" : "text-emerald-500"}`
+              : `${animated ? "flow-line " : ""}stroke-current ${b === "active" ? "text-primary" : "text-emerald-500"}`
             return (
               <line
                 key={`c-${i}`}
@@ -133,7 +138,7 @@ export function PipelineNodeGraph() {
                 x2={cx(i + 1) - NODE_W / 2}
                 y2={CY}
                 className={cls}
-                strokeWidth={flowing ? 1.8 : 1.5}
+                strokeWidth={lit ? 1.8 : 1.5}
               />
             )
           })}
@@ -148,7 +153,11 @@ export function PipelineNodeGraph() {
                 y1={CY}
                 x2={PX - 7}
                 y2={py}
-                className={lit ? "flow-line stroke-current text-emerald-500" : "stroke-border"}
+                className={
+                  lit
+                    ? `${inProgress ? "flow-line " : ""}stroke-current text-emerald-500`
+                    : "stroke-border"
+                }
                 strokeWidth={1.4}
               />
             )

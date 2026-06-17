@@ -11,6 +11,7 @@ import {
   X,
   ImageIcon,
   Clapperboard,
+  ExternalLink,
 } from "lucide-react"
 import { ImageLightbox } from "@/components/character/ImageLightbox"
 import { BAEKGOM_CHANNEL_ID } from "@/lib/content-plan"
@@ -127,6 +128,8 @@ export default function CastPage() {
   // 테스트 영상.
   const [producing, setProducing] = useState(false)
   const [testJob, setTestJob] = useState<{ progress: number; step: string } | null>(null)
+  // 최신 테스트 영상(영속) — 진입 시 로드, 완료 시 갱신. 이탈/복귀해도 유지.
+  const [testVideo, setTestVideo] = useState<{ video_url: string | null; youtube_url: string | null } | null>(null)
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null)
 
   const refreshCast = useCallback(async (): Promise<CastEntry[]> => {
@@ -152,6 +155,24 @@ export default function CastPage() {
       .finally(() => {
         if (alive) setLoading(false)
       })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  // 최신 테스트 영상 로드(영속) — 이탈했다 와도 패널에 재생/링크가 남는다.
+  useEffect(() => {
+    let alive = true
+    fetch(`/api/cast/test-video?channelId=${BAEKGOM_CHANNEL_ID}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => {
+        if (!alive) return
+        const v = d?.video
+        if (v && (v.video_url || v.youtube_url)) {
+          setTestVideo({ video_url: v.video_url ?? null, youtube_url: v.youtube_url ?? null })
+        }
+      })
+      .catch(() => {})
     return () => {
       alive = false
     }
@@ -308,7 +329,19 @@ export default function CastPage() {
         setTestJob({ progress: s.progress ?? 0, step: s.current_step || "제작 중…" })
         if (s.status === "completed") {
           setProducing(false)
-          setTestJob({ progress: 100, step: "완료" })
+          setTestJob(null)
+          // 결과(R2 영상 + 유튜브 비공개 링크)를 패널에 표시하고 영속 저장(이탈/복귀 유지).
+          const r = (s.result ?? {}) as Record<string, unknown>
+          const vurl = typeof r.video_url === "string" ? r.video_url : null
+          const yurl = typeof r.youtube_url === "string" ? r.youtube_url : null
+          if (vurl || yurl) {
+            setTestVideo({ video_url: vurl, youtube_url: yurl })
+            void fetch("/api/cast/test-video", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ channelId: BAEKGOM_CHANNEL_ID, video_url: vurl, youtube_url: yurl, job_id }),
+            })
+          }
           toast.success("테스트 영상 제작 완료")
         } else if (s.status === "failed") {
           setProducing(false)
@@ -529,8 +562,28 @@ export default function CastPage() {
                         </div>
                       )}
                     </div>
+                  ) : testVideo?.video_url ? (
+                    <video
+                      src={testVideo.video_url}
+                      controls
+                      playsInline
+                      className="h-full w-full object-contain"
+                    />
+                  ) : testVideo?.youtube_url ? (
+                    <a
+                      href={testVideo.youtube_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex flex-col items-center gap-2 text-center text-primary hover:opacity-90"
+                    >
+                      <ExternalLink className="h-7 w-7" />
+                      <span className="text-[11px]">유튜브에서 보기(비공개)</span>
+                    </a>
                   ) : (
-                    <Clapperboard className="h-7 w-7 text-muted-foreground/25" />
+                    <div className="flex flex-col items-center gap-1.5 px-3 text-center">
+                      <Clapperboard className="h-7 w-7 text-muted-foreground/25" />
+                      <span className="text-[10px] text-muted-foreground/50">아직 테스트 영상이 없어요</span>
+                    </div>
                   )}
                 </div>
               </div>
@@ -542,9 +595,21 @@ export default function CastPage() {
                 {producing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clapperboard className="h-4 w-4" />}
                 {producing ? "제작 중…" : "테스트 영상"}
               </button>
-              <p className="mt-1.5 shrink-0 text-center text-[10px] text-muted-foreground/70">
-                확정된 전체 캐스트 사용
-              </p>
+              {testVideo?.youtube_url ? (
+                <a
+                  href={testVideo.youtube_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1.5 flex shrink-0 items-center justify-center gap-1 text-center text-[10px] text-primary hover:opacity-90"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  유튜브 비공개 링크
+                </a>
+              ) : (
+                <p className="mt-1.5 shrink-0 text-center text-[10px] text-muted-foreground/70">
+                  확정된 전체 캐스트 사용
+                </p>
+              )}
             </div>
           </div>
 

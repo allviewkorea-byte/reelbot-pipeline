@@ -21,6 +21,8 @@ export const SAYEON_CHARACTER_TABLE = "sayeon_characters"
 // 사연 동물 캐스트(8) 상태 메타. 시트 이미지 자체는 R2(SoT)에 있고, 여기엔
 // role(PK)·표시 메타·승인 상태만 둔다. ⚠️ 테이블 생성·GRANT 는 대표가 SQL 로 실행.
 export const SAYEON_CAST_TABLE = "sayeon_cast"
+// /cast 테스트 영상 — 채널당 최신 1행(영속). ⚠️ 테이블 생성·GRANT 는 대표가 SQL 로 실행.
+export const SAYEON_TEST_VIDEO_TABLE = "sayeon_test_video"
 export const CHANNELS_TABLE = "channels"
 export const CHANNEL_STATUS_TABLE = "channel_status"
 export const TREND_RANKINGS_TABLE = "trend_rankings"
@@ -303,5 +305,64 @@ export async function deleteOldChannelVideos(channelId: string, beforeDate: stri
       .lt("date", beforeDate)
   } catch {
     /* 정리는 실패해도 무시 */
+  }
+}
+
+// ── /cast 테스트 영상 (Postgres `sayeon_test_video` 테이블) ──────────────
+// 채널당 최신 1행(channel_id PK). ⚠️ 테이블 생성·GRANT 는 코드가 하지 않는다(SQL 은
+// PR 설명, 대표가 Supabase 에서 실행). GRANT 누락 시 permission denied — 반드시 부여.
+// 조회는 테이블 미존재/에러/환경변수 미설정에도 null 방어(패널은 빈 상태로).
+
+export interface TestVideoRow {
+  channel_id: string
+  video_url: string | null
+  youtube_url: string | null
+  job_id: string | null
+  created_at: string
+}
+
+export async function getLatestTestVideo(channelId: string): Promise<TestVideoRow | null> {
+  try {
+    const supabase = getSupabaseAdmin()
+    const { data, error } = await supabase
+      .from(SAYEON_TEST_VIDEO_TABLE)
+      .select("channel_id, video_url, youtube_url, job_id, created_at")
+      .eq("channel_id", channelId)
+      .maybeSingle()
+    if (error) return null // 테이블 없음/조회 실패 → 없음(빈 상태)
+    return (data as TestVideoRow) ?? null
+  } catch {
+    return null // SUPABASE_* 미설정 등 → 없음
+  }
+}
+
+export async function saveLatestTestVideo(row: {
+  channelId: string
+  video_url?: string | null
+  youtube_url?: string | null
+  job_id?: string | null
+}): Promise<void> {
+  const supabase = getSupabaseAdmin()
+  const { error } = await supabase
+    .from(SAYEON_TEST_VIDEO_TABLE)
+    .upsert(
+      {
+        channel_id: row.channelId,
+        video_url: row.video_url ?? null,
+        youtube_url: row.youtube_url ?? null,
+        job_id: row.job_id ?? null,
+        created_at: new Date().toISOString(),
+      },
+      { onConflict: "channel_id" },
+    )
+  if (error) {
+    console.error("[sayeon-test-video] upsert 실패:", {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code,
+    })
+    const extra = error.details ? ` | ${error.details}` : ""
+    throw new Error(`테스트 영상 저장 실패: ${error.message}${extra}`)
   }
 }
