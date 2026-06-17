@@ -84,6 +84,7 @@ class SayeonGenerateRequest(BaseModel):
     gap_sec: float = 0.4
     thumbnail_scene_index: int | None = None  # 썸네일용 씬(없으면 기본 컷)
     privacy: str | None = None  # 'public'|'private' — 채널 모드로 결정(없으면 env 폴백)
+    synthetic_media: bool | None = None  # AI 합성 콘텐츠 표시 — 채널 토글(없으면 env 폴백)
 
 
 class SayeonAutoScriptRequest(BaseModel):

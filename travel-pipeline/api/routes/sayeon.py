@@ -283,6 +283,7 @@ def _run_generate(job_id: str, req: SayeonGenerateRequest) -> None:
             gap_sec=req.gap_sec,
             thumbnail_scene_index=req.thumbnail_scene_index,
             privacy=req.privacy,
+            synthetic_media=req.synthetic_media,
             progress_cb=cb,
         )
         job_manager.complete_job(job_id, result)

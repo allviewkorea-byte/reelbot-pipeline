@@ -55,6 +55,9 @@ export default function DashboardPage() {
   // 업로드 모드 — auto=공개 / semi(반자동)=비공개. 기본 semi(안전). 제작 시 privacy 결정.
   const [mode, setMode] = useState<ChannelMode>("semi")
   const [modeBusy, setModeBusy] = useState(false)
+  // AI 합성 콘텐츠 표시 토글(유튜브 containsSyntheticMedia). 기본 off. 제작 시 업로드에 반영.
+  const [syntheticMedia, setSyntheticMedia] = useState(false)
+  const [synthBusy, setSynthBusy] = useState(false)
   // 채널 KPI 통계(구독자·총조회수·영상수·평균). 로딩/실패/null → 카드 "—".
   const [stats, setStats] = useState<ChannelStats | null>(null)
   // 트렌드 패널 + 월간 계획서 공유 펼침 상태(짝으로 동시 펼침/접힘). 기본 접힘.
@@ -86,6 +89,7 @@ export default function DashboardPage() {
         if (!alive) return
         setIsActive(Boolean(d?.isActive))
         setMode(d?.mode === "auto" ? "auto" : "semi")
+        setSyntheticMedia(Boolean(d?.syntheticMedia))
       })
       .catch(() => {
         /* 실패 → 기본(OFF·반자동) 유지 */
@@ -144,6 +148,26 @@ export default function DashboardPage() {
       /* 실패 → 유지 */
     } finally {
       setModeBusy(false)
+    }
+  }
+
+  // AI 표시 토글(ON↔OFF). 저장만. 제작 시 업로드 containsSyntheticMedia 에 반영(프록시 주입).
+  const toggleSynthetic = async () => {
+    if (synthBusy) return
+    const next = !syntheticMedia
+    setSynthBusy(true)
+    try {
+      const res = await fetch("/api/channel-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channelId: BAEKGOM_CHANNEL_ID, syntheticMedia: next }),
+      })
+      const d = await res.json()
+      if (res.ok && d?.success) setSyntheticMedia(next)
+    } catch {
+      /* 실패 → 유지 */
+    } finally {
+      setSynthBusy(false)
     }
   }
 
@@ -235,6 +259,31 @@ export default function DashboardPage() {
               <span
                 className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${
                   mode === "auto" ? "left-3.5" : "left-0.5"
+                }`}
+              />
+            </span>
+          </button>
+          {/* AI 표시 — 유튜브 업로드 시 합성 콘텐츠(containsSyntheticMedia) 표시 ON/OFF.
+              공개/비공개와 동일한 스위치 스타일 재사용. 제작 전 경로(시작·스케줄·테스트) 일괄 반영. */}
+          <button
+            onClick={toggleSynthetic}
+            disabled={synthBusy}
+            role="switch"
+            aria-checked={syntheticMedia}
+            title="유튜브 업로드에 'AI 합성 콘텐츠' 표시를 켜고/끕니다"
+            className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-2 text-xs font-medium transition-colors hover:border-primary/40 disabled:opacity-60"
+          >
+            <span className={syntheticMedia ? "text-emerald-400" : "text-muted-foreground"}>
+              AI 표시 {syntheticMedia ? "ON" : "OFF"}
+            </span>
+            <span
+              className={`relative h-4 w-7 shrink-0 rounded-full transition-colors ${
+                syntheticMedia ? "bg-emerald-600" : "bg-secondary"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${
+                  syntheticMedia ? "left-3.5" : "left-0.5"
                 }`}
               />
             </span>

@@ -108,6 +108,7 @@ def upload_video(
     thumbnail_path: str | None = None,
     tags: list[str] | None = None,
     privacy: str | None = None,
+    synthetic_media: bool | None = None,
 ) -> dict:
     """영상 1개를 업로드하고 (가능하면) 썸네일을 첨부. Returns {video_id, video_url}.
 
@@ -151,12 +152,15 @@ def upload_video(
             "selfDeclaredMadeForKids": False,
         },
     }
-    # ⑫ AI/합성 콘텐츠 표시 토글(YOUTUBE_SYNTHETIC_MEDIA). on 일 때만 status 에
-    # containsSyntheticMedia=True 추가(YouTube Data API v3, 2024.10.30~). off/미설정 →
-    # 필드 미포함(기존 동작 그대로). 만화체라 의무는 아니나 투명성 위해 옵트인.
-    synthetic = (os.getenv("YOUTUBE_SYNTHETIC_MEDIA") or "").strip().lower() in (
-        "1", "true", "on", "yes",
-    )
+    # ⑫/⑬ AI/합성 콘텐츠 표시. 우선순위: 전달 인자(채널 토글) > env(YOUTUBE_SYNTHETIC_MEDIA)
+    # > False. on 이면 status.containsSyntheticMedia=True(YouTube Data API v3, 2024.10.30~),
+    # 아니면 필드 미포함(기존 동작). 만화체라 의무는 아니나 투명성 위해 옵트인.
+    if synthetic_media is None:
+        synthetic = (os.getenv("YOUTUBE_SYNTHETIC_MEDIA") or "").strip().lower() in (
+            "1", "true", "on", "yes",
+        )
+    else:
+        synthetic = bool(synthetic_media)
     if synthetic:
         body["status"]["containsSyntheticMedia"] = True
     logger.warning("[youtube-debug] containsSyntheticMedia=%s", synthetic)
@@ -199,7 +203,8 @@ def upload_video(
 
 
 def publish_to_youtube(
-    video_url: str, thumbnail_url: str, hook_text: str, script: str, privacy: str | None = None
+    video_url: str, thumbnail_url: str, hook_text: str, script: str,
+    privacy: str | None = None, synthetic_media: bool | None = None,
 ) -> dict:
     """완성 영상(URL/로컬) + 썸네일 → 메타데이터 생성 → 업로드. Returns {video_id, video_url}.
 
@@ -234,7 +239,10 @@ def publish_to_youtube(
                 logger.warning("[youtube-debug] 썸네일 다운로드 실패(영상만 업로드): %s\n%s", e, traceback.format_exc())
 
         try:
-            result = upload_video(str(local_video), title, description, local_thumb, tags, privacy=privacy)
+            result = upload_video(
+                str(local_video), title, description, local_thumb, tags,
+                privacy=privacy, synthetic_media=synthetic_media,
+            )
             logger.warning("[youtube-debug] 업로드 성공: %s", result.get("video_url"))
             return result
         except Exception as e:  # noqa: BLE001
