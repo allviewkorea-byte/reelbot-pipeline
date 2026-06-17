@@ -17,6 +17,8 @@ import os
 
 from openai import OpenAI
 
+from services.sayeon_cast import cast_references_enabled
+
 logger = logging.getLogger(__name__)
 
 _OPENAI_MODEL = "gpt-4o-mini"
@@ -278,6 +280,9 @@ def apply_director(script: str, scenes: list[dict]) -> list[dict]:
             for s, d in zip(scenes, defaults)
         ]
 
+    # ⑦ 플래그 on 일 때만 shot_type 을 씬에 실어 보낸다(scene 이 cast 아스펙트 선택에
+    #    사용). off 면 추가하지 않아 기존 씬 dict·job result 가 바이트 동일하게 유지된다.
+    add_shot_type = cast_references_enabled()
     out: list[dict] = []
     for i, s in enumerate(scenes):
         spec = shots[i] if i < len(shots) else {}
@@ -289,5 +294,7 @@ def apply_director(script: str, scenes: list[dict]) -> list[dict]:
         ns["emotion"] = spec.get("emotion", "deadpan")
         ns["other_role"] = spec.get("other_role", "")
         ns["include_protagonist"] = bool(spec.get("include_protagonist", False))
+        if add_shot_type:
+            ns["shot_type"] = spec.get("shot_type", "")
         out.append(ns)
     return out

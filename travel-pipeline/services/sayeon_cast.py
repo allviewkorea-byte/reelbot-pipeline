@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
 import time
 from pathlib import Path
@@ -156,6 +157,81 @@ _CAST_BY_ROLE = {entry["role"]: entry for entry in CAST_BIBLE}
 def get_cast_entry(role: str) -> dict | None:
     """역할 키로 캐스트 바이블 엔트리를 찾는다(없으면 None)."""
     return _CAST_BY_ROLE.get((role or "").strip().lower())
+
+
+# ── ⑦ 캐스트 ↔ 씬 연결 (피처 플래그 SAYEON_CAST_REFERENCES, 기본 off) ─────────
+# 디렉터 역할(other_role/protagonist) → 캐스트 바이블 역할. narrator 는 씬 역할이 아님(None).
+_DIRECTOR_TO_CAST_ROLE = {
+    "protagonist": "protagonist",
+    "male_lead": "male_lead",
+    "female_lead": "female_lead",
+    "family": "family_bear",
+    "villain": "villain",
+    "friend": "friend_squirrel",  # 기본; 없으면 friend_penguin 로 런타임 폴백
+}
+# 디렉터 감정(7) → 캐스트 표정 아스펙트(4). 미대응(flutter/anxiety/deadpan)은 front.
+_EMOTION_TO_EXPR = {
+    "joy": "expr_joy",
+    "sadness": "expr_sad",
+    "anger": "expr_angry",
+    "shock": "expr_surprised",
+}
+
+
+def cast_references_enabled() -> bool:
+    """피처 플래그 — on 일 때만 씬이 cast/{role}/{aspect} 레퍼런스를 쓴다(기본 off)."""
+    return (os.getenv("SAYEON_CAST_REFERENCES") or "").strip().lower() in (
+        "1", "true", "on", "yes",
+    )
+
+
+def map_cast_role(director_role: str) -> str | None:
+    """디렉터 역할 → 캐스트 역할(없으면 None = 씬 역할 아님/미상 → 스킵)."""
+    return _DIRECTOR_TO_CAST_ROLE.get((director_role or "").strip().lower())
+
+
+def select_aspect(shot_type: str, emotion: str) -> str:
+    """샷 종류 + 감정 → 캐스트 아스펙트 키.
+
+    close_up/over_the_shoulder → EXPR[emotion](없으면 front) / medium → threequarter /
+    full·wide·기타 → front.
+    """
+    st = (shot_type or "").strip().lower().replace("-", "_").replace(" ", "_")
+    emo = (emotion or "").strip().lower()
+    if st in ("close_up", "over_the_shoulder"):
+        return _EMOTION_TO_EXPR.get(emo, "front")
+    if st == "medium":
+        return "threequarter"
+    return "front"
+
+
+def _cast_url_if_present(cast_role: str, aspect: str, present: dict[str, int]) -> str | None:
+    """cast/{role}/{aspect} 있으면 URL, 없으면 같은 role 의 front, 둘 다 없으면 None.
+
+    present = list_cast_objects() 결과(키→epoch). 씬당 네트워크 없이 멤버십 판정.
+    """
+    if f"cast/{cast_role}/{aspect}.png" in present:
+        return r2_storage.cast_aspect_url(cast_role, aspect)
+    if aspect != "front" and f"cast/{cast_role}/front.png" in present:
+        return r2_storage.cast_aspect_url(cast_role, "front")
+    return None
+
+
+def resolve_cast_reference(director_role: str, aspect: str, present: dict[str, int]) -> str | None:
+    """디렉터 역할 → 캐스트 레퍼런스 URL(graceful). 없으면 None(호출부가 기존 동작 폴백).
+
+    friend 는 friend_squirrel 우선, 없으면 friend_penguin. 각 역할 내에서는
+    aspect → front 폴백(_cast_url_if_present).
+    """
+    cast_role = map_cast_role(director_role)
+    if not cast_role:
+        return None
+    url = _cast_url_if_present(cast_role, aspect, present)
+    if url:
+        return url
+    if (director_role or "").strip().lower() == "friend":
+        return _cast_url_if_present("friend_penguin", aspect, present)
+    return None
 
 
 # ── 프롬프트 빌더 ────────────────────────────────────────────────────────

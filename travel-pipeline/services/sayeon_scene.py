@@ -19,6 +19,11 @@ from pathlib import Path
 import httpx
 
 from adapters import ImageGenerationRequest, get_image_adapter, get_kontext_adapter, r2_storage
+from services.sayeon_cast import (
+    cast_references_enabled,
+    resolve_cast_reference,
+    select_aspect,
+)
 from services.sayeon_character import (
     POLAR_BEAR_ART_STYLE,
     SAYEON_NEGATIVE,
@@ -41,6 +46,12 @@ _MULTI_REF_NOTE = (
     " Reference image 1 is the white polar bear (the protagonist); reference image 2 is the "
     "brown bear (the other character). Match each animal to its own reference and keep them as "
     "two clearly distinct animals — do NOT blend, merge, or swap their fur colors or features."
+)
+# ⑦ cast 멀티 레퍼런스(상대역이 갈색곰에 한정되지 않으므로 동물 무관 일반 문구).
+_CAST_MULTI_REF_NOTE = (
+    " Reference image 1 is the white polar bear protagonist; reference image 2 is the other "
+    "character. Match each animal to its own reference and keep them as two clearly distinct "
+    "animals — do NOT blend, merge, or swap their colors or features."
 )
 
 
@@ -195,6 +206,10 @@ def generate_scenes(
     brown_sheet_url: str | None = None
     brown_tried = False
 
+    # ⑦ cast 레퍼런스(기본 off). on 이면 cast/ 키 존재맵을 1회 조회(씬당 네트워크 0).
+    cast_refs_on = cast_references_enabled()
+    cast_objs: dict[str, int] = r2_storage.list_cast_objects() if cast_refs_on else {}
+
     for idx, scene in enumerate(scenes, 1):
         index = scene.get("index", idx)
         subject = str(scene.get("subject_type", "protagonist")).strip().lower()
@@ -244,9 +259,29 @@ def generate_scenes(
                 extra["seed"] = seed
             refs = [sheet_url]
             scene_prompt = prompt
-            # 파일럿: 갈색곰(friend/advisor/family) two_shot 에 갈색곰 시트를 2번째 레퍼런스로.
+            used_cast = False
+            # ⑦ 플래그 on: cast/{role}/{aspect} 를 레퍼런스로 사용(주인공 sheet.png 대체).
+            #    주인공 아스펙트 = shot_type+emotion 규칙, two_shot 상대역 = front.
+            #    cast 키 없으면 front→기존 동작으로 graceful 폴백(아래 #141/단일 sheet).
+            if cast_refs_on:
+                prot_aspect = select_aspect(scene.get("shot_type", ""), emotion)
+                prot_url = resolve_cast_reference("protagonist", prot_aspect, cast_objs)
+                if prot_url:
+                    used_cast = True
+                    if subject == "two_shot" and other_role:
+                        other_url = resolve_cast_reference(other_role, "front", cast_objs)
+                        if other_url:
+                            refs = [prot_url, other_url]
+                            scene_prompt = prompt + _CAST_MULTI_REF_NOTE
+                            logger.info("씬 %s: cast 멀티 레퍼런스(주인공+%s)", index, other_role)
+                        else:
+                            refs = [prot_url]
+                    else:
+                        refs = [prot_url]
+            # 파일럿(#141): cast 미사용 시에만 — 갈색곰 two_shot 에 갈색곰 시트를 2번째 레퍼런스로.
             if (
-                supporting_sheets_on
+                not used_cast
+                and supporting_sheets_on
                 and subject == "two_shot"
                 and other_role.lower() in _BROWN_BEAR_ROLES
             ):
