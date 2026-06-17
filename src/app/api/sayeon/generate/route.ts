@@ -13,12 +13,15 @@ import { modeToPrivacy } from "@/lib/channel-status"
 // env 폴백). YOUTUBE_AUTO_PUBLISH 게이트(업로드 여부)는 백엔드 env 그대로 — 여기선 안 건드림.
 export async function POST(request: NextRequest) {
   const body = await request.json()
-  if (body && typeof body === "object" && body.privacy == null) {
+  // privacy(공개/비공개) + synthetic_media(AI 표시)를 채널 토글에서 주입(둘 다 미지정 시).
+  // 본문에 이미 있으면 존중(예: 테스트 영상 privacy='private'). 조회 실패는 무시(백엔드 env 폴백).
+  if (body && typeof body === "object" && (body.privacy == null || body.synthetic_media == null)) {
     try {
-      const { mode } = await getChannelStatus(BAEKGOM_CHANNEL_ID)
-      body.privacy = modeToPrivacy(mode)
+      const { mode, syntheticMedia } = await getChannelStatus(BAEKGOM_CHANNEL_ID)
+      if (body.privacy == null) body.privacy = modeToPrivacy(mode)
+      if (body.synthetic_media == null) body.synthetic_media = syntheticMedia
     } catch {
-      /* 조회 실패 → privacy 미주입(백엔드 YOUTUBE_PRIVACY_STATUS 폴백) */
+      /* 조회 실패 → 미주입(백엔드 YOUTUBE_PRIVACY_STATUS / YOUTUBE_SYNTHETIC_MEDIA 폴백) */
     }
   }
   return proxyJson("/sayeon/generate", { method: "POST", body })

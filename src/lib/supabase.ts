@@ -175,36 +175,40 @@ export async function upsertContentPlans(plans: ContentPlan[]): Promise<void> {
 export interface ChannelStatusState {
   isActive: boolean
   mode: ChannelMode
+  syntheticMedia: boolean
 }
 
 export async function getChannelStatus(channelId: string): Promise<ChannelStatusState> {
   try {
     const supabase = getSupabaseAdmin()
+    // select("*") 로 읽어 synthetic_media 컬럼 추가 전에도 깨지지 않게 한다(미존재 → undefined→false).
     const { data, error } = await supabase
       .from(CHANNEL_STATUS_TABLE)
-      .select("is_active, mode")
+      .select("*")
       .eq("channel_id", channelId)
       .maybeSingle()
-    if (error) return { isActive: false, mode: "semi" } // 테이블 없음/조회 실패 → 기본(OFF·반자동)
+    if (error) return { isActive: false, mode: "semi", syntheticMedia: false } // 테이블 없음/조회 실패 → 기본
     return {
       isActive: Boolean(data?.is_active),
       mode: data?.mode === "auto" ? "auto" : "semi", // 미설정/이상값 → semi(안전: 비공개)
+      syntheticMedia: Boolean(data?.synthetic_media), // 컬럼 미존재/미설정 → false
     }
   } catch {
-    return { isActive: false, mode: "semi" } // SUPABASE_* 미설정 등 → 기본
+    return { isActive: false, mode: "semi", syntheticMedia: false } // SUPABASE_* 미설정 등 → 기본
   }
 }
 
-// isActive / mode 중 제공된 것만 갱신(부분 upsert). 둘 다 없으면 no-op.
+// isActive / mode / syntheticMedia 중 제공된 것만 갱신(부분 upsert). 없으면 no-op.
 export async function setChannelStatus(
   channelId: string,
-  patch: { isActive?: boolean; mode?: ChannelMode },
+  patch: { isActive?: boolean; mode?: ChannelMode; syntheticMedia?: boolean },
 ): Promise<void> {
-  if (patch.isActive === undefined && patch.mode === undefined) return
+  if (patch.isActive === undefined && patch.mode === undefined && patch.syntheticMedia === undefined) return
   const supabase = getSupabaseAdmin()
   const row: Record<string, unknown> = { channel_id: channelId, updated_at: new Date().toISOString() }
   if (patch.isActive !== undefined) row.is_active = patch.isActive
   if (patch.mode !== undefined) row.mode = patch.mode
+  if (patch.syntheticMedia !== undefined) row.synthetic_media = patch.syntheticMedia
   const { error } = await supabase
     .from(CHANNEL_STATUS_TABLE)
     .upsert(row, { onConflict: "channel_id" })
