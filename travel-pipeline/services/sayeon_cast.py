@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+import time
 from pathlib import Path
 
 from adapters import (
@@ -352,6 +353,86 @@ def generate_cast_aspects(
         "colors": entry["colors"],
         "relative_height": entry["relative_height"],
     }
+
+
+def _versioned(url: str) -> str:
+    """방금 덮어쓴 객체 URL에 캐시버스팅 ?v= 부착(즉시 새 이미지 표시용).
+
+    재생성 응답 1회용 타임스탬프 — 매 로드 갱신이 아니라 업로드 직후 1회라 안전.
+    이후 GET /sayeon/cast 는 실제 LastModified 기반 ?v= 를 쓴다.
+    """
+    return f"{url}?v={int(time.time())}"
+
+
+def regenerate_cast_aspect(role: str, aspect: str, output_dir: str | None = None) -> dict:
+    """캐스트 아스펙트 1장만 재생성한다(전체 재생성 비용 회피).
+
+    - aspect == "front": z-image t2i 로 정면만 재생성. 나머지 6장은 이 정면을 레퍼런스로
+      만들어졌으므로 외형이 어긋날 수 있어 경고만 반환(자동 재생성 안 함).
+    - 그 외: R2 의 cast/{role}/front.png 를 Kontext 레퍼런스로 그 1장만 재생성.
+    같은 키로 덮어쓰고 ?v= 붙인 새 URL 을 반환. 1장이라 동기 처리.
+    """
+    entry = get_cast_entry(role)
+    if not entry:
+        raise ValueError(f"알 수 없는 캐스트 역할입니다: {role}")
+    if aspect not in ASPECT_KEYS:
+        raise ValueError(f"알 수 없는 아스펙트입니다: {aspect}")
+
+    core: str = entry["core"]
+    out_dir = Path(output_dir or f"output/sayeon/cast/{role}")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    local = out_dir / f"{aspect}.png"
+
+    if aspect == "front":
+        t2i = get_image_adapter()
+        if not t2i.is_available():
+            raise RuntimeError("이미지 어댑터 미설정(WAVESPEED/OPENAI 키) — 정면을 생성할 수 없습니다.")
+        result = asyncio.run(
+            t2i.generate(
+                ImageGenerationRequest(
+                    prompt=_front_prompt(core),
+                    aspect_ratio="9:16",
+                    output_path=str(local),
+                )
+            )
+        )
+        url = _persist_aspect(local, role, "front", result.source_url)
+        return {
+            "role": role,
+            "aspect": "front",
+            "url": _versioned(url),
+            "warning": "정면을 다시 생성했어요. 나머지 6장은 이전 정면 기준이라 외형이 "
+            "어긋날 수 있어요 — 전체 다시 생성을 권장합니다.",
+        }
+
+    # 비-정면: R2 정면을 레퍼런스로 사용(없으면 명확한 에러).
+    kontext = get_kontext_adapter()
+    if not kontext.is_available():
+        raise RuntimeError("WAVESPEED_API_KEY 미설정 — 레퍼런스 아스펙트를 생성할 수 없습니다.")
+    if not r2_storage.cast_aspect_exists(role, "front"):
+        raise RuntimeError("정면(front)이 없습니다 — 먼저 정면(또는 전체)을 생성하세요.")
+    front_ref = r2_storage.cast_aspect_url(role, "front")
+
+    view_map = dict(_VIEW_ASPECTS)
+    expr_map = dict(_EXPR_ASPECTS)
+    if aspect in view_map:
+        prompt = _view_prompt(core, view_map[aspect])
+    else:
+        prompt = _expr_prompt(core, expr_map[aspect])
+
+    result = asyncio.run(
+        kontext.generate(
+            ImageGenerationRequest(
+                prompt=prompt,
+                reference_images=[front_ref],
+                aspect_ratio="1:1" if aspect.startswith("expr_") else "9:16",
+                output_path=str(local),
+                extra_params={"num_images": 1},
+            )
+        )
+    )
+    url = _persist_aspect(local, role, aspect, result.source_url)
+    return {"role": role, "aspect": aspect, "url": _versioned(url)}
 
 
 # ── 비동기 생성 진행상태(인메모리) ──────────────────────────────────────
