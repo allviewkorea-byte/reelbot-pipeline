@@ -151,6 +151,15 @@ def upload_video(
             "selfDeclaredMadeForKids": False,
         },
     }
+    # ⑫ AI/합성 콘텐츠 표시 토글(YOUTUBE_SYNTHETIC_MEDIA). on 일 때만 status 에
+    # containsSyntheticMedia=True 추가(YouTube Data API v3, 2024.10.30~). off/미설정 →
+    # 필드 미포함(기존 동작 그대로). 만화체라 의무는 아니나 투명성 위해 옵트인.
+    synthetic = (os.getenv("YOUTUBE_SYNTHETIC_MEDIA") or "").strip().lower() in (
+        "1", "true", "on", "yes",
+    )
+    if synthetic:
+        body["status"]["containsSyntheticMedia"] = True
+    logger.warning("[youtube-debug] containsSyntheticMedia=%s", synthetic)
     # CMS 경로(파트너): 콘텐츠 소유자 권한으로 특정 소유 채널에 업로드.
     insert_kwargs: dict = {"part": "snippet,status", "body": body}
     if owner:
