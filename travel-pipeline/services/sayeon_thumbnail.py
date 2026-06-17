@@ -24,13 +24,30 @@ from openai import OpenAI
 
 from adapters import r2_storage
 # S4 합성 엔진의 검증된 헬퍼 재사용(재발명 금지).
-from services.sayeon_assemble import _ass_text, _fetch, _require_ffmpeg, _run
+from services.sayeon_assemble import _fetch, _require_ffmpeg, _run
 
 logger = logging.getLogger(__name__)
 
 W, H = 1080, 1920
 _FONT = "Noto Sans CJK KR"
 _OPENAI_MODEL = "gpt-4o-mini"
+
+# ⑩ 피크 감정 → 주인공(흰곰) 표정 시트 아스펙트(썸네일 거대 얼굴 베이스).
+_EMO_TO_EXPR = {
+    "shock": "expr_surprised",
+    "anger": "expr_angry",
+    "sadness": "expr_sad",
+}
+# ⑩ 썸네일 핵심구 감정색(ASS BGR &HBBGGRR&). 자막용 색과 별개(썸네일 전용 톤).
+_THUMB_DEFAULT_COLOR = "&H00F0FF&"  # 노랑(기본)
+_THUMB_EMO_COLOR = {
+    "anger": "&H0000FF&",    # 빨강
+    "shock": "&H008CFF&",    # 주황
+    "sadness": "&HEBCE87&",  # 하늘(sky #87CEEB)
+    "joy": "&H00FFFF&",      # 노랑
+}
+# 후킹 카피 위 반투명 다크 밴드 높이(상단 2줄 텍스트 영역을 덮어 가독성 확보).
+_BAND_H = 660
 
 
 def _strip_code_fence(raw: str) -> str:
@@ -87,11 +104,46 @@ def _generate_hook(script: str) -> tuple[str, str]:
     return hook, highlight
 
 
-def _build_thumb_ass(hook_text: str, highlight: str, ass_path: Path) -> None:
-    """썸네일 ASS(§4-(f)): 큰 굵은 2줄, 상단(Alignment=8), 두꺼운 외곽선, 노란 강조."""
-    # 리터럴 '\n' 도 실제 줄바꿈으로 정규화한 뒤 _ass_text 가 \N 으로 변환.
-    normalized = hook_text.replace("\\n", "\n")
-    text = _ass_text(normalized, highlight)
+def _fallback_hook(script: str) -> tuple[str, str]:
+    """LLM 후킹 실패/키 없음 시 안전 폴백(예외 방지). 대본 첫 문장을 2줄로 다듬는다."""
+    text = " ".join(line.strip() for line in (script or "").splitlines() if line.strip())
+    if not text:
+        return ("무슨 일이…?", "")
+    # 첫 문장(또는 앞부분) ~22자 → 가운데서 2줄로.
+    import re as _re
+    first = _re.split(r"(?<=[.?!…])\s+", text)[0].strip() or text
+    first = first[:22].rstrip()
+    if len(first) > 11:
+        cut = first.rfind(" ", 0, 12)
+        cut = cut if cut > 0 else 11
+        hook = f"{first[:cut].rstrip()}\n{first[cut:].lstrip()}…"
+    else:
+        hook = f"{first}…"
+    return (hook, "")
+
+
+def _resolve_base(scene_url: str, emotion: str) -> tuple[str, bool]:
+    """썸네일 베이스 결정 — 피크 감정이면 주인공 표정 시트(거대 얼굴) 우선, 없으면 씬 이미지.
+
+    Returns (base_url, is_face). is_face 면 합성 시 비네팅으로 얼굴에 시선 집중.
+    expr_* 시트가 R2에 없으면 graceful 폴백(기존 씬 이미지·기존 동작).
+    """
+    aspect = _EMO_TO_EXPR.get((emotion or "").strip().lower())
+    if aspect and r2_storage.is_available() and r2_storage.cast_aspect_exists("protagonist", aspect):
+        return r2_storage.cast_aspect_url("protagonist", aspect), True
+    return scene_url, False
+
+
+def _build_thumb_ass(hook_text: str, highlight: str, emotion: str, ass_path: Path) -> None:
+    """썸네일 ASS: 큰 굵은 2줄, 상단(Alignment=8), 두꺼운 외곽선, 핵심구 확대+감정색."""
+    # 리터럴 '\n' 도 실제 줄바꿈으로 정규화. 핵심구는 더 크게(fs168)+감정색으로 강조.
+    normalized = hook_text.replace("\\n", "\n").strip()
+    color = _THUMB_EMO_COLOR.get((emotion or "").strip().lower(), _THUMB_DEFAULT_COLOR)
+    text = normalized
+    hl = (highlight or "").strip()
+    if hl and hl in text:
+        text = text.replace(hl, f"{{\\fs168\\c{color}}}{hl}{{\\fs128\\c&HFFFFFF&}}", 1)
+    text = text.replace("\r\n", "\\N").replace("\n", "\\N")
     header = (
         "[Script Info]\n"
         "ScriptType: v4.00+\n"
@@ -120,37 +172,57 @@ def generate_thumbnail(
     hook_text: str = "",
     highlight: str = "",
     script: str = "",
+    emotion: str = "",
     output_dir: str | None = None,
 ) -> dict:
-    """씬 이미지(image_url) 배경 + 후킹 카피 오버레이 → 썸네일 PNG.
+    """베이스(거대 감정 얼굴 또는 씬 이미지) + 후킹 카피 오버레이 → 썸네일 PNG.
 
-    image_url 은 오케스트레이터가 고른 해당 사연의 씬 이미지(마지막 질문 엔딩 제외,
-    감정 피크 우선). 새 이미지를 생성하지 않으므로 추가 비용이 없고 실제 장면과 일치한다.
-    Returns {"thumbnail_url", ...}.
+    ⑩ 베이스 = 피크 감정이면 주인공 표정 시트(cast/protagonist/expr_*) 거대 얼굴,
+    없으면 image_url(씬 이미지)로 graceful 폴백. 텍스트는 반투명 다크 밴드 위에
+    흰 글씨 + 핵심구 확대·감정색. 새 이미지 생성 없음(비용 0). Returns {"thumbnail_url", ...}.
     """
     _require_ffmpeg()
     if not image_url:
         raise ValueError("image_url 이 필요합니다.")
 
+    # 후킹 카피 — 없으면 LLM 생성, 실패해도 폴백(예외 방지).
     hook_text = (hook_text or "").strip()
     if not hook_text:
-        if not script.strip():
-            raise ValueError("hook_text 또는 script 중 하나는 필요합니다.")
-        hook_text, highlight = _generate_hook(script)
+        if script.strip():
+            try:
+                hook_text, highlight = _generate_hook(script)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("후킹 생성 실패 → 폴백 카피 사용: %s", e)
+                hook_text, highlight = _fallback_hook(script)
+        if not hook_text:
+            hook_text, highlight = _fallback_hook(script)
+
+    # ⑩ 베이스 결정(피크 감정 얼굴 우선, 없으면 씬). is_face 면 비네팅 적용.
+    base_url, is_face = _resolve_base(image_url, emotion)
 
     tid = uuid.uuid4().hex[:12]
     out_dir = Path(output_dir or f"output/sayeon/thumbnails/{tid}")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     bg = out_dir / "bg.png"
-    _fetch(image_url, bg)
+    _fetch(base_url, bg)
     ass = out_dir / "thumb.ass"
-    _build_thumb_ass(hook_text, highlight, ass)
+    _build_thumb_ass(hook_text, highlight, emotion, ass)
     out = out_dir / "thumb.png"
-    # §4-(f): 단일 프레임 + ASS 오버레이. 입력 이미지를 9:16 로 스케일.
+    # 단일 프레임 합성: 9:16 cover-crop(왜곡 방지) → (얼굴 베이스면 비네팅) →
+    # 상단 반투명 다크 밴드(텍스트 가독성) → ASS 후킹 카피.
+    vf_parts = [
+        f"scale={W}:{H}:force_original_aspect_ratio=increase",
+        f"crop={W}:{H}",
+        "setsar=1",
+    ]
+    if is_face:
+        vf_parts.append("vignette=PI/4")
+    vf_parts.append(f"drawbox=x=0:y=0:w={W}:h={_BAND_H}:color=black@0.42:t=fill")
+    vf_parts.append(f"ass={ass.name}")
     _run([
         "-i", bg.name,
-        "-vf", f"scale={W}:{H},ass={ass.name}",
+        "-vf", ",".join(vf_parts),
         "-frames:v", "1",
         out.name,
     ], cwd=out_dir)

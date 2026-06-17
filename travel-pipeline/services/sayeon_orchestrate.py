@@ -35,15 +35,22 @@ _THUMB_PEAK_EMOTIONS = ("shock", "anger", "sadness")
 
 def _select_thumbnail_image(
     scenes: list[dict], image_by_index: dict, thumbnail_scene_index: int | None
-) -> str | None:
-    """썸네일 배경으로 쓸 씬 이미지 URL 선택(새 이미지 생성 없음).
+) -> tuple[str | None, str]:
+    """썸네일 베이스 씬 이미지 URL + 그 씬의 감정 선택(새 이미지 생성 없음).
 
     우선순위: 명시 지정(thumbnail_scene_index) → 감정 피크(shock/anger/sadness) 씬 랜덤
     → 나머지 씬 랜덤. 단, **마지막 씬(질문 엔딩)은 제외**하고 이미지가 있는 씬만 후보.
-    후보가 없으면 첫 씬/아무 이미지로 폴백.
+    후보가 없으면 첫 씬/아무 이미지로 폴백. emotion 은 썸네일 얼굴/감정색 선택에 사용.
+    Returns (image_url|None, emotion).
     """
+    def _emotion_of(index) -> str:
+        for s in scenes:
+            if s.get("index") == index:
+                return str(s.get("emotion", "")).strip().lower()
+        return ""
+
     if thumbnail_scene_index in image_by_index:
-        return image_by_index[thumbnail_scene_index]
+        return image_by_index[thumbnail_scene_index], _emotion_of(thumbnail_scene_index)
 
     last_index = scenes[-1].get("index") if scenes else None
     candidates = [
@@ -53,15 +60,15 @@ def _select_thumbnail_image(
     if not candidates:
         # 폴백: 이미지가 있는 아무 씬(없으면 None).
         if scenes and image_by_index.get(scenes[0].get("index")):
-            return image_by_index[scenes[0]["index"]]
-        return next(iter(image_by_index.values()), None)
+            return image_by_index[scenes[0]["index"]], str(scenes[0].get("emotion", "")).strip().lower()
+        return next(iter(image_by_index.values()), None), ""
 
     peak = [
         s for s in candidates
         if str(s.get("emotion", "")).strip().lower() in _THUMB_PEAK_EMOTIONS
     ]
     chosen = random.choice(peak or candidates)
-    return image_by_index.get(chosen["index"])
+    return image_by_index.get(chosen["index"]), str(chosen.get("emotion", "")).strip().lower()
 
 
 def _maybe_publish_youtube(
@@ -198,9 +205,9 @@ def generate_full(
 
     # f. 썸네일 (~98%) — 해당 사연의 씬 이미지 1장 선택(마지막 질문 엔딩 제외, 감정
     # 피크 우선) + 후킹 카피 오버레이. 새 이미지 생성 없음(비용 0, 실제 장면과 일치).
-    thumb_image = _select_thumbnail_image(scenes, image_by_index, thumbnail_scene_index)
+    thumb_image, thumb_emotion = _select_thumbnail_image(scenes, image_by_index, thumbnail_scene_index)
     with _stage("썸네일"):
-        thumb = generate_thumbnail(image_url=thumb_image, script=script)
+        thumb = generate_thumbnail(image_url=thumb_image, script=script, emotion=thumb_emotion)
     thumbnail_url = thumb["thumbnail_url"]
     report(98, "썸네일 완료")
 
