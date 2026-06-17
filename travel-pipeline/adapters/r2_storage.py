@@ -293,22 +293,29 @@ def cast_aspect_exists(role: str, aspect: str) -> bool:
         return False
 
 
-def list_cast_keys() -> set[str]:
-    """cast/ 프리픽스 아래 모든 오브젝트 키 집합.
+def list_cast_objects() -> dict[str, int]:
+    """cast/ 프리픽스 아래 모든 오브젝트의 {키: LastModified epoch(int)} 맵.
 
-    역할×아스펙트(8×7=56) head_object 대신 list_objects_v2 1~소수 회로 전체 키를 받아
-    멤버십 판정(목록 조회 속도 개선). 미설정/오류 시 빈 set(호출부가 '없음'으로 처리).
+    역할×아스펙트(8×7=56) head_object 대신 list_objects_v2 1~소수 회로 전체를 받아
+    (a) 존재 멤버십 판정 + (b) 캐시 버스팅용 버전값(LastModified)을 함께 제공한다.
+    LastModified 는 객체가 실제 덮어써질 때만 바뀌므로 ?v= 에 쓰면 불필요한 재다운로드가
+    없다. 미설정/오류 시 빈 dict(호출부가 '없음'으로 처리).
     """
     if not is_available():
-        return set()
-    keys: set[str] = set()
+        return {}
+    objs: dict[str, int] = {}
     try:
         client = _get_client()
         bucket = _character_bucket()
         paginator = client.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=bucket, Prefix="cast/"):
             for obj in page.get("Contents", []):
-                keys.add(obj["Key"])
-    except Exception:  # noqa: BLE001 - 권한/네트워크 → 빈 set(없음 처리)
-        return set()
-    return keys
+                lm = obj.get("LastModified")
+                try:
+                    epoch = int(lm.timestamp()) if lm is not None else 0
+                except Exception:  # noqa: BLE001 - 이상값 → 버전 0
+                    epoch = 0
+                objs[obj["Key"]] = epoch
+    except Exception:  # noqa: BLE001 - 권한/네트워크 → 빈 dict(없음 처리)
+        return {}
+    return objs

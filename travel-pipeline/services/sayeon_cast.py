@@ -199,17 +199,20 @@ def _expr_prompt(core: str, expr_desc: str) -> str:
     )
 
 
-def _public_entry(entry: dict, present_keys: set[str]) -> dict:
+def _public_entry(entry: dict, objects: dict[str, int]) -> dict:
     """프론트로 내려줄 캐스트 1건(프롬프트 코어 제외, R2 아스펙트 URL 병합).
 
-    present_keys = R2 cast/ 아래 존재 키 집합(list_cast 가 1회 조회해 공유). 56회
-    head_object 대신 메모리 멤버십으로 판정한다.
+    objects = R2 cast/ 아래 {키: LastModified epoch}(list_cast 가 1회 조회해 공유).
+    56회 head_object 대신 메모리 멤버십으로 판정하고, URL 끝에 ?v=<epoch> 를 붙여
+    같은 키 덮어쓰기 후에도 브라우저/CDN 이 옛 이미지를 서빙하지 않게 한다(캐시 버스팅).
     sheet_url = 정면(front) 아스펙트(대표 썸네일, 하위호환). aspects = 아스펙트별 URL.
     """
     aspects: dict[str, str] = {}
     for key in ASPECT_KEYS:
-        if f"cast/{entry['role']}/{key}.png" in present_keys:
-            aspects[key] = r2_storage.cast_aspect_url(entry["role"], key)
+        obj_key = f"cast/{entry['role']}/{key}.png"
+        if obj_key in objects:
+            url = r2_storage.cast_aspect_url(entry["role"], key)
+            aspects[key] = f"{url}?v={objects[obj_key]}"  # LastModified 기반 캐시 버스팅
     return {
         "role": entry["role"],
         "name": entry["name"],
@@ -226,10 +229,11 @@ def list_cast(channel_id: str = "") -> list[dict]:
     """8캐스트 메타 + 아스펙트 URL + colors + relative_height. status 는 프론트가 병합.
 
     R2 키를 1회(list_objects_v2)만 조회해 8×7=56 head_object 를 없앤다(속도 개선).
+    같은 조회로 LastModified 를 받아 URL 캐시 버스팅(?v=)에 쓴다.
     channel_id 는 하위호환용(아스펙트 키는 채널 무관이라 사용하지 않음).
     """
-    present_keys = r2_storage.list_cast_keys()
-    return [_public_entry(entry, present_keys) for entry in CAST_BIBLE]
+    objects = r2_storage.list_cast_objects()
+    return [_public_entry(entry, objects) for entry in CAST_BIBLE]
 
 
 def _persist_aspect(local_path: Path, role: str, aspect: str, source_url: str | None) -> str:
