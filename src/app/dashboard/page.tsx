@@ -2,7 +2,6 @@
 
 import Link from "next/link"
 import { useEffect, useState } from "react"
-import { toast } from "sonner"
 import {
   Play,
   Square,
@@ -16,13 +15,7 @@ import {
 import { PLATFORM_BADGE, PLATFORM_LABELS, TRACK_BADGE, TRACK_LABELS } from "@/lib/channels"
 import { BAEKGOM_CHANNEL_ID } from "@/lib/content-plan"
 import { CHANNEL_STATUS_EVENT, type ChannelStatusDetail, type ChannelMode } from "@/lib/channel-status"
-import {
-  generateSayeon,
-  generateSayeonScript,
-  getDefaultSayeonCharacter,
-  pollJobStatus,
-  type SayeonGenerateParams,
-} from "@/lib/api"
+import { pollJobStatus } from "@/lib/api"
 import { RecentVideosMarquee } from "@/components/dashboard/RecentVideosMarquee"
 import { PipelineNodeGraph } from "@/components/dashboard/PipelineNodeGraph"
 import { TrendPanel } from "@/components/dashboard/TrendPanel"
@@ -102,69 +95,39 @@ export default function DashboardPage() {
     }
   }, [])
 
-  // 새로고침 등으로 이미 진행 중인 job 이 있으면 '제작 중' 표시 반영(버튼 표식용).
+  // '제작 중' 표시 = produce-due(스케줄)가 실제 제작할 때만. /api/jobs/active 를 주기
+  // 폴링해 진행 중 job 이 있으면 표시(시작 버튼이 강제 제작하지 않으므로, 표시는 스케줄
+  // 제작에만 반응한다).
   useEffect(() => {
+    let alive = true
     let stop = () => {}
-    fetch("/api/jobs/active")
-      .then((r) => r.json())
-      .then((d) => {
-        if (d && typeof d.job_id === "string" && (d.status === "running" || d.status === "pending")) {
-          setProducing(true)
-          stop = pollJobStatus(d.job_id, (s) => {
-            if (s.status === "completed" || s.status === "failed") setProducing(false)
-          })
-        }
-      })
-      .catch(() => {})
-    return () => stop()
+    const check = () => {
+      fetch("/api/jobs/active")
+        .then((r) => r.json())
+        .then((d) => {
+          if (!alive) return
+          if (d && typeof d.job_id === "string" && (d.status === "running" || d.status === "pending")) {
+            setProducing(true)
+            stop()
+            stop = pollJobStatus(d.job_id, (s) => {
+              if (s.status === "completed" || s.status === "failed") setProducing(false)
+            })
+          } else {
+            setProducing(false)
+          }
+        })
+        .catch(() => {})
+    }
+    check()
+    const timer = setInterval(check, 15000)
+    return () => {
+      alive = false
+      clearInterval(timer)
+      stop()
+    }
   }, [])
 
-  // 화면 없이 흰곰 영상 제작 트리거 — 가동 ON 시 호출. 캐릭터는 흰곰 자동(코드 보장).
-  // 컨셉은 트렌드 가중 랜덤(pick-topic): 트렌드 있으면 가중 컨셉, 없으면 랜덤 폴백.
-  // privacy 는 /api/sayeon/generate 프록시가 모드로 주입(#129).
-  const startProduction = async () => {
-    setProducing(true)
-    try {
-      const char = await getDefaultSayeonCharacter() // default 라우트가 시드 → 사실상 항상 존재
-      if (!char) {
-        toast.error("기본 캐릭터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.")
-        setProducing(false)
-        return
-      }
-      // 트렌드 가중 컨셉 1개(없거나 실패 시 빈 topic → 백엔드 _TOPIC_POOL 랜덤 폴백).
-      let topic = ""
-      try {
-        const t = await fetch(`/api/sayeon/pick-topic?channelId=${BAEKGOM_CHANNEL_ID}`).then((r) => r.json())
-        if (typeof t?.topic === "string") topic = t.topic
-      } catch {
-        /* pick-topic 실패 → 빈 topic 폴백(제작은 계속) */
-      }
-      const { script } = await generateSayeonScript(topic ? { topic } : {})
-      const params: SayeonGenerateParams = { script }
-      if (char.sheet_url && char.anchor) {
-        params.sheet_url = char.sheet_url
-        params.anchor = char.anchor
-      } else if (char.spec) {
-        params.character_spec = char.spec // 흰곰은 코드 보장(spec 외형 무관)
-      }
-      const { job_id } = await generateSayeon(params)
-      toast.success("영상 제작을 시작했습니다 — 파이프라인에서 진행 상황을 확인하세요.")
-      pollJobStatus(job_id, (s) => {
-        if (s.status === "completed") {
-          setProducing(false)
-          toast.success("영상 제작 완료")
-        } else if (s.status === "failed") {
-          setProducing(false)
-          toast.error(`제작 실패: ${s.error || "알 수 없는 오류"}`)
-        }
-      })
-    } catch (e) {
-      setProducing(false)
-      toast.error(e instanceof Error ? e.message : "제작 시작 실패")
-    }
-  }
-
-  // 업로드 모드 토글(auto↔semi). 저장만 — 사이드바와 무관해 이벤트는 발행 안 함.
+  // 업로드 모드 토글(공개=auto↔비공개=semi). 저장만 — 사이드바와 무관해 이벤트는 발행 안 함.
   const toggleMode = async () => {
     if (modeBusy) return
     const next: ChannelMode = mode === "auto" ? "semi" : "auto"
@@ -184,10 +147,10 @@ export default function DashboardPage() {
     }
   }
 
-  // 시작↔중단 토글.
-  //  - 시작(OFF→ON): 가동 상태 저장 + 사이드바 즉시 동기화 + 화면 없이 흰곰 제작 트리거.
-  //  - 중단(ON→OFF): 가동 표시만 OFF(저장). 진행 중 job 취소 API 가 없어 백그라운드 job 은
-  //    계속 진행되며 표시만 꺼진다. 제작 완료해도 가동 상태는 자동 변경하지 않음(채널 ON 의미 유지).
+  // 시작↔중단 토글 — 가동 상태(is_active)만 켜고/끈다.
+  //  - 시작(OFF→ON): is_active 저장 + 사이드바 즉시 동기화 → 곧바로 "중단"/"가동 중".
+  //    ★강제 즉시 제작 없음 — 실제 제작은 produce-due(스케줄)가 슬롯 시각에 수행한다.
+  //  - 중단(ON→OFF): is_active OFF(스케줄 자연 정지). 진행 중 백그라운드 job 은 계속될 수 있음.
   const toggle = async () => {
     if (busy) return
     const next = !isActive
@@ -203,8 +166,6 @@ export default function DashboardPage() {
         setIsActive(next)
         const detail: ChannelStatusDetail = { channelId: BAEKGOM_CHANNEL_ID, isActive: next }
         window.dispatchEvent(new CustomEvent(CHANNEL_STATUS_EVENT, { detail }))
-        // 가동 ON 으로 전환 시 즉시 1편 제작 트리거(블로킹하지 않음 — 버튼은 바로 풀림).
-        if (next) void startProduction()
       }
     } catch {
       /* 실패 → 상태 유지 */
@@ -251,19 +212,20 @@ export default function DashboardPage() {
           <p className="mt-0.5 text-sm text-muted-foreground">운영 채널 관제 대시보드</p>
         </div>
 
-        {/* 액션 — 업로드 모드 토글 + 사연 제작 열기 + 가동 시작↔중단 토글 */}
+        {/* 액션 — 공개/비공개 토글 + 캐릭터 시트 + 가동 시작↔중단 토글 */}
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-          {/* 업로드 모드 — auto(공개)↔semi(비공개) 스위치. 제작 시 이 모드로 유튜브 privacy 결정. */}
+          {/* 공개/비공개 — 스케줄 제작(produce-due)의 유튜브 업로드 공개범위를 결정.
+              공개=public / 비공개=private. (내부 저장 필드는 mode auto/semi 그대로.) */}
           <button
             onClick={toggleMode}
             disabled={modeBusy}
             role="switch"
             aria-checked={mode === "auto"}
-            title="자동=유튜브 공개 업로드 / 반자동=비공개 업로드"
+            title="공개=유튜브 공개 업로드 / 비공개=비공개 업로드"
             className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-2 text-xs font-medium transition-colors hover:border-primary/40 disabled:opacity-60"
           >
             <span className={mode === "auto" ? "text-emerald-400" : "text-muted-foreground"}>
-              {mode === "auto" ? "자동·공개" : "반자동·비공개"}
+              {mode === "auto" ? "공개" : "비공개"}
             </span>
             <span
               className={`relative h-4 w-7 shrink-0 rounded-full transition-colors ${
