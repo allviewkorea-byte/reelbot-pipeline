@@ -248,8 +248,11 @@ def _build_ass(items: list[dict], ass_path: Path) -> None:
 # 라우드니스 타깃(유튜브 권장): I=-14 LUFS, TP=-1.5 dBTP, LRA=11.
 _LOUDNORM = "loudnorm=I=-14:TP=-1.5:LRA=11"
 
-# BGM 베이스 게인(나레이션 대비). 목소리가 메인, BGM 은 배경(-18~-20dB).
-_BGM_GAIN_DB = -19
+# BGM 믹싱 파라미터(튜닝 1줄). 빽빽한 90초 나레이션에 묻히지 않게 배경으로 살린다.
+# 게인↑(-19→-15) + 덕킹 완화(ratio 6→4, release 400→300ms) = BGM 더 잘 들리되 목소리 우선.
+_BGM_GAIN_DB = -15          # BGM 베이스 게인(나레이션 대비). 목소리가 메인, BGM 은 배경.
+_BGM_DUCK_RATIO = 4         # 사이드체인 압축비(목소리 나올 때 BGM 눌림 정도). 낮을수록 덜 눌림.
+_BGM_DUCK_RELEASE_MS = 300  # 목소리 멎은 뒤 BGM 회복 시간(ms). 짧을수록 갭에서 빨리 살아남.
 
 
 def _prepare_audio_track(audio: Path, cwd: Path, bgm: Path | None = None) -> Path:
@@ -262,8 +265,8 @@ def _prepare_audio_track(audio: Path, cwd: Path, bgm: Path | None = None) -> Pat
 
     bgm 이 주어지면 나레이션 아래에 배경음악을 덕킹해 깐다:
       - BGM 을 나레이션 길이만큼 무한 루프(-stream_loop)로 채우고
-      - 베이스 게인 _BGM_GAIN_DB(-19dB)로 낮춘 뒤
-      - 나레이션을 사이드체인 키로 sidechaincompress(목소리가 나올 때 BGM 더 눌림)
+      - 베이스 게인 _BGM_GAIN_DB(-15dB)로 낮춘 뒤
+      - 나레이션을 사이드체인 키로 sidechaincompress(목소리가 나올 때 BGM 눌림, ratio/release 완화)
       - amix(normalize=0)로 합치고 전체를 -14 LUFS 로 재정규화.
     """
     out = cwd / "narration_norm.wav"
@@ -282,7 +285,7 @@ def _prepare_audio_track(audio: Path, cwd: Path, bgm: Path | None = None) -> Pat
         "[0:a]aresample=44100,aformat=channel_layouts=mono,asplit=2[voice][vkey];"
         f"[1:a]aresample=44100,aformat=channel_layouts=mono,volume={_BGM_GAIN_DB}dB[bgmv];"
         "[bgmv][vkey]sidechaincompress="
-        "threshold=0.05:ratio=6:attack=20:release=400[bgmduck];"
+        f"threshold=0.05:ratio={_BGM_DUCK_RATIO}:attack=20:release={_BGM_DUCK_RELEASE_MS}[bgmduck];"
         "[voice][bgmduck]amix=inputs=2:duration=first:"
         "dropout_transition=0:normalize=0[mix];"
         f"[mix]{_LOUDNORM}[out]"
