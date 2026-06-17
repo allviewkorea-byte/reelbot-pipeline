@@ -169,13 +169,6 @@ _DIRECTOR_TO_CAST_ROLE = {
     "villain": "villain",
     "friend": "friend_squirrel",  # 기본; 없으면 friend_penguin 로 런타임 폴백
 }
-# 디렉터 감정(7) → 캐스트 표정 아스펙트(4). 미대응(flutter/anxiety/deadpan)은 front.
-_EMOTION_TO_EXPR = {
-    "joy": "expr_joy",
-    "sadness": "expr_sad",
-    "anger": "expr_angry",
-    "shock": "expr_surprised",
-}
 
 
 def cast_references_enabled() -> bool:
@@ -190,16 +183,13 @@ def map_cast_role(director_role: str) -> str | None:
     return _DIRECTOR_TO_CAST_ROLE.get((director_role or "").strip().lower())
 
 
-def select_aspect(shot_type: str, emotion: str) -> str:
-    """샷 종류 + 감정 → 캐스트 아스펙트 키.
+def select_aspect(shot_type: str) -> str:
+    """샷 종류 → 캐스트 **전신** 아스펙트 키. (씬 레퍼런스는 전신만 사용.)
 
-    close_up/over_the_shoulder → EXPR[emotion](없으면 front) / medium → threequarter /
-    full·wide·기타 → front.
+    medium → threequarter / 그 외(close_up·over_the_shoulder·full·wide·기타) → front.
+    ⚠️ 표정 크롭(expr_*)은 찌그러짐 유발 → 씬 레퍼런스에서 제외(갤러리·썸네일 전용).
     """
     st = (shot_type or "").strip().lower().replace("-", "_").replace(" ", "_")
-    emo = (emotion or "").strip().lower()
-    if st in ("close_up", "over_the_shoulder"):
-        return _EMOTION_TO_EXPR.get(emo, "front")
     if st == "medium":
         return "threequarter"
     return "front"

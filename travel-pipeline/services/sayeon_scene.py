@@ -47,12 +47,6 @@ _MULTI_REF_NOTE = (
     "brown bear (the other character). Match each animal to its own reference and keep them as "
     "two clearly distinct animals — do NOT blend, merge, or swap their fur colors or features."
 )
-# ⑦ cast 멀티 레퍼런스(상대역이 갈색곰에 한정되지 않으므로 동물 무관 일반 문구).
-_CAST_MULTI_REF_NOTE = (
-    " Reference image 1 is the white polar bear protagonist; reference image 2 is the other "
-    "character. Match each animal to its own reference and keep them as two clearly distinct "
-    "animals — do NOT blend, merge, or swap their colors or features."
-)
 
 
 def bear_in_frame(subject_type: str, include_protagonist: bool) -> bool:
@@ -260,24 +254,16 @@ def generate_scenes(
             refs = [sheet_url]
             scene_prompt = prompt
             used_cast = False
-            # ⑦ 플래그 on: cast/{role}/{aspect} 를 레퍼런스로 사용(주인공 sheet.png 대체).
-            #    주인공 아스펙트 = shot_type+emotion 규칙, two_shot 상대역 = front.
-            #    cast 키 없으면 front→기존 동작으로 graceful 폴백(아래 #141/단일 sheet).
+            # ⑦/⑨ 플래그 on: 주인공 1장만 cast/protagonist/{전신 aspect} 레퍼런스로 사용.
+            #    상대역(two_shot)은 멀티 레퍼런스(2장) 대신 ★기존 텍스트 묘사 유지
+            #    (build_scene_prompt 의 cast_supporting_animal 팔레트) — Kontext 흰곰 복제·찌그러짐 방지.
+            #    cast 키 없으면 front→기존 동작으로 graceful 폴백.
             if cast_refs_on:
-                prot_aspect = select_aspect(scene.get("shot_type", ""), emotion)
+                prot_aspect = select_aspect(scene.get("shot_type", ""))
                 prot_url = resolve_cast_reference("protagonist", prot_aspect, cast_objs)
                 if prot_url:
                     used_cast = True
-                    if subject == "two_shot" and other_role:
-                        other_url = resolve_cast_reference(other_role, "front", cast_objs)
-                        if other_url:
-                            refs = [prot_url, other_url]
-                            scene_prompt = prompt + _CAST_MULTI_REF_NOTE
-                            logger.info("씬 %s: cast 멀티 레퍼런스(주인공+%s)", index, other_role)
-                        else:
-                            refs = [prot_url]
-                    else:
-                        refs = [prot_url]
+                    refs = [prot_url]  # 항상 1장(주인공). 상대역은 프롬프트 텍스트로 등장.
             # 파일럿(#141): cast 미사용 시에만 — 갈색곰 two_shot 에 갈색곰 시트를 2번째 레퍼런스로.
             if (
                 not used_cast
