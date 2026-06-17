@@ -108,6 +108,11 @@ class SayeonCastSheetRequest(BaseModel):
     role: str  # 캐스트 바이블 역할 키(protagonist/narrator/male_lead/...)
 
 
+class SayeonCastAspectRequest(BaseModel):
+    role: str    # 캐스트 바이블 역할 키
+    aspect: str  # front/threequarter/side/expr_joy/expr_sad/expr_angry/expr_surprised
+
+
 class SayeonTtsRequest(BaseModel):
     scenes: list[dict]  # [{"index", "narration"}, ...] (S1 출력)
     voice_id: str | None = None

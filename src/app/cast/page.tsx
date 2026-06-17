@@ -61,16 +61,22 @@ function AspectPanel({
   url,
   label,
   pending,
+  regenerating,
+  disabled,
   onZoom,
+  onRegen,
 }: {
   url: string | undefined
   label: string
   pending: boolean
+  regenerating: boolean
+  disabled: boolean
   onZoom: (src: string) => void
+  onRegen: () => void
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-1">
-      <div className="relative min-h-0 flex-1 overflow-hidden rounded-lg border border-border bg-secondary/20">
+      <div className="group relative min-h-0 flex-1 overflow-hidden rounded-lg border border-border bg-secondary/20">
         {url ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -88,6 +94,21 @@ function AspectPanel({
             <ImageIcon className="h-6 w-6 text-muted-foreground/25" />
           </div>
         )}
+        {/* 이 패널만 재생성하는 작은 버튼(우상단). 생성/재생성 중엔 비활성. */}
+        <button
+          onClick={onRegen}
+          disabled={disabled || regenerating}
+          title="이 컷만 다시 생성"
+          className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity hover:bg-black/80 disabled:opacity-40 group-hover:opacity-100"
+        >
+          <RefreshCw className={`h-3 w-3 ${regenerating ? "animate-spin" : ""}`} />
+        </button>
+        {/* 재생성 중: 기존 이미지 위에 스피너 오버레이(다른 패널 영향 0). */}
+        {regenerating && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+            <Loader2 className="h-5 w-5 animate-spin text-white" />
+          </div>
+        )}
       </div>
       <span className="shrink-0 text-center text-[10px] font-medium text-muted-foreground">{label}</span>
     </div>
@@ -101,6 +122,8 @@ export default function CastPage() {
   // 현재 생성 중인 역할(동시 1건) + 진행상태.
   const [generatingRole, setGeneratingRole] = useState<string | null>(null)
   const [progress, setProgress] = useState<GenProgress | null>(null)
+  // 개별 아스펙트 재생성 — "role:aspect" 1건만 진행(다른 패널 영향 0).
+  const [regenKey, setRegenKey] = useState<string | null>(null)
   // 테스트 영상.
   const [producing, setProducing] = useState(false)
   const [testJob, setTestJob] = useState<{ progress: number; step: string } | null>(null)
@@ -213,6 +236,39 @@ export default function CastPage() {
       toast.success(next === "approved" ? "캐릭터를 확정했어요" : "확정을 해제했어요")
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "처리 중 오류가 발생했어요")
+    }
+  }
+
+  // 개별 아스펙트 1장만 재생성 — 성공 시 그 패널 img 만 새 URL 로 교체(다른 패널 불변).
+  async function handleRegenAspect(role: string, aspect: string) {
+    if (generatingRole || regenKey) return
+    setRegenKey(`${role}:${aspect}`)
+    try {
+      const res = await fetch("/api/cast/aspect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role, aspect, channelId: BAEKGOM_CHANNEL_ID }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.success) throw new Error(data.error ?? "재생성 실패")
+      // 그 아스펙트 URL 만 교체(front 면 sheet_url 도 동기화). 다른 패널은 ?v= 그대로.
+      setCast((prev) =>
+        prev.map((c) =>
+          c.role === role
+            ? {
+                ...c,
+                aspects: { ...c.aspects, [aspect]: data.url },
+                sheet_url: aspect === "front" ? data.url : c.sheet_url,
+              }
+            : c,
+        ),
+      )
+      if (data.warning) toast.warning(data.warning)
+      else toast.success("이 컷을 다시 생성했어요")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "재생성 중 오류가 발생했어요")
+    } finally {
+      setRegenKey(null)
     }
   }
 
@@ -426,7 +482,10 @@ export default function CastPage() {
                         url={selected.aspects[a]}
                         label={ASPECT_LABELS[a]}
                         pending={isPending(selected.role, a)}
+                        regenerating={regenKey === `${selected.role}:${a}`}
+                        disabled={!!generatingRole || (!!regenKey && regenKey !== `${selected.role}:${a}`)}
                         onZoom={onZoom}
+                        onRegen={() => handleRegenAspect(selected.role, a)}
                       />
                     ))}
                   </div>
@@ -442,7 +501,10 @@ export default function CastPage() {
                         url={selected.aspects[a]}
                         label={ASPECT_LABELS[a]}
                         pending={isPending(selected.role, a)}
+                        regenerating={regenKey === `${selected.role}:${a}`}
+                        disabled={!!generatingRole || (!!regenKey && regenKey !== `${selected.role}:${a}`)}
                         onZoom={onZoom}
+                        onRegen={() => handleRegenAspect(selected.role, a)}
                       />
                     ))}
                   </div>

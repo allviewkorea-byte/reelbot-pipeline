@@ -21,6 +21,7 @@ from api.schemas import (
     SayeonAssembleRequest,
     SayeonAutoScriptRequest,
     SayeonAutoScriptResponse,
+    SayeonCastAspectRequest,
     SayeonCastSheetRequest,
     SayeonGenerateRequest,
     SayeonJobResponse,
@@ -38,6 +39,7 @@ from services.sayeon_cast import (
     get_cast_entry,
     get_cast_progress,
     list_cast,
+    regenerate_cast_aspect,
     run_cast_generation,
 )
 from services.sayeon_character import generate_character_sheet
@@ -154,6 +156,21 @@ def cast_sheet(req: SayeonCastSheetRequest, background: BackgroundTasks):
 def cast_status(role: str):
     """역할별 멀티 아스펙트 생성 진행상태(idle|running|done|failed + generated/failed/total)."""
     return get_cast_progress(role)
+
+
+@router.post("/cast-aspect")
+def cast_aspect(req: SayeonCastAspectRequest):
+    """캐스트 아스펙트 1장만 재생성한다(전체 재생성 비용 회피).
+
+    비-정면은 R2 정면을 레퍼런스로, 정면은 z-image t2i. 1장이라 동기 처리(~10초).
+    같은 키로 덮어쓰고 ?v= 붙인 새 URL 을 반환. front 는 경고 메시지 동반.
+    """
+    try:
+        return regenerate_cast_aspect(req.role, req.aspect)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 def _run_scenes(
