@@ -293,7 +293,9 @@ export default function CastPage() {
         /* pick-topic 실패 → 빈 topic 폴백 */
       }
       const { script } = await generateSayeonScript(topic ? { topic } : {})
-      const params: SayeonGenerateParams = { script }
+      // 테스트 영상은 채널 모드(auto/semi)와 무관하게 항상 비공개로 업로드한다.
+      // 프록시는 privacy 가 지정되면 모드 주입을 건너뛰고 이 값을 그대로 쓴다.
+      const params: SayeonGenerateParams = { script, privacy: "private" }
       if (char.sheet_url && char.anchor) {
         params.sheet_url = char.sheet_url
         params.anchor = char.anchor

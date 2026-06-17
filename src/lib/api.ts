@@ -187,6 +187,9 @@ export interface SayeonGenerateParams {
   num_scenes?: number | null
   gap_sec?: number
   thumbnail_scene_index?: number | null
+  // 명시 지정 시 채널 모드 토글을 무시하고 이 공개범위로 업로드(테스트=항상 private).
+  // 미지정(undefined/null)이면 /api/sayeon/generate 프록시가 모드로 주입(기존 동작).
+  privacy?: string | null
 }
 
 // 완료 시 job.result 의 모양(orchestrate generate_full 반환).
