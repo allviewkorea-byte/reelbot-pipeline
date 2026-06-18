@@ -323,21 +323,35 @@ export default function DashboardPage() {
             </span>
           </button>
           {/* 하루 생산 개수(daily_cap) — 캘린더 슬롯·오늘의 콘텐츠·produce-due 캡을 동시 제어.
-              ui/select 컴포넌트가 없어 /character 와 동일한 토큰 스타일 native select 재사용(zero-diff). */}
-          <label className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-2 text-xs font-medium text-muted-foreground">
-            하루
-            <select
-              value={dailyCap}
-              onChange={(e) => changeCap(clampDailyCap(Number(e.target.value)))}
-              disabled={capBusy}
-              title="하루에 자동 게시할 영상 개수(캘린더·스케줄에 일괄 반영)"
-              className="rounded-md border border-border bg-background px-1.5 py-1 text-xs font-medium text-foreground focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/30 disabled:opacity-50"
-            >
-              <option value={1}>1개</option>
-              <option value={2}>2개</option>
-              <option value={3}>3개</option>
-            </select>
-          </label>
+              공개/비공개·AI 표시 버튼과 같은 토큰 스타일의 1/2/3 세그먼트 토글(zero-diff, 새 토큰 0). */}
+          <div
+            className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-2 text-xs font-medium"
+            title="하루에 자동 게시할 영상 개수(캘린더·스케줄에 일괄 반영)"
+          >
+            <span className="text-muted-foreground">하루</span>
+            <div className="inline-flex rounded-md border border-border bg-background p-0.5">
+              {[1, 2, 3].map((n) => {
+                const active = dailyCap === n
+                return (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => changeCap(n)}
+                    disabled={capBusy}
+                    aria-pressed={active}
+                    className={`rounded px-2 py-0.5 text-xs font-medium transition-colors disabled:opacity-50 ${
+                      active
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {n}
+                  </button>
+                )
+              })}
+            </div>
+            <span className="text-muted-foreground">개</span>
+          </div>
           {/* 캐릭터 시트 관리 화면(/cast) 진입 — 8캐스트 시트 생성·확정 + 테스트 영상.
               (/sayeon 제작 엔진은 무수정·유지. 메인 진입에서만 /cast 로 변경.) */}
           <Link

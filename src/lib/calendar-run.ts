@@ -4,7 +4,6 @@ import {
   type ContentPlan,
   type ContentSlot,
   slotsForCap,
-  randomSlotTime,
 } from "./content-plan"
 import {
   listContentPlans,
@@ -16,8 +15,7 @@ import {
 import { todayKST } from "./trend-concepts"
 import {
   buildConceptWeights,
-  planEmptySlots,
-  pickConcept,
+  planCappedSlots,
   isoFromKSTOffset,
   addDaysISO,
   neighborDates,
@@ -88,14 +86,14 @@ export async function generateCalendar(mode: GenerateMode, channelId: string): P
       for (const c of usageByDate.get(nb) ?? []) recentConcepts.add(c)
     }
 
-    const assignments = planEmptySlots({
+    const assignments = planCappedSlots({
       filledSlots,
       sameDayConcepts,
       recentConcepts,
       weights,
       counts,
       capCount,
-      slots, // daily_cap 만큼만 슬롯 생성
+      slots, // daily_cap 시간대; 카테고리는 후보 중 랜덤
     })
 
     if (!usageByDate.has(date)) usageByDate.set(date, new Set())
@@ -179,28 +177,33 @@ export async function applyCapToFuture(
         usageByDate.get(date)?.delete(r.concept) // 회피 계산에서 제거분 반영
       }
     }
-    // 2) 부족한 wanted 슬롯 채우기.
-    const presentIds = new Set(keep.map((r) => (r.slot ?? "morning") as ContentSlot))
-    const sameDay = new Set(keep.map((r) => r.concept).filter(Boolean))
+    // 2) 부족한 wanted 슬롯 채우기 — 생성과 동일한 '후보 중 랜덤' 로직(planCappedSlots).
+    const filledSlots = new Set(keep.map((r) => (r.slot ?? "morning") as ContentSlot))
+    const sameDay = new Set(keep.map((r) => r.concept).filter(Boolean) as string[])
     const recent = new Set<string>()
     for (const nb of neighborDates(date)) for (const c of usageByDate.get(nb) ?? []) recent.add(c)
-    for (const s of wanted) {
-      if (presentIds.has(s.id)) continue
-      const concept = pickConcept(weights, sameDay, recent)
-      sameDay.add(concept)
+
+    const assignments = planCappedSlots({
+      filledSlots,
+      sameDayConcepts: sameDay,
+      recentConcepts: recent,
+      weights,
+      slots: wanted,
+    })
+    for (const a of assignments) {
       let dayUse = usageByDate.get(date)
       if (!dayUse) {
         dayUse = new Set<string>()
         usageByDate.set(date, dayUse)
       }
-      dayUse.add(concept) // 이후 날짜 ±N일 회피에 반영
+      dayUse.add(a.concept) // 이후 날짜 ±N일 회피에 반영
       newRows.push({
         id: crypto.randomUUID(),
         channel_id: channelId,
         date,
-        slot: s.id,
-        scheduled_time: randomSlotTime(s.id),
-        concept,
+        slot: a.slot,
+        scheduled_time: a.scheduled_time,
+        concept: a.concept,
         title: null,
         status: "planned",
         memo: null,
