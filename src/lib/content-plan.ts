@@ -41,6 +41,25 @@ export const SLOT_BY_ID: Record<ContentSlot, SlotDef> = Object.fromEntries(
   CONTENT_SLOTS.map((s) => [s.id, s]),
 ) as Record<ContentSlot, SlotDef>
 
+// ── 하루 생산 개수(daily_cap, 1~3) ───────────────────────────────────
+// 캘린더 슬롯 생성·오늘의 콘텐츠 표시·produce-due 캡을 한 값으로 동시 제어한다.
+export const DEFAULT_DAILY_CAP = 3
+
+// 임의 입력 → 1~3 정수로 클램프(이상값/누락 → 기본 3).
+export function clampDailyCap(n: unknown): number {
+  const v = typeof n === "number" ? n : Number(n)
+  if (!Number.isFinite(v)) return DEFAULT_DAILY_CAP
+  return Math.max(1, Math.min(3, Math.round(v)))
+}
+
+// daily_cap → 사용할 시간 슬롯. cap=1→저녁 / cap=2→저녁+밤 / cap=3→아침·저녁·밤(현행).
+export function slotsForCap(cap: number): SlotDef[] {
+  const c = clampDailyCap(cap)
+  if (c === 1) return [SLOT_BY_ID.evening]
+  if (c === 2) return [SLOT_BY_ID.evening, SLOT_BY_ID.night]
+  return CONTENT_SLOTS
+}
+
 // 구간 내 랜덤 'HH:MM' (endHour 직전까지). 예: morning → 09:23
 export function randomSlotTime(slot: ContentSlot): string {
   const def = SLOT_BY_ID[slot]

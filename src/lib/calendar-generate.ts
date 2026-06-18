@@ -8,6 +8,7 @@ import {
   CONCEPT_CONFLICT_WINDOW_DAYS,
   randomSlotTime,
   type ContentSlot,
+  type SlotDef,
 } from "./content-plan"
 import type { TrendRankingItem } from "./trend-concepts"
 
@@ -75,12 +76,14 @@ export function planEmptySlots(opts: {
   weights: Record<string, number>
   counts?: Map<string, number>
   capCount?: number
+  slots?: SlotDef[] // 채울 시간 슬롯(daily_cap 반영). 미지정 시 전 슬롯(현행).
 }): SlotAssignment[] {
   const sameDay = new Set(opts.sameDayConcepts)
   const counts = opts.counts
   const capCount = opts.capCount ?? 0
+  const slots = opts.slots ?? CONTENT_SLOTS
   const out: SlotAssignment[] = []
-  for (const s of CONTENT_SLOTS) {
+  for (const s of slots) {
     if (opts.filledSlots.has(s.id)) continue
     // 하드 제외 = 같은 날 컨셉 ∪ 상한 도달 컨셉.
     const exclude = new Set(sameDay)

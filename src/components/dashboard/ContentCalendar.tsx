@@ -8,6 +8,9 @@ import {
   CONTENT_SLOTS,
   CONCEPT_CONFLICT_WINDOW_DAYS,
   SLOT_BY_ID,
+  DEFAULT_DAILY_CAP,
+  clampDailyCap,
+  slotsForCap,
   conceptColor,
   randomSlotTime,
   type ContentPlan,
@@ -98,6 +101,27 @@ export function ContentCalendar({
   // 연속 컨셉 경고(⚠ + "연속 컨셉 N건") 표시 토글 — 자동 생성엔 거슬려 기본 꺼짐.
   // detectConflicts 계산은 그대로, 표시 여부만 제어. (하루 중복 경고는 항상 표시)
   const [showConflicts, setShowConflicts] = useState(false)
+  // 하루 생산 개수(daily_cap) — 오늘의 콘텐츠를 cap 개수만큼만 표시(월간 그리드는 데이터 기준 자동).
+  const [dailyCap, setDailyCap] = useState(DEFAULT_DAILY_CAP)
+
+  // daily_cap 로드(대시보드 드롭다운과 같은 출처). 변경 즉시 반영을 위해 포커스 복귀 시 재조회.
+  useEffect(() => {
+    let alive = true
+    const load = () =>
+      fetch(`/api/channel-status?channelId=${BAEKGOM_CHANNEL_ID}`)
+        .then((r) => r.json())
+        .then((d) => {
+          if (alive) setDailyCap(clampDailyCap(d?.dailyCap))
+        })
+        .catch(() => {})
+    load()
+    const onFocus = () => load()
+    window.addEventListener("focus", onFocus)
+    return () => {
+      alive = false
+      window.removeEventListener("focus", onFocus)
+    }
+  }, [])
 
   // 가시 범위(현재 달 ±1주)를 넉넉히 조회 — 주간 스트립 + 월간 그리드 모두 커버.
   const range = useMemo(() => {
@@ -234,10 +258,11 @@ export function ContentCalendar({
         </div>
       </div>
 
-      {/* 오늘의 콘텐츠 — 오늘 날짜 3슬롯(아침/저녁/밤). status 로 완료/미완료 색 구분. */}
+      {/* 오늘의 콘텐츠 — 오늘 날짜 cap 개수만큼 슬롯 표시(cap=1 저녁/2 저녁+밤/3 현행).
+          status 로 완료/미완료 색 구분. */}
       {!monthOpen && (
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-          {CONTENT_SLOTS.map((s) => {
+          {slotsForCap(dailyCap).map((s) => {
             const p = (byDateSlot.get(toISO(today)) ?? {})[s.id]
             const st = p?.status
             const cardCls = !p

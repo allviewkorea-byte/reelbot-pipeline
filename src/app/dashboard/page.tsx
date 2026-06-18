@@ -13,7 +13,7 @@ import {
   Video,
 } from "lucide-react"
 import { PLATFORM_BADGE, PLATFORM_LABELS, TRACK_BADGE, TRACK_LABELS } from "@/lib/channels"
-import { BAEKGOM_CHANNEL_ID } from "@/lib/content-plan"
+import { BAEKGOM_CHANNEL_ID, DEFAULT_DAILY_CAP, clampDailyCap } from "@/lib/content-plan"
 import { CHANNEL_STATUS_EVENT, type ChannelStatusDetail, type ChannelMode } from "@/lib/channel-status"
 import { pollJobStatus } from "@/lib/api"
 import { RecentVideosMarquee } from "@/components/dashboard/RecentVideosMarquee"
@@ -58,6 +58,9 @@ export default function DashboardPage() {
   // AI 합성 콘텐츠 표시 토글(유튜브 containsSyntheticMedia). 기본 off. 제작 시 업로드에 반영.
   const [syntheticMedia, setSyntheticMedia] = useState(false)
   const [synthBusy, setSynthBusy] = useState(false)
+  // 하루 생산 개수(daily_cap, 1~3). 캘린더 슬롯·오늘의 콘텐츠·produce-due 캡을 동시 제어.
+  const [dailyCap, setDailyCap] = useState(DEFAULT_DAILY_CAP)
+  const [capBusy, setCapBusy] = useState(false)
   // 채널 KPI 통계(구독자·총조회수·영상수·평균). 로딩/실패/null → 카드 "—".
   const [stats, setStats] = useState<ChannelStats | null>(null)
   // 트렌드 패널 + 월간 계획서 공유 펼침 상태(짝으로 동시 펼침/접힘). 기본 접힘.
@@ -90,6 +93,7 @@ export default function DashboardPage() {
         setIsActive(Boolean(d?.isActive))
         setMode(d?.mode === "auto" ? "auto" : "semi")
         setSyntheticMedia(Boolean(d?.syntheticMedia))
+        setDailyCap(clampDailyCap(d?.dailyCap))
       })
       .catch(() => {
         /* 실패 → 기본(OFF·반자동) 유지 */
@@ -168,6 +172,36 @@ export default function DashboardPage() {
       /* 실패 → 유지 */
     } finally {
       setSynthBusy(false)
+    }
+  }
+
+  // 하루 생산 개수 변경: daily_cap 저장 → 오늘 이후 미제작 날짜만 새 cap 으로 캘린더 재생성.
+  const changeCap = async (next: number) => {
+    if (capBusy || next === dailyCap) return
+    const prev = dailyCap
+    setDailyCap(next) // 낙관적
+    setCapBusy(true)
+    try {
+      const res = await fetch("/api/channel-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channelId: BAEKGOM_CHANNEL_ID, dailyCap: next }),
+      })
+      const d = await res.json()
+      if (!res.ok || !d?.success) {
+        setDailyCap(prev) // 실패 → 롤백
+        return
+      }
+      // 미래 캘린더 재생성(과거·제작완료 보존). 실패해도 cap 저장은 유지.
+      await fetch("/api/calendar/apply-cap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channelId: BAEKGOM_CHANNEL_ID, cap: next }),
+      }).catch(() => {})
+    } catch {
+      setDailyCap(prev)
+    } finally {
+      setCapBusy(false)
     }
   }
 
@@ -288,6 +322,22 @@ export default function DashboardPage() {
               />
             </span>
           </button>
+          {/* 하루 생산 개수(daily_cap) — 캘린더 슬롯·오늘의 콘텐츠·produce-due 캡을 동시 제어.
+              ui/select 컴포넌트가 없어 /character 와 동일한 토큰 스타일 native select 재사용(zero-diff). */}
+          <label className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-2 text-xs font-medium text-muted-foreground">
+            하루
+            <select
+              value={dailyCap}
+              onChange={(e) => changeCap(clampDailyCap(Number(e.target.value)))}
+              disabled={capBusy}
+              title="하루에 자동 게시할 영상 개수(캘린더·스케줄에 일괄 반영)"
+              className="rounded-md border border-border bg-background px-1.5 py-1 text-xs font-medium text-foreground focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/30 disabled:opacity-50"
+            >
+              <option value={1}>1개</option>
+              <option value={2}>2개</option>
+              <option value={3}>3개</option>
+            </select>
+          </label>
           {/* 캐릭터 시트 관리 화면(/cast) 진입 — 8캐스트 시트 생성·확정 + 테스트 영상.
               (/sayeon 제작 엔진은 무수정·유지. 메인 진입에서만 /cast 로 변경.) */}
           <Link
