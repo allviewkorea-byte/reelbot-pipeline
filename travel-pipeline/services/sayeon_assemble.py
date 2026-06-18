@@ -169,7 +169,10 @@ _EMOTION_COLOR = {
     "anger": "&H0000FF&",    # 빨강
 }
 _PEAK_EMOTIONS = set(_EMOTION_COLOR)  # 감정 피크 씬(shock/anger/sadness)
-_PEAK_FONTSIZE = 100  # 기본 90pt + 10pt
+# 자막 폰트 크기(추후 1줄 조절). 가독성 위해 +33% 확대(90→120). peak 감정은 비례 상향.
+# (Style/타이밍/위치 로직은 그대로 — 크기 값만 변경.)
+_SUBTITLE_FONTSIZE = 120  # 기본 자막 크기(이전 90)
+_PEAK_FONTSIZE = 132  # 감정 피크 씬 강조 크기(이전 100)
 _FADE = "\\fad(150,100)"  # 자막 페이드 인/아웃
 
 # emotion 별 핵심 키워드(자막에서 찾아 색칠). 오탐을 줄이려 2자 이상 구체어만.
@@ -224,7 +227,7 @@ def _build_ass(items: list[dict], ass_path: Path) -> None:
         # 자막 확대(74→90, 외곽선5→6·그림자3→4)로 가독성 ↑. 하단 중앙(Alignment=2),
         # MarginV 340→400 으로 9:16 안전영역(하단 진행바·버튼)을 피해 위로 띄운다.
         # WrapStyle=0 로 긴 문장은 2줄로 자동 래핑(MarginL/R=40 폭 제한).
-        f"Style: Default,{_FONT},90,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"
+        f"Style: Default,{_FONT},{_SUBTITLE_FONTSIZE},&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"
         "1,0,0,0,100,100,0,0,1,6,4,2,40,40,400,1\n\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, "
