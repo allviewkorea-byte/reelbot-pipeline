@@ -108,6 +108,8 @@ py -m uvicorn api.server:app --port 8000           # ⚠️ py 필수 (--reload 
 4. **영상 제작은 수 분 → Vercel 10초 불가 → Railway 비동기**(BackgroundTasks, JobManager는 **인메모리**, 재시작 시 소실). `generate`는 job_id 즉시 반환 → 크론은 트리거만.
 5. **CRON_SECRET 헤더**: cron-job.org는 Key=`Authorization`, Value=`Bearer <시크릿>`. Vercel `CRON_SECRET`은 Bearer 없는 순수값. 모든 잡 동일 시크릿. 변경 후 **재배포 필수**.
 6. **단일 진실 출처**: `raw.githubusercontent.com/allviewkorea-byte/reelbot-pipeline/main/CLAUDE.md` (claude.ai 프로젝트 업로드본은 자동 동기화 X).
+7. **Railway 사용량 ~$1.40/월**(`adventurous-renewal`) — 플랜 확인 필요.
+8. **Shorts 커스텀 썸네일 포기** — Shorts 피드엔 안 보여 영상 첫 프레임/자막으로 대체(`SAYEON_THUMBNAIL` 기본 off).
 
 ---
 
@@ -151,6 +153,15 @@ py -m uvicorn api.server:app --port 8000           # ⚠️ py 필수 (--reload 
 - #133: **1단계 PR-1** — 시작 버튼 = 가동 ON + 화면 없이 흰곰 제작 + privacy
 - #134: **1단계 PR-2** — 시작 버튼 컨셉을 트렌드 가중 랜덤으로(pick-topic, 7b 재사용)
 - #135: **2단계** — produce-due 크론(캘린더 due 슬롯 자동 제작)
+
+### 캐스트·품질·운영 (2026-06-19 세션, PR #142 스택)
+- **캐릭터 시트 화면**(`/cast`): 8 동물 캐스트 멀티 아스펙트(정면·반측면·측면·표정4) 생성·확정·재생성(개별 포함), R2 `cast/{role}/{aspect}.png`(?v= 캐시버스팅), 비동기 폴링, 테스트 영상(항상 private). 대시보드 "사연 제작 열기"→"캐릭터 시트"(/cast).
+- **캐스트↔씬 연결**: `SAYEON_CAST_REFERENCES`(기본 off) — 주인공 단일 레퍼런스(two_shot 상대역은 텍스트, 흰곰 복제·찌그러짐 회피), `select_aspect` 전신만.
+- **AI 표시 토글**: `YOUTUBE_SYNTHETIC_MEDIA` env + 대시보드 토글(channel_status.synthetic_media) → `containsSyntheticMedia`(인자>env>false).
+- **BGM 무음화 수정**: `_BGM_GAIN_DB` -19→-15, `_BGM_DUCK_RATIO` 6→4, `_BGM_DUCK_RELEASE_MS` 400→300 (믹싱 코드 회귀 아님, 덕킹 완화).
+- **썸네일 클리프행어 카피**: `_generate_hook` 질문형→클리프행어(반전 암시·물음표 금지).
+- **daily_cap(하루 1/2/3 수동 제어, 859c0d7+a3c4b83)**: 헤더 1/2/3 세그먼트 버튼 + `channel_status.daily_cap`(GRANT 완료) → 캘린더 슬롯·오늘의 콘텐츠·produce-due 캡 **동시 제어**. 시간대=cap(1 저녁/2 저녁+밤/3 현행), 카테고리=**그날 3후보 중 랜덤**. cap 변경 시 **오늘 이후 미제작 날짜만 재생성**(과거·done 보존).
+- **영상 수정 3건(7c3e65e)**: 자막 `_SUBTITLE_FONTSIZE` 90→120 / peak 132, 마지막 시청자질문 `INCLUDE_CLOSING_Q_PROB=0.30`(70% 생략, 포함 시 GPT 맥락형 질문), ⑩ 썸네일 `SAYEON_THUMBNAIL`(기본 off)로 비활성(Shorts 미노출).
 
 ---
 
@@ -196,6 +207,8 @@ claude.ai가 "필요 정보 리스트" 제공 → 대표가 정보 제공 → Cl
 4. **트렌드 분류 정밀도**: 이별↔가족 오분류(장례·파혼) 다듬기.
 5. **누락분 캐치업**: produce-due v1은 "오늘 due"만. 지난 날짜 미처리 planned는 스킵.
 6. JobManager 인메모리 → 영속화(추후).
+7. **자막 크기 육안 검증**: 2026-06-20 저녁 자동 영상으로 `_SUBTITLE_FONTSIZE`(현 120)가 과한지 확인 → 필요시 조절.
+8. **ElevenLabs Starter($5) 다운그레이드 검토**.
 
 ---
 
