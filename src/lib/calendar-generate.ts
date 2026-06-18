@@ -8,6 +8,7 @@ import {
   CONCEPT_CONFLICT_WINDOW_DAYS,
   randomSlotTime,
   type ContentSlot,
+  type SlotDef,
 } from "./content-plan"
 import type { TrendRankingItem } from "./trend-concepts"
 
@@ -68,30 +69,59 @@ export interface SlotAssignment {
 // sameDayConcepts: 그 날 이미 쓰인 컨셉(수동분 포함, 하루 중복 금지). recentConcepts: ±N일.
 // counts/capCount: 컨셉 쏠림 완화 — counts(전 기간 누적, mutate)가 capCount 도달한 컨셉은
 //   후보에서 제외. (counts 미전달 시 상한 미적용 = 기존 동작)
-export function planEmptySlots(opts: {
+// 배열에서 k개를 무작위로(중복 없이) 뽑는다(부분 Fisher-Yates). k>=length 면 원본 순서 유지.
+function sampleK<T>(arr: T[], k: number): T[] {
+  if (k >= arr.length) return arr.slice() // 전체 선택 = 순서 보존(cap=3 현행 동작 유지)
+  const a = arr.slice()
+  for (let i = 0; i < k; i++) {
+    const j = i + Math.floor(Math.random() * (a.length - i))
+    ;[a[i], a[j]] = [a[j], a[i]]
+  }
+  return a.slice(0, k)
+}
+
+// 하루의 '빈 슬롯'을 daily_cap 만큼 채운다(채워진 슬롯은 호출부가 제외해 전달 → 보존).
+// ★카테고리 = "그날 3슬롯이 받았을 후보 3개를 기존 로직대로 계산한 뒤, 빈 슬롯 수만큼 무작위 선택".
+//   시간대(slots)와 카테고리(후보 중 랜덤) 두 축을 분리한다. cap=3(빈 슬롯 3개)이면 후보 3개를
+//   순서대로 배정 = 현행 그대로.
+// sameDayConcepts: 그 날 이미 쓰인 컨셉(수동분 포함, 하루 중복 금지). recentConcepts: ±N일.
+// counts/capCount: 컨셉 쏠림 완화 — 후보 계산 시 capCount 도달 컨셉 제외, 실제 확정분만 누적.
+export function planCappedSlots(opts: {
   filledSlots: Set<ContentSlot>
   sameDayConcepts: Set<string>
   recentConcepts: Set<string>
   weights: Record<string, number>
   counts?: Map<string, number>
   capCount?: number
+  slots: SlotDef[] // 채울 시간대(slotsForCap)
 }): SlotAssignment[] {
+  // 1) 채울 빈 시간대(이미 찬 슬롯 제외).
+  const emptySlots = opts.slots.filter((s) => !opts.filledSlots.has(s.id))
+  if (emptySlots.length === 0) return []
+
+  // 2) '그날의 후보 카테고리'를 3개(=하루 최대 슬롯 수) 기존 로직대로 계산(서로 다른 가중랜덤).
   const sameDay = new Set(opts.sameDayConcepts)
   const counts = opts.counts
   const capCount = opts.capCount ?? 0
-  const out: SlotAssignment[] = []
-  for (const s of CONTENT_SLOTS) {
-    if (opts.filledSlots.has(s.id)) continue
-    // 하드 제외 = 같은 날 컨셉 ∪ 상한 도달 컨셉.
+  const candidates: string[] = []
+  for (let i = 0; i < CONTENT_SLOTS.length; i++) {
     const exclude = new Set(sameDay)
     if (counts && capCount > 0) {
       for (const [c, n] of counts) if (n >= capCount) exclude.add(c)
     }
     const concept = pickConcept(opts.weights, exclude, opts.recentConcepts)
-    sameDay.add(concept) // 같은 날 다음 슬롯은 다른 컨셉
+    candidates.push(concept)
+    sameDay.add(concept) // 후보끼리 서로 다른 컨셉
+  }
+
+  // 3) 후보 중 빈 슬롯 수만큼 무작위 선택 → 시간대에 배정(확정분만 counts 누적).
+  const chosen = sampleK(candidates, emptySlots.length)
+  const out: SlotAssignment[] = []
+  emptySlots.forEach((s, i) => {
+    const concept = chosen[i]
     if (counts) counts.set(concept, (counts.get(concept) ?? 0) + 1)
     out.push({ slot: s.id, concept, scheduled_time: randomSlotTime(s.id) })
-  }
+  })
   return out
 }
 

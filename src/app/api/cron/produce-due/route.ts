@@ -11,9 +11,6 @@ import { isAuthorizedCron } from "@/lib/cron-auth"
 export const dynamic = "force-dynamic"
 export const maxDuration = 60 // generate-script(gpt) 호출 여유(기본 10초)
 
-// 폭주 방지 일일 상한(하루 최대 슬롯 3개 구조라 자연 상한이지만 안전장치로 명시).
-const DAILY_PRODUCE_CAP = 3
-
 // 현재 KST 'HH:MM' (scheduled_time 문자열과 직접 비교용).
 function nowHHMMKST(): string {
   return new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(11, 16)
@@ -29,7 +26,8 @@ export async function GET(req: NextRequest) {
 
   try {
     // ① 가동 게이트 — 가동 중인 채널만 자동 제작(중단=자연 정지 스위치).
-    const { isActive } = await getChannelStatus(channelId)
+    //    일일 상한(daily_cap)도 같은 조회에서 얻는다(하드코딩 3 → channel_status 출처, 폴백 3).
+    const { isActive, dailyCap } = await getChannelStatus(channelId)
     if (!isActive) {
       return NextResponse.json({ success: true, skipped: "not_active" })
     }
@@ -39,8 +37,8 @@ export async function GET(req: NextRequest) {
     const plans = await listContentPlans(channelId, today, today)
 
     const doneToday = plans.filter((p) => p.status === "done").length
-    if (doneToday >= DAILY_PRODUCE_CAP) {
-      return NextResponse.json({ success: true, skipped: "cap_reached", doneToday })
+    if (doneToday >= dailyCap) {
+      return NextResponse.json({ success: true, skipped: "cap_reached", doneToday, dailyCap })
     }
 
     // ③ due 슬롯 1개 — status=planned & scheduled_time 지남. 가장 이른 시각 1개(순차).

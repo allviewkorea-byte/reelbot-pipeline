@@ -8,7 +8,7 @@ import {
   type Channel,
   type ChannelRow,
 } from "./channels"
-import type { ContentPlan } from "./content-plan"
+import { DEFAULT_DAILY_CAP, clampDailyCap, type ContentPlan } from "./content-plan"
 import type { TrendRankingRow, ChannelVideosRow } from "./trend-concepts"
 import type { ChannelMode } from "./channel-status"
 
@@ -176,39 +176,45 @@ export interface ChannelStatusState {
   isActive: boolean
   mode: ChannelMode
   syntheticMedia: boolean
+  dailyCap: number // 하루 생산 개수(1~3, 기본 3)
 }
 
 export async function getChannelStatus(channelId: string): Promise<ChannelStatusState> {
   try {
     const supabase = getSupabaseAdmin()
-    // select("*") 로 읽어 synthetic_media 컬럼 추가 전에도 깨지지 않게 한다(미존재 → undefined→false).
+    // select("*") 로 읽어 synthetic_media/daily_cap 컬럼 추가 전에도 안 깨지게 한다(미존재 → 기본).
     const { data, error } = await supabase
       .from(CHANNEL_STATUS_TABLE)
       .select("*")
       .eq("channel_id", channelId)
       .maybeSingle()
-    if (error) return { isActive: false, mode: "semi", syntheticMedia: false } // 테이블 없음/조회 실패 → 기본
+    if (error) return { isActive: false, mode: "semi", syntheticMedia: false, dailyCap: DEFAULT_DAILY_CAP }
     return {
       isActive: Boolean(data?.is_active),
       mode: data?.mode === "auto" ? "auto" : "semi", // 미설정/이상값 → semi(안전: 비공개)
       syntheticMedia: Boolean(data?.synthetic_media), // 컬럼 미존재/미설정 → false
+      dailyCap: clampDailyCap(data?.daily_cap), // 컬럼 미존재/이상값 → 3
     }
   } catch {
-    return { isActive: false, mode: "semi", syntheticMedia: false } // SUPABASE_* 미설정 등 → 기본
+    return { isActive: false, mode: "semi", syntheticMedia: false, dailyCap: DEFAULT_DAILY_CAP }
   }
 }
 
-// isActive / mode / syntheticMedia 중 제공된 것만 갱신(부분 upsert). 없으면 no-op.
+// isActive / mode / syntheticMedia / dailyCap 중 제공된 것만 갱신(부분 upsert). 없으면 no-op.
 export async function setChannelStatus(
   channelId: string,
-  patch: { isActive?: boolean; mode?: ChannelMode; syntheticMedia?: boolean },
+  patch: { isActive?: boolean; mode?: ChannelMode; syntheticMedia?: boolean; dailyCap?: number },
 ): Promise<void> {
-  if (patch.isActive === undefined && patch.mode === undefined && patch.syntheticMedia === undefined) return
+  if (
+    patch.isActive === undefined && patch.mode === undefined &&
+    patch.syntheticMedia === undefined && patch.dailyCap === undefined
+  ) return
   const supabase = getSupabaseAdmin()
   const row: Record<string, unknown> = { channel_id: channelId, updated_at: new Date().toISOString() }
   if (patch.isActive !== undefined) row.is_active = patch.isActive
   if (patch.mode !== undefined) row.mode = patch.mode
   if (patch.syntheticMedia !== undefined) row.synthetic_media = patch.syntheticMedia
+  if (patch.dailyCap !== undefined) row.daily_cap = clampDailyCap(patch.dailyCap)
   const { error } = await supabase
     .from(CHANNEL_STATUS_TABLE)
     .upsert(row, { onConflict: "channel_id" })
