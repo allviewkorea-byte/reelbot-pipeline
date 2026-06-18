@@ -209,13 +209,17 @@ def generate_full(
     video_url = asm["video_url"]
     report(90, "영상 합성 완료")
 
-    # f. 썸네일 (~98%) — 해당 사연의 씬 이미지 1장 선택(마지막 질문 엔딩 제외, 감정
-    # 피크 우선) + 후킹 카피 오버레이. 새 이미지 생성 없음(비용 0, 실제 장면과 일치).
+    # f. 썸네일 (~98%) — ⑩ 커스텀 썸네일은 Shorts 에서 노출 안 돼 기본 비활성(env 로 재활성).
+    #    SAYEON_THUMBNAIL on 일 때만 이미지 합성·R2 업로드. off(기본)면 이미지/업로드 스킵하고
+    #    제목용 후킹 카피만 생성(thumbnail_url=None → 유튜브 set 도 자연히 스킵 → 자동 프레임).
+    thumb_enabled = (os.getenv("SAYEON_THUMBNAIL") or "").strip().lower() in ("1", "true", "on", "yes")
     thumb_image, thumb_emotion = _select_thumbnail_image(scenes, image_by_index, thumbnail_scene_index)
     with _stage("썸네일"):
-        thumb = generate_thumbnail(image_url=thumb_image, script=script, emotion=thumb_emotion)
-    thumbnail_url = thumb["thumbnail_url"]
-    report(98, "썸네일 완료")
+        thumb = generate_thumbnail(
+            image_url=thumb_image, script=script, emotion=thumb_emotion, compose=thumb_enabled,
+        )
+    thumbnail_url = thumb["thumbnail_url"]  # 비활성 시 None
+    report(98, "썸네일 완료" if thumb_enabled else "썸네일 비활성(스킵)")
 
     # g. 유튜브 자동 게시 (옵션) — YOUTUBE_AUTO_PUBLISH=true 일 때만, 실패해도 안 멈춤.
     youtube_url = _maybe_publish_youtube(

@@ -180,18 +180,18 @@ def generate_thumbnail(
     script: str = "",
     emotion: str = "",
     output_dir: str | None = None,
+    compose: bool = True,
 ) -> dict:
     """베이스(거대 감정 얼굴 또는 씬 이미지) + 후킹 카피 오버레이 → 썸네일 PNG.
 
     ⑩ 베이스 = 피크 감정이면 주인공 표정 시트(cast/protagonist/expr_*) 거대 얼굴,
     없으면 image_url(씬 이미지)로 graceful 폴백. 텍스트는 반투명 다크 밴드 위에
     흰 글씨 + 핵심구 확대·감정색. 새 이미지 생성 없음(비용 0). Returns {"thumbnail_url", ...}.
-    """
-    _require_ffmpeg()
-    if not image_url:
-        raise ValueError("image_url 이 필요합니다.")
 
-    # 후킹 카피 — 없으면 LLM 생성, 실패해도 폴백(예외 방지).
+    compose=False 면 이미지 합성·R2 업로드를 건너뛰고(썸네일 비활성), 제목용 후킹 카피만
+    생성해 thumbnail_url=None 으로 반환한다(유튜브 thumbnails.set 도 자연히 스킵).
+    """
+    # 후킹 카피 — 없으면 LLM 생성, 실패해도 폴백(예외 방지). compose 여부와 무관(제목 재사용).
     hook_text = (hook_text or "").strip()
     if not hook_text:
         if script.strip():
@@ -202,6 +202,14 @@ def generate_thumbnail(
                 hook_text, highlight = _fallback_hook(script)
         if not hook_text:
             hook_text, highlight = _fallback_hook(script)
+
+    if not compose:
+        # 썸네일 비활성 — 이미지/ffmpeg/R2 스킵. 제목용 hook 만 반환.
+        return {"thumbnail_url": None, "persistent": False, "hook_text": hook_text, "highlight": highlight}
+
+    _require_ffmpeg()
+    if not image_url:
+        raise ValueError("image_url 이 필요합니다.")
 
     # ⑩ 베이스 결정(피크 감정 얼굴 우선, 없으면 씬). is_face 면 비네팅 적용.
     base_url, is_face = _resolve_base(image_url, emotion)
