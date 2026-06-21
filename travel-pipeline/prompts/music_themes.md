@@ -84,8 +84,10 @@
 ## 6. style_prompt 작성법 (Suno용 · 영어)
 `장르 + 무드 + 핵심 악기 + 보컬여부/톤 + BPM감 + 한 줄 분위기` 순으로.
 - 연주는 반드시 **"instrumental"** 명시.
-- 보컬은 보컬 성별·톤 명시 (예: "warm female vocals", "smooth male vocals").
-- 좋은 예: `upbeat city pop, groovy slap bass, bright synths, warm female vocals, 112 BPM, neon Tokyo night drive`
+- 보컬은 **명료도 표현 필수**: `clear, present, polished vocals` 류로 반주에 안 묻히게.
+- ⚠️ **성별(male/female)은 style_prompt에 넣지 않는다** — 성별은 produce가 곡마다 랜덤
+  주입한다. 생성기는 톤·악기·명료도만 쓰고 성별 단어(female/male)는 뺀다.
+- 좋은 예: `upbeat city pop, groovy slap bass, bright synths, clear present polished vocals, 112 BPM, neon Tokyo night drive`
 - 나쁜 예: `nice music, chill` (장르·악기 없음)
 
 ---
@@ -96,7 +98,7 @@
 ```json
 { "slug": "workout_citypop", "title_kr": "운동할 때 듣는 신나는 시티팝",
   "genre": "시티팝", "situation": "운동", "mood": "신남·그루비", "type": "vocal",
-  "style_prompt": "high-energy city pop, driving bass, punchy drums, bright synths, energetic female vocals, 124 BPM",
+  "style_prompt": "high-energy city pop, driving bass, punchy drums, bright synths, energetic clear present polished vocals, 124 BPM",
   "lyric_tone": "땀나게 달리는 순간의 자기긍정 — 응원하되 뻔한 구호는 금지, 구체적 장면으로", "track_count": 8 }
 ```
 ```json
@@ -114,7 +116,7 @@
 ```json
 { "slug": "date_night_krnb", "title_kr": "둘만의 밤, 감성 R&B",
   "genre": "K-R&B", "situation": "데이트·로맨틱 저녁", "mood": "로맨틱·세련", "type": "vocal",
-  "style_prompt": "smooth Korean R&B, warm Rhodes, soft trap drums, intimate vocals, 85 BPM, candlelit night",
+  "style_prompt": "smooth Korean R&B, warm Rhodes, soft trap drums, intimate clear present polished vocals, 85 BPM, candlelit night",
   "lyric_tone": "둘 사이의 구체적 순간(손끝·눈빛·침묵)으로 — '사랑해'를 직접 쓰지 말고 장면으로", "track_count": 8 }
 ```
 
