@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 import logging
+import random
+import re
 
 from adapters import r2_storage
 from services import music_lyrics, music_master, music_mix, music_suno
@@ -20,29 +22,59 @@ logger = logging.getLogger(__name__)
 # 시티팝 기본 베이스 스타일(플랜이 곡별 변주를 주면 그쪽 우선).
 DEFAULT_BASE_STYLE = "city pop, 80s Japanese citypop, warm analog, lush chords, nostalgic"
 
+# 보컬 명료도 — 반주에 묻히지 않게 모든 보컬 곡 style 에 붙인다(#5.1).
+_VOCAL_CLARITY = "clear, present, polished vocals"
+_GENDERS = ("female", "male")
+# style 문자열에 이미 박힌 성별 단어 제거용(곡별 랜덤 성별과 충돌 방지).
+_GENDER_RE = re.compile(r"\b(?:fe)?male\b", re.IGNORECASE)
+
+
+def _assign_genders(n: int) -> list[str]:
+    """N곡에 줄 성별 리스트(곡 단위 랜덤). N≥2면 남·여 최소 1곡씩 보장(쏠림 방지),
+    순서는 무작위. 시드 고정 안 함(매번 달라야 함)."""
+    if n <= 0:
+        return []
+    if n == 1:
+        return [random.choice(_GENDERS)]
+    genders = ["female", "male"] + [random.choice(_GENDERS) for _ in range(n - 2)]
+    random.shuffle(genders)
+    return genders
+
+
+def _vocal_style(base: str, gender: str) -> str:
+    """곡 style 에 랜덤 성별 + 명료도 표현을 붙인다(기존 성별 단어는 제거 후)."""
+    base = _GENDER_RE.sub("", base or "")
+    base = re.sub(r"\s{2,}", " ", base).strip().strip(",").strip()
+    return f"{base}, {gender} vocals, {_VOCAL_CLARITY}"
+
 
 def _gen_vocal(
     theme_slug: str, songs: list[dict], base_style: str, genre_theme: str, log
 ) -> tuple[list[dict], dict[str, str]]:
-    """보컬 경로: 곡별 가사로 보컬곡 생성(부분 실패 허용) + 가사 원문 R2 보존."""
+    """보컬 경로: 곡별 가사로 보컬곡 생성(부분 실패 허용) + 가사 원문 R2 보존.
+
+    곡마다 남/여 보컬을 랜덤 주입(N≥2면 남·여 모두 포함)하고 명료도 표현을 style 에
+    붙여, 한 믹스 안에서도 영상끼리도 성별이 예측 불가하게 한다(#5.1).
+    """
     produced: list[dict] = []
     lyrics_by_id: dict[str, str] = {}
-    for i, s in enumerate(songs, 1):
-        lyric = (s.get("lyrics") or "").strip()
-        if not lyric:
-            logger.warning("[produce] 곡 %d 가사 비어 있음 — 건너뜀", i)
-            continue
+    # 가사 있는 곡만 추려 성별을 균형 배정(쏠림 방지).
+    valid = [s for s in songs if (s.get("lyrics") or "").strip()]
+    if len(valid) < len(songs):
+        logger.warning("[produce] 가사 빈 곡 %d개 건너뜀", len(songs) - len(valid))
+    genders = _assign_genders(len(valid))
+    for i, (s, gender) in enumerate(zip(valid, genders), 1):
+        lyric = s["lyrics"].strip()
         theme = {
             "theme_slug": theme_slug,
             "instrumental": False,
-            "style": s.get("style") or base_style,
+            "style": _vocal_style(s.get("style") or base_style, gender),
             "title": s.get("title") or f"{genre_theme} {i}",
             "lyrics": lyric,
+            "vocalGender": gender,
         }
-        if s.get("vocalGender"):
-            theme["vocalGender"] = s["vocalGender"]
         try:
-            log(f"보컬 생성 {i}/{len(songs)}: {s.get('title')}")
+            log(f"보컬 생성 {i}/{len(valid)} [{gender}]: {s.get('title')}")
             res = music_suno.generate_and_store(theme)
         except Exception as e:  # noqa: BLE001 - 1곡 실패가 전체를 막지 않게
             logger.warning("[produce] 곡 %d 보컬 생성 실패: %s", i, e)
