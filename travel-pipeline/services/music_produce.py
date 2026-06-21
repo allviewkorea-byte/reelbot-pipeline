@@ -21,40 +21,10 @@ logger = logging.getLogger(__name__)
 DEFAULT_BASE_STYLE = "city pop, 80s Japanese citypop, warm analog, lush chords, nostalgic"
 
 
-def produce(
-    theme_slug: str,
-    *,
-    n: int = 3,
-    genre_theme: str = "city pop",
-    base_style: str = DEFAULT_BASE_STYLE,
-    language: str = "ko",
-    minutes: float = 10.0,
-    sub_theme_pool: list[str] | None = None,
-    lyrics: list[dict] | None = None,
-    do_master: bool = True,
-    do_mix: bool = True,
-    seed: int | None = None,
-    model: str | None = None,
-    progress=None,
-) -> dict:
-    """주제 → N곡 가사 → 보컬 생성 → 마스터 → 믹스. 완성 오디오 메타 반환.
-
-    lyrics(선택): 이미 만든/검수한 가사 리스트를 주면 가사 생성을 건너뛴다.
-    Returns: {theme_slug, songs:[...], produced:[record...], mastered, mix}
-    """
-
-    def _log(msg: str) -> None:
-        logger.info("[produce] %s", msg)
-        if progress:
-            progress(msg)
-
-    # ① 가사 (헌법 3-스테이지) — 주어지면 재사용(검수본).
-    songs = lyrics if lyrics is not None else music_lyrics.generate_lyrics(
-        genre_theme, n, sub_theme_pool=sub_theme_pool, language=language, model=model
-    )
-    _log(f"가사 {len(songs)}곡 확보")
-
-    # ② 곡별 보컬 생성(부분 실패 허용) + 가사 원문 R2 보존.
+def _gen_vocal(
+    theme_slug: str, songs: list[dict], base_style: str, genre_theme: str, log
+) -> tuple[list[dict], dict[str, str]]:
+    """보컬 경로: 곡별 가사로 보컬곡 생성(부분 실패 허용) + 가사 원문 R2 보존."""
     produced: list[dict] = []
     lyrics_by_id: dict[str, str] = {}
     for i, s in enumerate(songs, 1):
@@ -72,7 +42,7 @@ def produce(
         if s.get("vocalGender"):
             theme["vocalGender"] = s["vocalGender"]
         try:
-            _log(f"보컬 생성 {i}/{len(songs)}: {s.get('title')}")
+            log(f"보컬 생성 {i}/{len(songs)}: {s.get('title')}")
             res = music_suno.generate_and_store(theme)
         except Exception as e:  # noqa: BLE001 - 1곡 실패가 전체를 막지 않게
             logger.warning("[produce] 곡 %d 보컬 생성 실패: %s", i, e)
@@ -94,29 +64,160 @@ def produce(
                 "core_message": s.get("core_message", ""),
                 "lyrics": lyric,
             })
+    return produced, lyrics_by_id
+
+
+def _gen_instrumental(
+    theme_slug: str, n: int, style: str, genre_theme: str, log
+) -> tuple[list[dict], dict[str, str]]:
+    """연주 경로: 가사 없이 style 만으로 연주곡 N회 생성(instrumental=True, 부분 실패 허용).
+
+    가사 없음 → lyrics_by_id 는 빈 dict(믹스 JSON 에 가사 미포함).
+    """
+    produced: list[dict] = []
+    for i in range(1, n + 1):
+        theme = {
+            "theme_slug": theme_slug,
+            "instrumental": True,
+            "style": style,
+            "title": f"{genre_theme} {i}",
+        }
+        try:
+            log(f"연주 생성 {i}/{n}")
+            res = music_suno.generate_and_store(theme)
+        except Exception as e:  # noqa: BLE001 - 1곡 실패가 전체를 막지 않게
+            logger.warning("[produce] 연주 %d 생성 실패: %s", i, e)
+            continue
+        for rec in res.get("tracks", []):
+            if rec.get("audio_id"):
+                produced.append({**rec})
+    return produced, {}
+
+
+def produce(
+    theme_slug: str,
+    *,
+    n: int = 3,
+    genre_theme: str = "city pop",
+    base_style: str = DEFAULT_BASE_STYLE,
+    language: str = "ko",
+    minutes: float = 10.0,
+    sub_theme_pool: list[str] | None = None,
+    lyrics: list[dict] | None = None,
+    track_type: str = "vocal",
+    style_prompt: str | None = None,
+    lyric_tone: str | None = None,
+    do_master: bool = True,
+    do_mix: bool = True,
+    seed: int | None = None,
+    model: str | None = None,
+    progress=None,
+) -> dict:
+    """주제 → N곡 생성 → 마스터 → 믹스. 완성 오디오 메타 반환.
+
+    track_type 으로 분기:
+      - "instrumental": 가사 스킵, style_prompt(없으면 base_style)로 연주곡 N회 생성.
+      - "vocal"(기본): 헌법 3-스테이지 가사 → 보컬곡. lyric_tone 이 있으면 작성에 반영.
+    lyrics(선택, vocal): 이미 만든/검수한 가사 리스트를 주면 가사 생성을 건너뛴다.
+    Returns: {theme_slug, track_type, songs:[...], produced:[record...], mastered, mix}
+    """
+
+    def _log(msg: str) -> None:
+        logger.info("[produce] %s", msg)
+        if progress:
+            progress(msg)
+
+    is_instrumental = (track_type or "vocal").strip().lower() == "instrumental"
+
+    if is_instrumental:
+        # ① 가사 스킵. style_prompt 우선(주제), 없으면 base_style.
+        songs: list[dict] = []
+        _log(f"연주 경로 — 가사 스킵, {n}곡 생성")
+        produced, lyrics_by_id = _gen_instrumental(
+            theme_slug, n, style_prompt or base_style, genre_theme, _log
+        )
+    else:
+        # ① 가사(헌법 3-스테이지) — 주어지면 재사용(검수본), lyric_tone 반영.
+        songs = lyrics if lyrics is not None else music_lyrics.generate_lyrics(
+            genre_theme, n, sub_theme_pool=sub_theme_pool, language=language,
+            model=model, tone=lyric_tone,
+        )
+        _log(f"가사 {len(songs)}곡 확보")
+        # ② 곡별 보컬 생성.
+        produced, lyrics_by_id = _gen_vocal(theme_slug, songs, base_style, genre_theme, _log)
 
     if not produced:
-        raise RuntimeError("보컬 생성 결과가 없습니다(전 곡 실패).")
-    _log(f"보컬 트랙 {len(produced)}개 생성")
+        raise RuntimeError("생성 결과가 없습니다(전 곡 실패).")
+    _log(f"트랙 {len(produced)}개 생성")
 
-    # ③ 마스터링(이번 배치만, 멱등).
+    # ③ 마스터링(이번 배치만, 멱등) — 연주/보컬 공통.
     mastered = []
     if do_master:
         _log("마스터링(2-pass loudnorm -14 LUFS)...")
         mastered = music_master.master_theme(theme_slug, produced)
 
-    # ④ 롱폼 믹스(가사 임베드).
+    # ④ 롱폼 믹스 — 연주는 lyrics_by_id 없이, 보컬은 가사 임베드.
     mix = None
     if do_mix:
         _log(f"믹스(목표 {minutes}분)...")
         mix = music_mix.build_mix(
-            theme_slug, produced, minutes=minutes, seed=seed, lyrics_by_id=lyrics_by_id
+            theme_slug, produced, minutes=minutes, seed=seed,
+            lyrics_by_id=lyrics_by_id or None,
         )
 
     return {
         "theme_slug": theme_slug,
+        "track_type": "instrumental" if is_instrumental else "vocal",
         "songs": songs,
         "produced": produced,
         "mastered": mastered,
         "mix": mix,
     }
+
+
+def run_theme(
+    *,
+    theme: dict | None = None,
+    n: int | None = None,
+    minutes: float = 10.0,
+    seed: int | None = None,
+    do_master: bool = True,
+    do_mix: bool = True,
+    avoid_recent: int = 10,
+    persist: bool = True,
+    theme_model: str | None = None,
+    lyrics_model: str | None = None,
+    progress=None,
+) -> dict:
+    """주제 1개 → 음원 믹스 1개(얇은 오케스트레이터).
+
+    theme 미지정 시 music_theme.generate_theme() 로 1개 생성한다. 주제의 type 으로
+    produce 가 연주/보컬 경로를 자동 선택한다. Returns: {theme, mix, result}.
+    """
+    from services import music_theme  # 지연 import(순환 회피)
+
+    if theme is None:
+        theme = music_theme.generate_theme(
+            avoid_recent=avoid_recent, persist=persist, model=theme_model
+        )
+    slug = theme.get("slug") or theme.get("theme_slug")
+    if not slug:
+        raise ValueError("theme 에 slug 가 없습니다.")
+    count = n or int(theme.get("track_count") or 3)
+
+    result = produce(
+        slug,
+        n=count,
+        genre_theme=theme.get("genre") or "music",
+        base_style=theme.get("style_prompt") or DEFAULT_BASE_STYLE,
+        style_prompt=theme.get("style_prompt"),
+        track_type=theme.get("type") or "vocal",
+        lyric_tone=theme.get("lyric_tone"),
+        minutes=minutes,
+        seed=seed,
+        do_master=do_master,
+        do_mix=do_mix,
+        model=lyrics_model,
+        progress=progress,
+    )
+    return {"theme": theme, "mix": result.get("mix"), "result": result}

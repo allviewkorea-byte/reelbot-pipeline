@@ -136,14 +136,18 @@ def plan_songs(
 
 
 # ── 스테이지 2: 작성 ─────────────────────────────────────────────────────
-def write_lyrics(plan: dict, *, language: str = "ko", model: str | None = None) -> str:
-    """플랜 1개 → 깊이있는 가사(섹션 태그). 가사 텍스트만 반환."""
+def write_lyrics(plan: dict, *, language: str = "ko", model: str | None = None, tone: str | None = None) -> str:
+    """플랜 1개 → 깊이있는 가사(섹션 태그). 가사 텍스트만 반환.
+
+    tone(선택): 주제의 lyric_tone 한 줄. 있으면 작성 컨텍스트에 추가(없으면 현행과 동일).
+    """
     guidelines = load_guidelines()
     system = (
         "너는 시티팝 작사가다. 아래 '가사 헌법'의 모든 원칙을 지켜 한 곡을 쓴다. "
         "telling 금지, 장면으로 showing. 클리셰 한 줄도 금지.\n\n"
         f"=== 가사 헌법 ===\n{guidelines}"
     )
+    tone_line = f"- 이 곡의 톤: {tone}\n" if (tone or "").strip() else ""
     user = (
         "다음 설계로 가사를 써라.\n"
         f"- sub_theme: {plan.get('sub_theme')}\n"
@@ -152,6 +156,7 @@ def write_lyrics(plan: dict, *, language: str = "ko", model: str | None = None) 
         f"- 상황/장면: {plan.get('situation')}\n"
         f"- 감정의 결: {plan.get('emotion')}\n"
         f"- 제목: {plan.get('title')}\n"
+        f"{tone_line}"
         f"- 언어: {language} (한국어 기반 + 영어 훅 살짝)\n\n"
         "원칙 7 형식: [Verse]/[Pre-Chorus]/[Chorus]/[Bridge]/[Outro] 섹션 태그 포함. "
         "원칙 3: 끝에 잔상/전환을 남겨라.\n"
@@ -202,10 +207,12 @@ def generate_lyrics(
     sub_theme_pool: list[str] | None = None,
     language: str = "ko",
     model: str | None = None,
+    tone: str | None = None,
     progress=None,
 ) -> list[dict]:
     """주제 → N곡 가사(헌법 기반 3-스테이지). 곡별 dict 리스트 반환.
 
+    tone(선택): 주제의 lyric_tone. 작성 단계에 전달(없으면 현행과 완전 동일).
     반환 원소: {sub_theme, core_message, title, lyrics, style, vocalGender?, scores, revised, issues}
     """
     if not is_available():
@@ -222,7 +229,7 @@ def generate_lyrics(
         try:
             if progress:
                 progress(f"② 작성 {i}/{len(plans)}: {plan.get('sub_theme')}")
-            draft = write_lyrics(plan, language=language, model=model)
+            draft = write_lyrics(plan, language=language, model=model, tone=tone)
             if progress:
                 progress(f"③ 자기검토 {i}/{len(plans)}...")
             review = review_lyrics(plan, draft, language=language, model=model)

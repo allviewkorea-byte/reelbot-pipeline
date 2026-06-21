@@ -84,6 +84,32 @@ def list_recent_themes(n: int = 10) -> list[dict]:
         return []
 
 
+def get_theme(slug: str) -> dict | None:
+    """slug 로 저장된 주제 1개 조회. payload(원본 JSON) 우선 반환. 없으면 None."""
+    url, key = _supabase_cfg()
+    if not (url and key):
+        logger.warning("[theme] SUPABASE 미설정 — 주제 조회 불가")
+        return None
+    try:
+        headers = {"apikey": key, "Authorization": f"Bearer {key}"}
+        with httpx.Client(timeout=30.0) as c:
+            r = c.get(
+                f"{url}/rest/v1/{_TABLE}",
+                headers=headers,
+                params={"slug": f"eq.{slug}", "select": "*", "limit": "1"},
+            )
+            r.raise_for_status()
+            rows = r.json()
+        if not rows:
+            return None
+        row = rows[0]
+        payload = row.get("payload")
+        return payload if isinstance(payload, dict) and payload else row
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[theme] 주제 조회 실패(%s): %s", slug, _http_err(e))
+        return None
+
+
 def _slug_exists(slug: str) -> bool:
     """slug 이 DB 에 이미 있는지(전역 dedup). 미설정/오류 시 False."""
     url, key = _supabase_cfg()
