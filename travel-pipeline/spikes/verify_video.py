@@ -25,6 +25,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -64,8 +65,8 @@ def main() -> int:
         print(f"✗ 믹스를 찾을 수 없음(music-mixes/{slug}/). 먼저 음원을 만드세요.", file=sys.stderr)
         return 1
 
-    # 믹스 오프셋 JSON 다운로드 → tracks/total_duration 확보.
-    tmp_json = Path(f"/tmp/{slug}_{mix_id}.json")
+    # 믹스 오프셋 JSON 다운로드 → tracks/total_duration 확보(크로스플랫폼 임시경로).
+    tmp_json = Path(tempfile.gettempdir()) / f"{slug}_{mix_id}.json"
     r2_storage.download_music_object(
         r2_storage.music_mix_key(slug, mix_id, "json"), str(tmp_json)
     )

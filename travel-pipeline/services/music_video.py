@@ -44,8 +44,13 @@ def _require_ffmpeg() -> None:
             raise RuntimeError(f"{tool} 가 PATH 에 없습니다 — 영상 합성에 ffmpeg 필요.")
 
 
-def _run(args: list[str]) -> None:
-    result = subprocess.run(["ffmpeg", "-y", *args], capture_output=True, text=True)
+def _run(args: list[str], cwd: Path | None = None) -> None:
+    result = subprocess.run(
+        ["ffmpeg", "-y", *args],
+        cwd=(str(cwd) if cwd else None),
+        capture_output=True,
+        text=True,
+    )
     if result.returncode != 0:
         raise RuntimeError(f"FFmpeg 오류:\n{result.stderr[-2500:]}")
 
@@ -70,11 +75,17 @@ def _fetch(url_or_path: str, dest: Path) -> None:
         shutil.copy(url_or_path, dest)
 
 
-def _font_arg() -> str:
-    """drawtext 폰트 인자(한국어). SUBTITLE_FONT_PATH(나눔고딕) 우선, 없으면 fontconfig 이름."""
+def _stage_font(work: Path) -> str:
+    """drawtext 폰트(한국어)를 work 로 복사하고 **상대경로** fontfile 인자를 반환.
+
+    절대경로(특히 Windows 'C:\\...\\malgun.ttf')를 filtergraph 에 직접 쓰면 ':'·'\\' 가
+    파싱을 깨뜨린다. 폰트를 work/font.ttf 로 복사하고 cwd=work + 상대명으로 회피한다
+    (백곰 sayeon 의 cwd+상대명 선례와 동일). 폰트 파일이 없으면 fontconfig 이름 폴백.
+    """
     p = os.getenv("SUBTITLE_FONT_PATH", "/usr/share/fonts/truetype/nanum/NanumGothic.ttf")
     if os.path.exists(p):
-        return f"fontfile='{p}'"
+        shutil.copy(p, work / "font.ttf")
+        return "fontfile=font.ttf"
     return "font=NanumGothic"
 
 
@@ -140,11 +151,14 @@ def generate_background(theme: dict, out_path: str, *, force: bool = False) -> s
 
 # ── ffmpeg 합성 ──────────────────────────────────────────────────────────
 def _build_filter(
-    tracks: list[dict], title_kr: str, duration: float, work: Path, viz: str
+    tracks: list[dict], title_kr: str, duration: float, work: Path, viz: str, font: str
 ) -> str:
-    """Ken Burns 배경 + 비주얼라이저 + drawtext(주제·곡 제목) filter_complex 구성."""
+    """Ken Burns 배경 + 비주얼라이저 + drawtext(주제·곡 제목) filter_complex 구성.
+
+    textfile 은 work 기준 **상대명**만 쓴다(ffmpeg cwd=work). 절대경로의 '\\'·':' 가
+    filtergraph 파싱을 깨뜨리는 걸 회피한다(Windows 호환).
+    """
     total_frames = int(duration * FPS) + FPS  # 여유 프레임(루프 reset 회피)
-    font = _font_arg()
 
     # 1) 배경 Ken Burns(느린 줌) → 1920x1080.
     bg = (
@@ -168,29 +182,36 @@ def _build_filter(
     # 4) drawtext — 주제 제목(상단 고정) + 곡 제목(전환 구간).
     chain = bg + v + overlay
     prev = "bgw"
-    title_file = work / "title.txt"
-    title_file.write_text(title_kr or "", encoding="utf-8")
+    # 주제 제목 — work 기준 상대명(title.txt). 항상 표시.
+    (work / "title.txt").write_text(title_kr or "", encoding="utf-8")
     chain += (
-        f"[{prev}]drawtext={font}:textfile='{title_file}':fontcolor=white:fontsize=54:"
+        f"[{prev}]drawtext={font}:textfile=title.txt:fontcolor=white:fontsize=54:"
         f"box=1:boxcolor=black@0.45:boxborderw=18:x=(w-text_w)/2:y=56[lbl_t];"
     )
     prev = "lbl_t"
 
+    # 곡 제목 — 컷(duration) 안에서만. start_sec >= duration 인 곡은 스킵,
+    # enable 끝은 min(다음 곡 시작, duration) 로 클램프(짧은 컷에서 구간 역전 방지).
     for i, t in enumerate(tracks):
         title = (t.get("title") or "").strip()
         if not title:
             continue
         start = float(t.get("start_sec") or 0.0)
-        end = (
+        if start >= duration:
+            continue  # 컷 이후 시작 곡은 표시 안 함
+        nxt = (
             float(tracks[i + 1].get("start_sec"))
             if i + 1 < len(tracks) and tracks[i + 1].get("start_sec") is not None
             else duration
         )
-        tf = work / f"song_{i}.txt"
-        tf.write_text(title, encoding="utf-8")
+        end = min(nxt, duration)
+        if end <= start:
+            continue  # 표시 구간 없음
+        tf_name = f"song_{i}.txt"
+        (work / tf_name).write_text(title, encoding="utf-8")
         lbl = f"lbl{i}"
         chain += (
-            f"[{prev}]drawtext={font}:textfile='{tf}':fontcolor=white:fontsize=40:"
+            f"[{prev}]drawtext={font}:textfile={tf_name}:fontcolor=white:fontsize=40:"
             f"box=1:boxcolor=black@0.4:boxborderw=12:x=(w-text_w)/2:y=h-th-300:"
             f"enable='between(t,{start:.3f},{end:.3f})'[{lbl}];"
         )
@@ -218,10 +239,13 @@ def compose_video(
     viz = viz or os.getenv("MUSIC_VIZ", "showwaves")
     work = Path(tempfile.mkdtemp(prefix="mv_"))
     try:
-        filt = _build_filter(tracks, title_kr, duration, work, viz)
+        # 폰트는 work 로 복사해 상대명 사용. 입력/출력은 절대경로(=CLI 인자, filtergraph
+        # 밖이라 OS 무관)로 둔다 — filtergraph 안에는 상대 textfile/fontfile 만 들어간다.
+        font = _stage_font(work)
+        filt = _build_filter(tracks, title_kr, duration, work, viz, font)
         _run([
-            "-loop", "1", "-i", str(bg_path),
-            "-i", str(audio_path),
+            "-loop", "1", "-i", os.path.abspath(str(bg_path)),
+            "-i", os.path.abspath(str(audio_path)),
             "-filter_complex", filt,
             "-map", "[vout]", "-map", "1:a",
             "-t", f"{duration:.3f}",
@@ -229,8 +253,8 @@ def compose_video(
             "-pix_fmt", "yuv420p", "-r", str(FPS),
             "-c:a", "aac", "-b:a", "192k",
             "-movflags", "+faststart",
-            str(out_path),
-        ])
+            os.path.abspath(str(out_path)),
+        ], cwd=work)
     finally:
         shutil.rmtree(work, ignore_errors=True)
     return str(out_path)
