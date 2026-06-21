@@ -481,6 +481,74 @@ def lyrics_url(theme_slug: str, audio_id: str) -> str:
     return f"{_music_public_base()}/{lyrics_key(theme_slug, audio_id)}"
 
 
+# ── 음악 영상 — music-videos/{slug}/{name} (배경 bg.png · 완성 mp4) ──
+# 음악 버킷(R2_MUSIC_BUCKET)을 prefix 만 달리해 재사용한다(신규 버킷 없음).
+def music_video_key(theme_slug: str, name: str) -> str:
+    return f"music-videos/{theme_slug.strip('/')}/{name}"
+
+
+def upload_music_video(
+    file_path: str, theme_slug: str, name: str, *, content_type: str = "video/mp4"
+) -> str:
+    """음악 영상 산출물(mp4/bg.png)을 R2(music-videos/{slug}/{name})에 올린다."""
+    bucket = os.environ.get("R2_MUSIC_BUCKET")
+    public_base = os.environ.get("R2_MUSIC_PUBLIC_BASE_URL")
+    if not bucket:
+        logger.warning(
+            "R2_MUSIC_BUCKET 미설정 — 기본 버킷 사용. 7일 Lifecycle 로 영상이 삭제될 "
+            "수 있으니 Lifecycle 없는 전용 버킷 설정을 권장합니다."
+        )
+    return upload_image(
+        file_path,
+        music_video_key(theme_slug, name),
+        bucket=bucket,
+        public_base_url=public_base,
+        content_type=content_type,
+    )
+
+
+def music_video_url(theme_slug: str, name: str) -> str:
+    return f"{_music_public_base()}/{music_video_key(theme_slug, name)}"
+
+
+def music_video_exists(theme_slug: str, name: str) -> bool:
+    """music-videos/{slug}/{name} 이 이미 있는지(head_object). 미설정/오류 시 False."""
+    if not is_available():
+        return False
+    try:
+        _get_client().head_object(
+            Bucket=_music_bucket(), Key=music_video_key(theme_slug, name)
+        )
+        return True
+    except Exception:  # noqa: BLE001 - 없음/권한/네트워크 → 미존재로 처리
+        return False
+
+
+def latest_mix_id(theme_slug: str) -> str | None:
+    """music-mixes/{slug}/ 아래 가장 최근 .json(=믹스)의 mix_id 반환. 없으면 None."""
+    if not is_available():
+        return None
+    prefix = f"music-mixes/{theme_slug.strip('/')}/"
+    newest_key, newest_ts = None, -1.0
+    try:
+        client = _get_client()
+        paginator = client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=_music_bucket(), Prefix=prefix):
+            for obj in page.get("Contents", []):
+                key = obj["Key"]
+                if not key.endswith(".json"):
+                    continue
+                lm = obj.get("LastModified")
+                ts = lm.timestamp() if lm is not None else 0.0
+                if ts > newest_ts:
+                    newest_ts, newest_key = ts, key
+    except Exception:  # noqa: BLE001 - 권한/네트워크 → None
+        return None
+    if not newest_key:
+        return None
+    return newest_key[len(prefix):].rsplit(".json", 1)[0]
+
+
 def list_cast_objects() -> dict[str, int]:
     """cast/ 프리픽스 아래 모든 오브젝트의 {키: LastModified epoch(int)} 맵.
 
