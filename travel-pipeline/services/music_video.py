@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import logging
 import os
+import platform
 import shutil
 import subprocess
 import tempfile
@@ -75,18 +76,62 @@ def _fetch(url_or_path: str, dest: Path) -> None:
         shutil.copy(url_or_path, dest)
 
 
-def _stage_font(work: Path) -> str:
-    """drawtext 폰트(한국어)를 work 로 복사하고 **상대경로** fontfile 인자를 반환.
+def _font_candidates(system: str | None = None) -> list[str]:
+    """한국어 폰트 후보 경로(우선순위 순). env SUBTITLE_FONT_PATH 가 최우선."""
+    system = system or platform.system()
+    cands: list[str] = []
+    env = os.getenv("SUBTITLE_FONT_PATH")
+    if env:
+        cands.append(env)
+    if system == "Windows":
+        fonts = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")
+        cands += [
+            os.path.join(fonts, "malgun.ttf"),    # 맑은 고딕
+            os.path.join(fonts, "malgunbd.ttf"),  # 맑은 고딕 Bold
+            os.path.join(fonts, "gulim.ttc"),     # 굴림
+            os.path.join(fonts, "batang.ttc"),    # 바탕
+        ]
+    elif system == "Darwin":  # macOS
+        cands += [
+            "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+            "/System/Library/Fonts/Supplemental/AppleGothic.ttf",
+            "/Library/Fonts/AppleGothic.ttf",
+        ]
+    else:  # Linux 등
+        cands += [
+            "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        ]
+    return cands
+
+
+def _resolve_font(system: str | None = None) -> str:
+    """존재하는 첫 폰트 파일 경로를 반환. 하나도 없으면 본 경로 목록과 함께 에러."""
+    cands = _font_candidates(system)
+    for p in cands:
+        if p and os.path.exists(p):
+            return p
+    raise RuntimeError(
+        "한국어 자막 폰트를 찾지 못했습니다. 다음 경로를 확인했습니다:\n  "
+        + "\n  ".join(cands)
+        + "\n→ SUBTITLE_FONT_PATH 환경변수로 폰트 파일(.ttf/.ttc) 경로를 지정하세요."
+    )
+
+
+def _stage_font(work: Path, system: str | None = None) -> str:
+    """결정된 한국어 폰트를 work 로 복사하고 **상대경로** fontfile 인자를 반환.
 
     절대경로(특히 Windows 'C:\\...\\malgun.ttf')를 filtergraph 에 직접 쓰면 ':'·'\\' 가
-    파싱을 깨뜨린다. 폰트를 work/font.ttf 로 복사하고 cwd=work + 상대명으로 회피한다
-    (백곰 sayeon 의 cwd+상대명 선례와 동일). 폰트 파일이 없으면 fontconfig 이름 폴백.
+    파싱을 깨뜨린다. 폰트를 work/font.<ext> 로 복사하고 cwd=work + 상대명으로 회피한다
+    (백곰 sayeon 의 cwd+상대명 선례와 동일). drawtext 는 항상 fontfile= 만 쓴다 —
+    font=(이름) fontconfig 조회는 Windows 에서 'Cannot load default config file' 의
+    원인이라 절대 쓰지 않는다.
     """
-    p = os.getenv("SUBTITLE_FONT_PATH", "/usr/share/fonts/truetype/nanum/NanumGothic.ttf")
-    if os.path.exists(p):
-        shutil.copy(p, work / "font.ttf")
-        return "fontfile=font.ttf"
-    return "font=NanumGothic"
+    src = _resolve_font(system)
+    ext = os.path.splitext(src)[1].lower() or ".ttf"
+    shutil.copy(src, work / f"font{ext}")
+    return f"fontfile=font{ext}"
 
 
 # ── 배경 이미지 (gpt-image-1, 가로) ──────────────────────────────────────
