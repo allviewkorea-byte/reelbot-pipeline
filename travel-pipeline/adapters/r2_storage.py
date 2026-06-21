@@ -293,6 +293,67 @@ def cast_aspect_exists(role: str, aspect: str) -> bool:
         return False
 
 
+# ── 음악 마스터(Rooftop Music) — sunoapi.org 생성곡 영구 보존 ─────────────
+# 키: music-masters/{theme_slug}/{audio_id}.mp3
+# sunoapi 의 mp3 는 15일 후 삭제되므로 생성 직후 반드시 R2 로 영구 복사한다.
+# ⚠️ 기본(videos) 버킷에는 7일 Lifecycle 자동삭제가 걸려 있어 음악도 사라질 수
+# 있다. Lifecycle 없는 전용 버킷(R2_MUSIC_BUCKET)을 권장하며, 미설정 시 기본
+# 버킷으로 폴백하되 경고를 남긴다(BGM/캐릭터 시트와 동일 패턴).
+def _music_bucket() -> str:
+    return os.environ.get("R2_MUSIC_BUCKET") or os.environ.get("R2_BUCKET", "videos")
+
+
+def _music_public_base() -> str:
+    return (
+        os.environ.get("R2_MUSIC_PUBLIC_BASE_URL")
+        or os.environ.get("R2_PUBLIC_BASE_URL", "")
+    ).rstrip("/")
+
+
+def music_key(theme_slug: str, audio_id: str) -> str:
+    """저장 규칙(오브젝트 키). DB r2_key 기록·존재 확인에 공용으로 쓴다."""
+    return f"music-masters/{theme_slug.strip('/')}/{audio_id}.mp3"
+
+
+def upload_music(file_path: str, theme_slug: str, audio_id: str) -> str:
+    """음악 마스터 mp3 를 R2(music-masters/{slug}/{audio_id}.mp3)에 올리고 공개 URL 반환."""
+    bucket = os.environ.get("R2_MUSIC_BUCKET")
+    public_base = os.environ.get("R2_MUSIC_PUBLIC_BASE_URL")
+    if not bucket:
+        logger.warning(
+            "R2_MUSIC_BUCKET 미설정 — 기본 버킷 사용. 7일 Lifecycle 로 음악 마스터가 "
+            "삭제될 수 있으니 Lifecycle 없는 전용 버킷 설정을 권장합니다."
+        )
+    return upload_image(
+        file_path,
+        music_key(theme_slug, audio_id),
+        bucket=bucket,
+        public_base_url=public_base,
+        content_type="audio/mpeg",
+    )
+
+
+def music_url(theme_slug: str, audio_id: str) -> str:
+    """저장 규칙과 동일한 공개 URL(존재 확인 후 재사용용)."""
+    return f"{_music_public_base()}/{music_key(theme_slug, audio_id)}"
+
+
+def music_exists(theme_slug: str, audio_id: str) -> bool:
+    """해당 음악 마스터가 R2 에 이미 있는지(head_object). 멱등 저장 판단용.
+
+    미설정/없음/권한/네트워크 오류는 모두 False(→ 호출부가 업로드 진행).
+    """
+    if not is_available():
+        return False
+    try:
+        _get_client().head_object(
+            Bucket=_music_bucket(), Key=music_key(theme_slug, audio_id)
+        )
+        return True
+    except Exception:  # noqa: BLE001 - 없음/권한/네트워크 → 미존재로 처리
+        return False
+
+
 def list_cast_objects() -> dict[str, int]:
     """cast/ 프리픽스 아래 모든 오브젝트의 {키: LastModified epoch(int)} 맵.
 
