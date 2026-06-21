@@ -160,13 +160,17 @@ def build_mix(
     crossfade: float = CROSSFADE_SEC,
     seed: int | None = None,
     mix_id: str | None = None,
+    lyrics_by_id: dict[str, str] | None = None,
 ) -> dict:
     """테마의 마스터본들로 롱폼 믹스 mp3 + 오프셋 JSON 을 만들어 R2 에 올린다.
 
     tracks 미지정 시 music_tracks(status=SUCCESS)를 조회한다. 각 곡의 마스터본을
     R2 에서 받아 acrossfade 로 잇는다(마스터본이 없으면 그 곡은 건너뜀).
+    lyrics_by_id(선택): audio_id→가사. 주어지면 오프셋 JSON 의 각 곡에 가사를
+    함께 실어 #4 자막 동기화에 쓴다.
     Returns: {mix_id, mp3_url, json_url, track_count, total_duration, tracks:[메타]}
     """
+    lyrics_by_id = lyrics_by_id or {}
     _require_ffmpeg()
     if not r2_storage.is_available():
         raise RuntimeError("R2 미설정 — 믹스를 저장할 수 없습니다.")
@@ -196,7 +200,12 @@ def build_mix(
                 r2_storage.mastered_music_key(theme_slug, audio_id), str(dst)
             )
             files.append(dst)
-            meta_tracks.append({"audio_id": audio_id, "title": t.get("title") or ""})
+            entry = {"audio_id": audio_id, "title": t.get("title") or ""}
+            # 가사: 인자(lyrics_by_id) 우선, 없으면 트랙 행에 실린 lyrics 사용.
+            lyric = lyrics_by_id.get(audio_id) or t.get("lyrics")
+            if lyric:
+                entry["lyrics"] = lyric
+            meta_tracks.append(entry)
 
         if not files:
             raise ValueError(
