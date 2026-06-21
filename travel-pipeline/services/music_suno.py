@@ -208,9 +208,17 @@ def store_tracks(theme_slug: str, task_id: str, tracks: list[dict]) -> list[dict
         elif not r2_storage.is_available():
             logger.warning("[suno] R2 미설정 — 영구 저장 불가(⚠️ 15일 후 삭제 위험)")
         else:
-            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=True) as tmp:
-                _download_mp3(audio_url, tmp.name)
-                r2_storage.upload_music(tmp.name, theme_slug, audio_id)
+            # Windows 파일 잠금 회피: 핸들을 닫은 뒤 같은 경로로 재오픈(다운로드/업로드).
+            fd, tmp_path = tempfile.mkstemp(suffix=".mp3")
+            os.close(fd)
+            try:
+                _download_mp3(audio_url, tmp_path)
+                r2_storage.upload_music(tmp_path, theme_slug, audio_id)
+            finally:
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
             logger.info("[suno] R2 저장 OK key=%s", r2_key)
 
         record = {
