@@ -441,6 +441,46 @@ def music_mix_url(theme_slug: str, mix_id: str, ext: str = "mp3") -> str:
     return f"{_music_public_base()}/{music_mix_key(theme_slug, mix_id, ext)}"
 
 
+# ── 곡별 가사 원문 — music-masters/{slug}/lyrics/{audio_id}.txt ──
+# #4 자막 동기화 시 sunoapi 타임스탬프 가사와 함께 쓸 원문(헌법 기반 생성본).
+def lyrics_key(theme_slug: str, audio_id: str) -> str:
+    return f"music-masters/{theme_slug.strip('/')}/lyrics/{audio_id}.txt"
+
+
+def upload_lyrics_text(text: str, theme_slug: str, audio_id: str) -> str:
+    """가사 원문(txt)을 R2(.../lyrics/{audio_id}.txt)에 올리고 공개 URL 반환."""
+    import tempfile
+
+    bucket = os.environ.get("R2_MUSIC_BUCKET")
+    public_base = os.environ.get("R2_MUSIC_PUBLIC_BASE_URL")
+    if not bucket:
+        logger.warning(
+            "R2_MUSIC_BUCKET 미설정 — 기본 버킷 사용. 7일 Lifecycle 로 가사 원문이 "
+            "삭제될 수 있으니 Lifecycle 없는 전용 버킷 설정을 권장합니다."
+        )
+    fd, tmp_path = tempfile.mkstemp(suffix=".txt")
+    os.close(fd)
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.write(text or "")
+        return upload_image(
+            tmp_path,
+            lyrics_key(theme_slug, audio_id),
+            bucket=bucket,
+            public_base_url=public_base,
+            content_type="text/plain; charset=utf-8",
+        )
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+
+def lyrics_url(theme_slug: str, audio_id: str) -> str:
+    return f"{_music_public_base()}/{lyrics_key(theme_slug, audio_id)}"
+
+
 def list_cast_objects() -> dict[str, int]:
     """cast/ 프리픽스 아래 모든 오브젝트의 {키: LastModified epoch(int)} 맵.
 
