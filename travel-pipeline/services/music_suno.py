@@ -78,14 +78,30 @@ def callback_url(theme_slug: str = "") -> str:
 
 
 def _build_body(theme: dict) -> dict:
-    """테마 dict → 생성 요청 body. 누락 시 안전한 기본값."""
+    """테마 dict → 생성 요청 body. 누락 시 안전한 기본값.
+
+    instrumental=True(기본): 연주곡 — 기존 동작 그대로(회귀 없음).
+    instrumental=False: 보컬곡 — body 에 prompt=가사를 넣는다(sunoapi customMode
+      보컬은 prompt 가 가사). 가사가 없으면 ValueError(보컬인데 가사 누락 방지).
+    기본 모델: 보컬 V5.5 / 연주 V5.
+    """
+    instrumental = bool(theme.get("instrumental", True))
+    default_model = "V5" if instrumental else "V5.5"
     body: dict = {
         "customMode": theme.get("customMode", True),
-        "instrumental": bool(theme.get("instrumental", True)),
-        "model": theme.get("model", "V5"),
+        "instrumental": instrumental,
+        "model": theme.get("model") or default_model,
         "style": theme.get("style", ""),
         "title": theme.get("title", ""),
     }
+    # 보컬곡: prompt(가사) 필수. lyrics(우선) 또는 prompt 필드를 받는다.
+    if not instrumental:
+        lyrics = (theme.get("lyrics") or theme.get("prompt") or "").strip()
+        if not lyrics:
+            raise ValueError(
+                "보컬곡(instrumental=false)에는 가사가 필요합니다 — theme['lyrics'] 또는 theme['prompt'] 를 채워주세요."
+            )
+        body["prompt"] = lyrics
     # 선택 파라미터 — 값이 있을 때만 포함.
     for opt in ("negativeTags", "vocalGender", "styleWeight", "weirdnessConstraint"):
         if theme.get(opt) is not None:

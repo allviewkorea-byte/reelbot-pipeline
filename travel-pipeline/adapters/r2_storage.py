@@ -354,6 +354,93 @@ def music_exists(theme_slug: str, audio_id: str) -> bool:
         return False
 
 
+def download_music_object(object_key: str, dest: str) -> str:
+    """음악 버킷의 오브젝트를 로컬 dest 로 내려받는다(마스터링/믹스 입력용)."""
+    client = _get_client()
+    bucket = _music_bucket()
+    try:
+        client.download_file(bucket, object_key, dest)
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(
+            f"R2 음악 다운로드 실패(bucket={bucket}, key={object_key}): {e}"
+        ) from e
+    return dest
+
+
+# ── 마스터본(-14 LUFS 통일) — music-masters/{slug}/mastered/{audio_id}.mp3 ──
+def mastered_music_key(theme_slug: str, audio_id: str) -> str:
+    return f"music-masters/{theme_slug.strip('/')}/mastered/{audio_id}.mp3"
+
+
+def upload_mastered_music(file_path: str, theme_slug: str, audio_id: str) -> str:
+    """마스터본 mp3 를 R2(.../mastered/{audio_id}.mp3)에 올리고 공개 URL 반환."""
+    bucket = os.environ.get("R2_MUSIC_BUCKET")
+    public_base = os.environ.get("R2_MUSIC_PUBLIC_BASE_URL")
+    if not bucket:
+        logger.warning(
+            "R2_MUSIC_BUCKET 미설정 — 기본 버킷 사용. 7일 Lifecycle 로 마스터본이 "
+            "삭제될 수 있으니 Lifecycle 없는 전용 버킷 설정을 권장합니다."
+        )
+    return upload_image(
+        file_path,
+        mastered_music_key(theme_slug, audio_id),
+        bucket=bucket,
+        public_base_url=public_base,
+        content_type="audio/mpeg",
+    )
+
+
+def mastered_music_url(theme_slug: str, audio_id: str) -> str:
+    return f"{_music_public_base()}/{mastered_music_key(theme_slug, audio_id)}"
+
+
+def mastered_music_exists(theme_slug: str, audio_id: str) -> bool:
+    """마스터본이 R2 에 이미 있는지(head_object). 멱등 마스터링 판단용."""
+    if not is_available():
+        return False
+    try:
+        _get_client().head_object(
+            Bucket=_music_bucket(), Key=mastered_music_key(theme_slug, audio_id)
+        )
+        return True
+    except Exception:  # noqa: BLE001 - 없음/권한/네트워크 → 미존재로 처리
+        return False
+
+
+# ── 롱폼 믹스 — music-mixes/{slug}/{mix_id}.mp3 + {mix_id}.json(오프셋 메타) ──
+def music_mix_key(theme_slug: str, mix_id: str, ext: str = "mp3") -> str:
+    return f"music-mixes/{theme_slug.strip('/')}/{mix_id}.{ext.lstrip('.')}"
+
+
+def upload_music_mix(
+    file_path: str,
+    theme_slug: str,
+    mix_id: str,
+    *,
+    ext: str = "mp3",
+    content_type: str = "audio/mpeg",
+) -> str:
+    """롱폼 믹스 산출물(mp3/json)을 R2(music-mixes/{slug}/{mix_id}.{ext})에 올린다."""
+    bucket = os.environ.get("R2_MUSIC_BUCKET")
+    public_base = os.environ.get("R2_MUSIC_PUBLIC_BASE_URL")
+    if not bucket:
+        logger.warning(
+            "R2_MUSIC_BUCKET 미설정 — 기본 버킷 사용. 7일 Lifecycle 로 믹스가 삭제될 "
+            "수 있으니 Lifecycle 없는 전용 버킷 설정을 권장합니다."
+        )
+    return upload_image(
+        file_path,
+        music_mix_key(theme_slug, mix_id, ext),
+        bucket=bucket,
+        public_base_url=public_base,
+        content_type=content_type,
+    )
+
+
+def music_mix_url(theme_slug: str, mix_id: str, ext: str = "mp3") -> str:
+    return f"{_music_public_base()}/{music_mix_key(theme_slug, mix_id, ext)}"
+
+
 def list_cast_objects() -> dict[str, int]:
     """cast/ 프리픽스 아래 모든 오브젝트의 {키: LastModified epoch(int)} 맵.
 
