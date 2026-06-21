@@ -219,12 +219,16 @@ def run_theme(
     persist: bool = True,
     theme_model: str | None = None,
     lyrics_model: str | None = None,
+    video: bool = False,
+    video_seconds: float | None = None,
     progress=None,
 ) -> dict:
     """주제 1개 → 음원 믹스 1개(얇은 오케스트레이터).
 
     theme 미지정 시 music_theme.generate_theme() 로 1개 생성한다. 주제의 type 으로
-    produce 가 연주/보컬 경로를 자동 선택한다. Returns: {theme, mix, result}.
+    produce 가 연주/보컬 경로를 자동 선택한다.
+    video=True 면 믹스 후 영상(mp4)까지 이어 만든다(기본 False — 기존 동작 회귀 0).
+    Returns: {theme, mix, result, video?}.
     """
     from services import music_theme  # 지연 import(순환 회피)
 
@@ -252,4 +256,14 @@ def run_theme(
         model=lyrics_model,
         progress=progress,
     )
-    return {"theme": theme, "mix": result.get("mix"), "result": result}
+    out = {"theme": theme, "mix": result.get("mix"), "result": result}
+
+    # (선택) 영상화 — 믹스가 있을 때만. 실패해도 음원 결과는 보존.
+    if video and result.get("mix"):
+        from services import music_video  # 지연 import(선택 기능)
+        if progress:
+            progress("영상 합성...")
+        out["video"] = music_video.make_video(
+            theme, result["mix"], seconds=video_seconds
+        )
+    return out
