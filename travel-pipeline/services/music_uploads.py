@@ -76,6 +76,35 @@ def record_pending(
         return {"stored": False, "error": msg}
 
 
+def delete_pending(mix_id: str) -> dict:
+    """단일 mix_id 큐 행만 삭제(다른 행 영향 0). {deleted:int, error}.
+
+    mix_id=eq 필터로 정확히 한 행만 대상으로 한다. Prefer: return=representation 으로
+    실제 삭제된 행 수를 확인한다. R2 파일은 만료 정책에 맡기고 즉시 지우지 않는다(안전).
+    """
+    url, key = _supabase_cfg()
+    if not (url and key):
+        return {"deleted": 0, "error": "supabase 미설정"}
+    if not (mix_id or "").strip():
+        return {"deleted": 0, "error": "mix_id 필요"}
+    try:
+        with httpx.Client(timeout=30.0) as c:
+            r = c.delete(
+                f"{url}/rest/v1/{_TABLE}",
+                headers={**_headers(key), "Prefer": "return=representation"},
+                params={"mix_id": f"eq.{mix_id}"},
+            )
+            r.raise_for_status()
+            rows = r.json() if r.content else []
+        n = len(rows) if isinstance(rows, list) else 0
+        logger.info("[music-uploads] 삭제 OK (mix_id=%s, %d행)", mix_id, n)
+        return {"deleted": n, "error": None}
+    except Exception as e:  # noqa: BLE001
+        msg = _http_err(e)
+        logger.warning("[music-uploads] 삭제 실패(mix_id=%s): %s", mix_id, msg)
+        return {"deleted": 0, "error": msg}
+
+
 def list_pending() -> list[dict]:
     """검토 대기(status=pending) 목록 최신순. 미설정/오류 시 빈 리스트."""
     url, key = _supabase_cfg()
