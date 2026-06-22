@@ -207,8 +207,38 @@ def _validate(theme: dict) -> dict:
 
 
 # ── 생성 ─────────────────────────────────────────────────────────────────
+def _trend_hint() -> str:
+    """최신 트렌드 인사이트 → 주제 생성 프롬프트에 끼울 '영감' 문구(가중치 아님).
+
+    인사이트가 없으면 빈 문자열(기존 로직 회귀 0). 특정 주제 강제·빈도 조작은 절대 안 함.
+    """
+    try:
+        from services import music_trend
+        ins = music_trend.get_latest()
+    except Exception:  # noqa: BLE001 - 조회 실패 → 영감 없이 진행
+        return ""
+    if not ins:
+        return ""
+    moods = ", ".join(str(x) for x in (ins.get("mood_keywords") or []))
+    titles = ", ".join(str(x) for x in (ins.get("title_patterns") or []))
+    summary = str(ins.get("summary") or "")
+    if not (moods or titles or summary):
+        return ""
+    return (
+        "\n\n[요즘 트렌드 — 영감용(가중치/빈도 조작 아님)]\n"
+        f"- 잘 되는 무드: {moods}\n"
+        f"- 제목 경향: {titles}\n"
+        f"- 인사이트: {summary}\n"
+        "이 결을 참고하되 그대로 베끼지 말고 우리 채널 톤으로 재해석하라. "
+        "특정 주제를 강제 선택하거나 빈도를 높이지 말 것 — 다양성(5번)이 우선."
+    )
+
+
 def _build_messages(
-    catalog: str, recent_genres: list[str], recent_situations: list[str]
+    catalog: str,
+    recent_genres: list[str],
+    recent_situations: list[str],
+    trend_hint: str = "",
 ) -> tuple[str, str]:
     system = (
         "너는 루프탑뮤직의 주제 큐레이터다. 아래 '주제 헌법'(SSOT)을 절대 기준으로 삼아 "
@@ -224,6 +254,7 @@ def _build_messages(
         "- 4번 코히어런스(상황×무드×장르가 말 되는 조합)·6번 style_prompt 작성법을 지킨다.\n"
         "- type 이 instrumental 이면 lyric_tone 은 null, vocal 이면 lyric_tone 한 줄을 채운다.\n"
         "- slug 은 영문 소문자_스네이크(^[a-z0-9_]+$).\n"
+        f"{trend_hint}\n"
         "**JSON 외 다른 텍스트 금지.**"
     )
     return system, user
@@ -254,7 +285,9 @@ def generate_theme(
     ]
     mdl = _model(model)
 
-    system, user = _build_messages(catalog, recent_genres, recent_situations)
+    system, user = _build_messages(
+        catalog, recent_genres, recent_situations, trend_hint=_trend_hint()
+    )
 
     last: dict | None = None
     for attempt in range(1, max_tries + 1):
