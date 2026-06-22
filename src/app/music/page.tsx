@@ -9,7 +9,7 @@ import { MUSIC_CHANNEL_ID, MUSIC_CHANNEL_NAME, fmtCount, type MusicMetrics } fro
 import { MusicPipeline } from "@/components/music/MusicPipeline"
 import { MusicMarquee } from "@/components/music/MusicMarquee"
 import { MusicTrendPanel } from "@/components/music/MusicTrendPanel"
-import { MusicTodayCard } from "@/components/music/MusicTodayCard"
+import { MusicQueuePreview } from "@/components/music/MusicQueuePreview"
 
 interface ChannelStatus {
   isActive: boolean
@@ -194,7 +194,7 @@ export default function MusicDashboardPage() {
           <MusicTrendPanel />
         </div>
         <div className="[&>div]:h-full">
-          <MusicTodayCard isActive={isActive} isPublic={isPublic} dailyCap={dailyCap} />
+          <MusicQueuePreview />
         </div>
       </div>
 

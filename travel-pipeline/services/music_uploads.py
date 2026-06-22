@@ -12,6 +12,7 @@ music_store 의 PostgREST(httpx) 패턴을 재사용(신규 의존성 0). mix_id
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
@@ -20,6 +21,7 @@ from services.music_store import _http_err, _supabase_cfg
 logger = logging.getLogger(__name__)
 
 _TABLE = "music_uploads"
+_KST = timezone(timedelta(hours=9))
 _SELECT = (
     "slug,mix_id,title_kr,genre,mood,mp4_url,gpt_prompt,thumbnail_r2_key,viz_spec,"
     "status,youtube_video_id,youtube_url,created_at"
@@ -162,6 +164,38 @@ def get_viz_spec(mix_id: str) -> dict | None:
         return None
     spec = row.get("viz_spec")
     return spec if isinstance(spec, dict) and spec else None
+
+
+def count_today_kst() -> int:
+    """오늘(KST 자정 이후) 생성된 music_uploads row 수 — cron 중복 생성 스킵 판단용(#28).
+
+    created_at >= KST 자정(UTC 환산) 으로 필터. Prefer: count=exact 의 Content-Range 로
+    총개수만 받는다(전체 fetch 회피). 미설정/오류 시 0(→ 호출부가 생성 진행, 안전).
+    """
+    url, key = _supabase_cfg()
+    if not (url and key):
+        return 0
+    now = datetime.now(_KST)
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    since = midnight.astimezone(timezone.utc).isoformat()
+    try:
+        with httpx.Client(timeout=30.0) as c:
+            r = c.get(
+                f"{url}/rest/v1/{_TABLE}",
+                headers={**_headers(key), "Prefer": "count=exact"},
+                params={"created_at": f"gte.{since}", "select": "mix_id", "limit": "1"},
+            )
+            r.raise_for_status()
+            cr = r.headers.get("content-range", "")  # 예: "0-0/3"
+            if "/" in cr:
+                total = cr.rsplit("/", 1)[-1]
+                if total.isdigit():
+                    return int(total)
+            rows = r.json()
+            return len(rows) if isinstance(rows, list) else 0
+    except Exception as e:  # noqa: BLE001 - 조회 실패 시 0(생성 진행, 안전)
+        logger.warning("[music-uploads] 오늘 생성 수 조회 실패: %s", _http_err(e))
+        return 0
 
 
 def list_uploaded(limit: int = 12) -> list[dict]:

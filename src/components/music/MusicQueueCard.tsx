@@ -33,7 +33,8 @@ function fileToDataUrl(file: File): Promise<string> {
   })
 }
 
-const cardClass = "flex flex-col overflow-hidden rounded-xl border border-border bg-card"
+// 카드 분리감 강화(#28) — 보더 + 미세 그림자 + ring 으로 각 카드를 독립 단위로.
+const cardClass = "flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-md ring-1 ring-black/5"
 
 // 빠른 테스트 카드(임시, 보라 점선) — 합성 음원 10초. DB·유튜브 미저장.
 export function TestCard({ loading, video }: { loading: boolean; video: { url: string; engine?: string } | null }) {
