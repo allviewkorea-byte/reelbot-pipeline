@@ -100,6 +100,32 @@ def test_render(body: TestRenderBody | None = None):
     return {"ok": True, **result}
 
 
+@router.post("/manual-render")
+def manual_render(background: BackgroundTasks, body: TestRenderBody | None = None):
+    """수동 영상 생성(#26) — 진짜 음원 1곡 → 풀 렌더 → 검토 큐 적재(비동기). 유튜브 X.
+
+    수 분~수십 분 걸려 BackgroundTasks 로 시작하고 job_id 즉시 반환. 동시 1개 제한.
+    완료 시 music_uploads 에 status=pending 으로 저장(검토 큐 일반 카드). 상태는
+    GET /manual-render/status/{job_id} 폴링.
+    """
+    from services import music_manual
+    started = music_manual.start(mood=body.mood if body else None)
+    if not started.get("ok"):
+        raise HTTPException(status_code=409, detail=started.get("error") or "이미 진행 중")
+    background.add_task(music_manual.run, started["job_id"])
+    return {"ok": True, "job_id": started["job_id"]}
+
+
+@router.get("/manual-render/status/{job_id}")
+def manual_render_status(job_id: str):
+    """수동 생성 진행 상태 폴링 — {status, step, video_url, mix_id, error}. 없으면 404."""
+    from services import music_manual
+    st = music_manual.get_status(job_id)
+    if st is None:
+        raise HTTPException(status_code=404, detail="해당 job 을 찾을 수 없습니다(재시작 시 소실).")
+    return st
+
+
 @router.get("/trends")
 def trends_latest():
     """최신 트렌드 인사이트(대시보드/가이드 표시용). 없으면 trend=None."""

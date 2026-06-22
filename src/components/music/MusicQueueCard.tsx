@@ -35,7 +35,7 @@ function fileToDataUrl(file: File): Promise<string> {
 
 const cardClass = "flex flex-col overflow-hidden rounded-xl border border-border bg-card"
 
-// 테스트 영상 카드(임시) — 그리드 첫 자리. DB·유튜브 미저장.
+// 빠른 테스트 카드(임시, 보라 점선) — 합성 음원 10초. DB·유튜브 미저장.
 export function TestCard({ loading, video }: { loading: boolean; video: { url: string; engine?: string } | null }) {
   return (
     <div className={cn(cardClass, "border-dashed border-primary/40")}>
@@ -47,13 +47,44 @@ export function TestCard({ loading, video }: { loading: boolean; video: { url: s
         ) : (
           <div className="flex h-full items-center justify-center text-muted-foreground"><MonitorPlay className="h-7 w-7" /></div>
         )}
-        <span className="absolute left-2 top-2 rounded-full bg-primary/20 px-2 py-0.5 text-[11px] font-semibold text-primary">테스트</span>
+        <span className="absolute left-2 top-2 rounded-full bg-primary/20 px-2 py-0.5 text-[11px] font-semibold text-primary">테스트 10초</span>
       </div>
       <div className="flex flex-col gap-1 p-3">
-        <span className="text-sm font-semibold text-foreground">테스트 영상</span>
+        <span className="text-sm font-semibold text-foreground">빠른 테스트</span>
         <span className="text-xs text-muted-foreground">
           {video?.engine ? `렌더 엔진: ${video.engine} · ` : ""}DB·유튜브에 저장되지 않습니다.
         </span>
+      </div>
+    </div>
+  )
+}
+
+// 수동 영상 생성 진행 카드(#26) — 완료되면 사라지고 검토 큐 일반 카드로 등장(테스트 배지 X).
+export function ManualProgressCard({ step }: { step: string }) {
+  const STEPS = ["주제", "음원", "가사", "렌더", "완료"]
+  const idx = Math.max(0, STEPS.indexOf(step))
+  return (
+    <div className={cardClass}>
+      <div className="relative flex aspect-video w-full flex-col items-center justify-center gap-2 bg-black text-muted-foreground">
+        <Loader2 className="h-7 w-7 animate-spin text-primary" />
+        <span className="text-xs text-foreground/90">{step}…</span>
+      </div>
+      <div className="flex flex-col gap-2 p-3">
+        <span className="text-sm font-semibold text-foreground">수동 영상 생성 중</span>
+        <div className="flex flex-wrap items-center gap-1">
+          {STEPS.map((s, i) => (
+            <span
+              key={s}
+              className={cn(
+                "rounded px-1.5 py-0.5 text-[10px] font-medium",
+                i < idx ? "bg-emerald-500/15 text-emerald-400" : i === idx ? "bg-primary/15 text-primary" : "bg-secondary/40 text-muted-foreground",
+              )}
+            >
+              {s}
+            </span>
+          ))}
+        </div>
+        <span className="text-xs text-muted-foreground">진짜 음원 1곡 · 최대 30분 소요 가능. 완료 시 검토 큐에 자동 추가됩니다.</span>
       </div>
     </div>
   )
