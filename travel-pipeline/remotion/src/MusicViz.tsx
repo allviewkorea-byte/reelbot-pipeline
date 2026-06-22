@@ -20,15 +20,19 @@ const dancing = loadDancing();
 const SERIF = playfair.fontFamily;
 const SCRIPT = dancing.fontFamily;
 
-// 곡 분석 결과(#20). null 이면 mood 기반 색상으로 폴백.
+// 곡 분석 결과(#20·#27). null 이면 mood 기반 색상으로 폴백.
 export type VizSpec = {
   primary_color?: string;
   secondary_color?: string;
-  text_color?: string;
+  text_color?: string; // #27: 무시(텍스트는 항상 흰색). 호환 위해 필드만 유지.
   subtitle_en?: string;
   dominant_emotion?: string;
   scene_keywords?: string[];
   lighting?: string;
+  location_en?: string; // #27: WHERE 라벨
+  season?: string;
+  location_category?: string;
+  mood_category?: string;
 };
 
 // Composition Props 제약(Record<string, unknown>)을 만족하려면 type 별칭이어야 한다.
@@ -64,8 +68,10 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
   const [mc1, mc2] = moodColors(mood);
   const c1 = vizSpec?.primary_color || mc1;
   const c2 = vizSpec?.secondary_color || mc2;
-  const textColor = vizSpec?.text_color || "#F5F0E6";
+  // #27: 모든 텍스트 순백 고정(vizSpec.text_color 무시). 이퀄·배경 색감만 mood 별 유지.
+  const textColor = "#FFFFFF";
   const subtitleEn = (vizSpec?.subtitle_en || "").trim();
+  const locationEn = (vizSpec?.location_en || "").trim();
   const firstTitle = (tracks[0]?.title || "").trim();
 
   // ── 이퀄 막대 진폭(최근 프레임 평균으로 감쇠) ──────────────────────
@@ -166,6 +172,20 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
           background: "linear-gradient(to top, rgba(0,0,0,0.45), rgba(0,0,0,0))",
         }}
       />
+
+      {/* #27 WHERE 라벨 — 상단 중앙, 작은 산세리프, 흰색 70%. 영상 내내 유지(채널 정체성). */}
+      {locationEn && (
+        <div
+          style={{
+            position: "absolute", top: height * 0.035, width: "100%", textAlign: "center",
+            fontFamily: "sans-serif", fontSize: width * 0.012, fontWeight: 600,
+            letterSpacing: width * 0.004, color: "#FFFFFF", opacity: 0.7,
+            textShadow: "0 2px 10px rgba(0,0,0,0.7)",
+          }}
+        >
+          WHERE : {locationEn}
+        </div>
+      )}
 
       {/* 2) 인트로 정지 보조 텍스트(부제 좌중 / 곡제목 우중하단) — 0~4.7 페이드 */}
       {introOpacity > 0.001 && (

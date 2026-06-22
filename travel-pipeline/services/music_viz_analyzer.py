@@ -8,7 +8,8 @@ fallback(키워드 매핑)으로 **항상 유효한 VizSpec** 을 돌려준다(�
 
 VizSpec(JSON):
   { primary_color, secondary_color, text_color, subtitle_en,
-    dominant_emotion, scene_keywords[], lighting }
+    dominant_emotion, scene_keywords[], lighting,
+    season, location_en, location_category, mood_category }   # #27 (시즌·장소·분위기)
 """
 
 from __future__ import annotations
@@ -21,52 +22,69 @@ logger = logging.getLogger(__name__)
 
 _HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
-# 장르/무드/상황 키워드 → 색상 프리셋(primary, secondary, text) + 부제·키워드·조명.
+# #27 곡 분석 확장 — 허용 값(검증·#28 자동 플레이리스트 재사용).
+_SEASONS = {"spring", "summer", "autumn", "winter", "all_season"}
+_LOC_CATS = {"city", "cafe", "nature", "beach", "home", "road"}
+_MOOD_CATS = {"chill", "energetic", "sad", "focus", "happy"}
+
+# 장르/무드/상황 키워드 → 색상 프리셋(primary, secondary, text) + 부제·키워드·조명 + 시즌·장소.
 _PALETTES: list[dict] = [
     {
         "keys": ["시티팝", "citypop", "city pop", "드라이브", "drive", "driving",
                  "운전", "출근", "퇴근", "commute"],
         "primary": "#7C5CFF", "secondary": "#4ECDFF", "text": "#F5F0E6",
         "subtitle": "morning drive city pop",
-        "keywords": ["dawn road", "open car window", "wind"],
+        "keywords": ["dawn highway", "city skyline", "open road"],
         "emotion": "free, energetic", "lighting": "warm sunrise",
+        "season": "spring", "location_en": "Dawn Highway",
+        "location_category": "road", "mood_category": "chill",
     },
     {
         "keys": ["카페", "cafe", "재즈", "jazz", "커피", "coffee", "브런치", "lounge", "라운지"],
         "primary": "#F5A623", "secondary": "#FFD56B", "text": "#F5F0E6",
         "subtitle": "warm afternoon cafe jazz",
-        "keywords": ["cozy cafe", "coffee cup", "window light"],
+        "keywords": ["cozy cafe interior", "coffee cup overhead", "window light"],
         "emotion": "calm, cozy", "lighting": "warm amber light",
+        "season": "autumn", "location_en": "Cozy Cafe",
+        "location_category": "cafe", "mood_category": "chill",
     },
     {
         "keys": ["이별", "헤어", "breakup", "발라드", "ballad", "슬픔", "sad", "그리움", "눈물"],
         "primary": "#4E6CFF", "secondary": "#9B6CFF", "text": "#E8EAF0",
         "subtitle": "rainy night sad ballad",
-        "keywords": ["rainy window", "night city", "neon glow"],
+        "keywords": ["rain-streaked window", "empty night street", "neon glow"],
         "emotion": "melancholic, tender", "lighting": "cool moonlight",
+        "season": "winter", "location_en": "Rainy Street",
+        "location_category": "city", "mood_category": "sad",
     },
     {
         "keys": ["운동", "헬스", "workout", "gym", "러닝", "running", "동기", "motivat",
                  "fitness", "트레이닝"],
         "primary": "#FF4E4E", "secondary": "#FF9B3D", "text": "#FFFFFF",
         "subtitle": "high energy workout beats",
-        "keywords": ["running track", "city sunrise", "motion blur"],
+        "keywords": ["coastal running trail", "city sunrise", "ocean horizon"],
         "emotion": "powerful, driven", "lighting": "bright daylight",
+        "season": "summer", "location_en": "Coastal Run",
+        "location_category": "beach", "mood_category": "energetic",
     },
     {
         "keys": ["수면", "잠", "취침", "sleep", "공부", "스터디", "study", "집중", "focus",
                  "독서", "lofi", "lo-fi"],
         "primary": "#34D399", "secondary": "#A7F3D0", "text": "#F0F5EE",
         "subtitle": "calm late night lofi",
-        "keywords": ["quiet desk", "soft lamp", "night sky"],
+        "keywords": ["quiet desk by window", "moonlit room", "still lake"],
         "emotion": "soothing, focused", "lighting": "soft dim light",
+        "season": "all_season", "location_en": "Quiet Room",
+        "location_category": "home", "mood_category": "focus",
     },
 ]
 _DEFAULT_PALETTE = {
     "primary": "#7C5CFF", "secondary": "#4ECDFF", "text": "#F5F0E6",
     "subtitle": "smooth music vibes",
-    "keywords": ["soft bokeh", "ambient light", "calm scene"],
+    "keywords": ["city skyline", "soft bokeh lights", "calm horizon"],
     "emotion": "smooth, warm", "lighting": "warm light",
+    "season": "all_season", "location_en": "City View",
+    "location_category": "city", "mood_category": "chill",
 }
 
 
@@ -95,6 +113,10 @@ def _fallback_spec(theme: dict) -> dict:
         "dominant_emotion": p["emotion"],
         "scene_keywords": list(p["keywords"]),
         "lighting": p["lighting"],
+        "season": p["season"],
+        "location_en": p["location_en"],
+        "location_category": p["location_category"],
+        "mood_category": p["mood_category"],
     }
 
 
@@ -121,6 +143,19 @@ def _coerce(spec: dict, fallback: dict) -> dict:
         clean = [str(x).strip() for x in kws if str(x).strip()][:5]
         if clean:
             out["scene_keywords"] = clean
+    # #27 시즌·장소·분위기 — 허용 값만 채택, 아니면 fallback 유지.
+    season = str(spec.get("season", "")).strip().lower()
+    if season in _SEASONS:
+        out["season"] = season
+    loc = str(spec.get("location_en", "")).strip()
+    if 2 <= len(loc) <= 40:
+        out["location_en"] = loc
+    lcat = str(spec.get("location_category", "")).strip().lower()
+    if lcat in _LOC_CATS:
+        out["location_category"] = lcat
+    mcat = str(spec.get("mood_category", "")).strip().lower()
+    if mcat in _MOOD_CATS:
+        out["mood_category"] = mcat
     return out
 
 
@@ -129,13 +164,19 @@ def _gpt_spec(theme: dict, fallback: dict, *, model: str | None = None) -> dict:
 
     mdl = (model or os.getenv("MUSIC_VIZ_MODEL") or "claude-haiku-4-5-20251001").strip()
     system = (
-        "You are an art director for a music video channel. Given a song's metadata, "
-        "decide its visual language. Return STRICT JSON only with keys: "
+        "You are an art director for a music video channel with a landscape/city/nature "
+        "visual identity (no people focus). Given a song's metadata, decide its visual "
+        "language. Return STRICT JSON only with keys: "
         "primary_color, secondary_color, text_color (all #RRGGBB hex), "
         "subtitle_en (one poetic lowercase english line, 5-8 words), "
-        "dominant_emotion (2-3 words), scene_keywords (3-5 short english phrases), "
-        "lighting (short english). Colors must match genre/mood; cream/off-white text. "
-        "No markdown, no commentary."
+        "dominant_emotion (2-3 words), scene_keywords (3-5 short english LANDSCAPE/place "
+        "phrases, no people), lighting (short english), "
+        "season (one of: spring, summer, autumn, winter, all_season), "
+        "location_en (a short evocative english PLACE name for a WHERE label, e.g. "
+        "'Blue Pool', 'New York', 'Cozy Cafe', 'Rainy Street'), "
+        "location_category (one of: city, cafe, nature, beach, home, road), "
+        "mood_category (one of: chill, energetic, sad, focus, happy). "
+        "Colors must match genre/mood. No markdown, no commentary."
     )
     user = (
         f"genre: {theme.get('genre','')}\n"

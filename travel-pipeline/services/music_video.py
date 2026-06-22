@@ -206,6 +206,16 @@ def _thumb_person() -> str:
     ])
 
 
+def _thumb_subject() -> str:
+    """#27 인물 비중 — 80% 풍경(사람 없음) / 15% 먼 인물(얼굴 강조 X) / 5% 애견·동물."""
+    r = random.random()
+    if r < 0.80:
+        return "No people — focus entirely on the landscape, architecture and nature."
+    if r < 0.95:
+        return "A distant figure as a small part of the scene, seen from afar, no face emphasis."
+    return "A cute dog or small animal naturally in the scene (e.g. swimming or strolling)."
+
+
 def _thumb_trend_hint() -> str:
     """최신 트렌드 mood_keywords 가 있으면 톤에 살짝 섞을 한 줄(없으면 빈값 → 회귀 0)."""
     try:
@@ -222,17 +232,19 @@ def _thumb_trend_hint() -> str:
 def build_thumbnail_prompt(theme: dict, viz_spec: dict | None = None) -> str:
     """주제 → ChatGPT(gpt-image)에 붙여넣을 영어 썸네일 프롬프트(#8 큐 복사용).
 
-    #20: viz_spec(곡 분석) 이 있으면 색감·씬키워드·조명을 주입하고 **텍스트 0개**(PLAY LIST·
-    글자는 Remotion 이 그림)로 만든다. viz_spec 없으면 #17 동작(시그니처 호환).
-    배경은 데이터(_THUMB_SCENES) 매핑, 인물·성별은 매 호출 랜덤. 영어 한 문단.
+    #27: viz_spec 가 있으면 **풍경·도시·자연 중심**(인물 거의 없음, 80/15/5) + location_en·
+    씬키워드 강조 + 색감, **텍스트 0개**(글자는 Remotion 이 그림). viz_spec 없으면 #17 동작.
+    배경은 데이터(_THUMB_SCENES) 매핑. 영어 한 문단.
     """
     scene, tone = _thumb_scene(theme)
     person = _thumb_person()
 
     if viz_spec:
-        # #20: 깨끗한(텍스트 없는) 이미지 — Remotion 이 PLAY LIST·부제·곡제목을 그린다.
+        # #27: 풍경 중심 — Remotion 이 PLAY LIST·부제·곡제목·WHERE 를 그린다(이미지엔 글자 0).
         kws = ", ".join((viz_spec.get("scene_keywords") or [])[:5])
-        scene_bit = f"{scene}" + (f" ({kws})" if kws else "")
+        scene_bit = kws if kws else scene
+        loc = str(viz_spec.get("location_en") or "").strip()
+        place_bit = f"Location: {loc}. " if loc else ""
         lighting = str(viz_spec.get("lighting") or "").strip()
         light_bit = f"{lighting} lighting. " if lighting else ""
         colors = ", ".join(
@@ -240,11 +252,12 @@ def build_thumbnail_prompt(theme: dict, viz_spec: dict | None = None) -> str:
         )
         color_bit = f"Color tone: {colors}. " if colors else ""
         return (
-            f"YouTube music thumbnail, 16:9 aspect ratio. "
-            f"Background: {scene_bit}. "
-            f"{person} in the scene, natural candid pose. "
+            f"Cinematic landscape photo for a music playlist thumbnail, 16:9 aspect ratio. "
+            f"{place_bit}"
+            f"Scene: {scene_bit}. "
+            f"{_thumb_subject()} "
             f"{color_bit}{light_bit}"
-            f"Cinematic, high quality, photographic. "
+            f"Photographic, high quality, atmospheric depth, no people faces. "
             f"Absolutely no text, no letters, no words, no logo, no watermark."
         )
 
