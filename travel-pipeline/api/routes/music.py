@@ -56,6 +56,35 @@ def produce(background: BackgroundTasks, authorization: str | None = Header(defa
     return {"ok": True, "status": "started"}
 
 
+def _run_trend_analysis() -> None:
+    """백그라운드: 유튜브 인기 음악 분석 → music_trends 저장."""
+    try:
+        from services import music_trend
+        insight = music_trend.run_analysis()
+        logger.info("[music-trend] 분석 완료 무드=%s", insight.get("mood_keywords"))
+    except Exception as e:  # noqa: BLE001 - 백그라운드 실패는 로깅만
+        logger.warning("[music-trend] 분석 실패: %s", e)
+
+
+@router.post("/trends/analyze")
+def trends_analyze(background: BackgroundTasks, authorization: str | None = Header(default=None)):
+    """cron 트리거 — 트렌드 분석을 비동기로 시작하고 즉시 반환(주 2회).
+
+    유튜브 검색 + GPT 라 수십 초~분 → fire-and-forget. CRON_SECRET 헤더 필수.
+    """
+    if not _authorized_cron(authorization):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    background.add_task(_run_trend_analysis)
+    return {"ok": True, "status": "started"}
+
+
+@router.get("/trends")
+def trends_latest():
+    """최신 트렌드 인사이트(대시보드/가이드 표시용). 없으면 trend=None."""
+    from services import music_trend
+    return {"trend": music_trend.get_latest()}
+
+
 @router.post("/suno-callback")
 async def suno_callback(request: Request, theme_slug: str = ""):
     """suno 생성 콜백. complete 면 멱등 R2 저장을 트리거한다."""
