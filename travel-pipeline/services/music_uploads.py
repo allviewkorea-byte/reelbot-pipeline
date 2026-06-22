@@ -164,6 +164,29 @@ def get_viz_spec(mix_id: str) -> dict | None:
     return spec if isinstance(spec, dict) and spec else None
 
 
+def list_uploaded(limit: int = 12) -> list[dict]:
+    """공개 업로드 완료(status=uploaded) 목록 최신순 — 대시보드 '최근 업로드' 마퀴용."""
+    url, key = _supabase_cfg()
+    if not (url and key):
+        return []
+    try:
+        with httpx.Client(timeout=30.0) as c:
+            r = c.get(
+                f"{url}/rest/v1/{_TABLE}",
+                headers=_headers(key),
+                params={
+                    "status": "eq.uploaded", "select": _SELECT,
+                    "order": "created_at.desc", "limit": str(limit),
+                },
+            )
+            r.raise_for_status()
+            rows = r.json()
+        return rows if isinstance(rows, list) else []
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[music-uploads] 업로드 목록 조회 실패: %s", _http_err(e))
+        return []
+
+
 def set_thumbnail(mix_id: str, thumbnail_r2_key: str) -> dict:
     """썸네일 R2 키 업데이트(PATCH). {stored, error}."""
     url, key = _supabase_cfg()

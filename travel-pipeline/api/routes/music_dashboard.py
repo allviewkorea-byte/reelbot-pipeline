@@ -43,6 +43,12 @@ def queue():
     return {"queue": [_with_thumb_url(r) for r in music_uploads.list_pending()]}
 
 
+@router.get("/recent")
+def recent_uploaded():
+    """공개 업로드 완료 영상 최신순 — 대시보드 '최근 업로드' 마퀴용(썸네일 URL 동봉)."""
+    return {"videos": [_with_thumb_url(r) for r in music_uploads.list_uploaded(12)]}
+
+
 @router.delete("/queue/{mix_id}")
 def delete_queue_item(mix_id: str):
     """큐에서 단일 영상 삭제(깨진/못 쓰는 영상 정리). 해당 mix_id 한 행만 영향.
