@@ -1,6 +1,7 @@
 import {
   AbsoluteFill,
   Audio,
+  Easing,
   Img,
   interpolate,
   staticFile,
@@ -46,12 +47,13 @@ const NUM_SAMPLES = 256; // visualizeAudio 는 2의 거듭제곱 필요.
 const SMOOTH_FRAMES = 4; // 최근 N프레임 평균 → 부드러운 감쇠(차분).
 
 // 인트로 타임라인(초) — A 옵션 확정.
-const STATIC_END = 3.5; // 0~3.5 정지(PLAY LIST·부제·곡제목)
-const FADE_END = 4.7; // 3.5~4.7 페이드아웃 + 이퀄 등장
+const STATIC_END = 3.5; // 0~3.5 정지(거대 PLAY LIST + 부제 + 곡제목)
+const FADE_END = 4.7; // 3.5~4.7 PLAY LIST 좌하단 이동·축소·페이드 + 이퀄 등장
 const TYPE_START = 4.9; // 4.9~6.1 타이프라이터 재등장
 const TYPE_END = 6.1; // 6.1~ 본 영상
 
 const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp" } as const;
+const easeInOut = Easing.bezier(0.65, 0, 0.35, 1);
 
 export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, vizSpec }) => {
   const frame = useCurrentFrame();
@@ -67,6 +69,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
   const firstTitle = (tracks[0]?.title || "").trim();
 
   // ── 이퀄 막대 진폭(최근 프레임 평균으로 감쇠) ──────────────────────
+  // 오디오 디코드가 안 되는 경우에도 막대가 보이도록 idle 사인으로 폴백(가시성 보장).
   const values: number[] = new Array(BARS).fill(0);
   if (audioData) {
     const windows = [];
@@ -81,6 +84,10 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
       for (const w of windows) sum += w[idx] || 0;
       values[i] = sum / windows.length;
     }
+  } else {
+    for (let i = 0; i < BARS; i++) {
+      values[i] = 0.22 + 0.16 * (0.5 + 0.5 * Math.sin(frame / 6 + i * 0.5));
+    }
   }
 
   // ── 레이아웃 ──────────────────────────────────────────────────────
@@ -91,12 +98,23 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
   const maxBarH = height * 0.12;
   const baseBottom = height * 0.035;
 
-  // ── 인트로 모션 진행도 ────────────────────────────────────────────
+  // ── 인트로: 부제/곡제목 정지 표시 페이드(0~4.7) ───────────────────
   const introOpacity = interpolate(frame, [STATIC_END * fps, FADE_END * fps], [1, 0], clamp);
+
+  // ── 이퀄 등장(3.5초부터 아래에서 상승, 4.7초 완전 등장 후 유지) ────
   const eqIn = interpolate(frame, [STATIC_END * fps, FADE_END * fps], [0, 1], clamp);
   const eqTranslateY = (1 - eqIn) * (maxBarH + baseBottom + 60);
-  const typeProgress = interpolate(frame, [TYPE_START * fps, TYPE_END * fps], [0, 1], clamp);
-  const inIntroType = frame < TYPE_END * fps;
+
+  // ── PLAY LIST: 0~3.5 중앙상단 거대 → 3.5~4.7 좌하단 이동·축소·페이드 ──
+  const LARGE = height * 0.3; // 폰트 높이 ~30% (가로 거의 꽉)
+  const plProgress = interpolate(frame, [STATIC_END * fps, FADE_END * fps], [0, 1], {
+    ...clamp,
+    easing: easeInOut,
+  });
+  const plScale = interpolate(plProgress, [0, 1], [1, (height * 0.05) / LARGE]); // 끝 ~5% 높이
+  const plX = interpolate(plProgress, [0, 1], [width * 0.5, width * 0.22]); // 중앙 → 좌
+  const plY = interpolate(plProgress, [0, 1], [height * 0.2, height * 0.86]); // 상단 → 하단
+  const plOpacity = interpolate(plProgress, [0.85, 1], [1, 0], clamp); // 끝부분에서만 페이드
 
   // ── 곡 제목(본 영상 구간별, 경계 페이드) ─────────────────────────
   const t = frame / fps;
@@ -112,16 +130,16 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
     );
   }
 
-  // ── 좌하단 블록(부제 고정 + 곡 제목): 4.9초부터 타이핑, 6.1초부터 본 영상 ──
+  // ── 좌하단 블록(부제 위 / 곡 제목 아래, 명확히 분리): 4.9~6.1 타이핑, 6.1~ 본영상 ──
+  const typeProgress = interpolate(frame, [TYPE_START * fps, TYPE_END * fps], [0, 1], clamp);
+  const inIntroType = frame < TYPE_END * fps;
   const blLeft = width * 0.06;
-  const blSubBottom = baseBottom + maxBarH + 96;
-  const blTitleBottom = baseBottom + maxBarH + 36;
+  const blSubTop = height * 0.77; // 부제(위)
+  const blTitleTop = height * 0.855; // 곡 제목(아래) — 두 줄 충분히 분리
   let blSub = "";
   let blTitle = "";
-  let blSubOpacity = 0;
   let blTitleOpacity = 0;
   if (frame >= TYPE_START * fps) {
-    blSubOpacity = 1;
     if (inIntroType) {
       blSub = subtitleEn.slice(0, Math.floor(typeProgress * subtitleEn.length));
       blTitle = firstTitle.slice(0, Math.floor(typeProgress * firstTitle.length));
@@ -149,18 +167,9 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
         }}
       />
 
-      {/* 2) 인트로 정지 화면(0~4.7 페이드) — PLAY LIST 상단 / 부제 좌중 / 곡제목 우중하단 */}
+      {/* 2) 인트로 정지 보조 텍스트(부제 좌중 / 곡제목 우중하단) — 0~4.7 페이드 */}
       {introOpacity > 0.001 && (
         <div style={{ position: "absolute", inset: 0, opacity: introOpacity }}>
-          <div
-            style={{
-              position: "absolute", top: height * 0.08, width: "100%", textAlign: "center",
-              fontFamily: SERIF, fontWeight: 700, color: textColor,
-              fontSize: width * 0.075, letterSpacing: width * 0.012, textShadow: shadow,
-            }}
-          >
-            PLAY LIST
-          </div>
           {subtitleEn && (
             <div
               style={{
@@ -186,13 +195,37 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
         </div>
       )}
 
-      {/* 3) 좌하단 블록(타이핑 후 본 영상): 부제 고정 + 곡 제목(전환 페이드) */}
+      {/* 2b) PLAY LIST — 거대 → 좌하단 이동·축소·페이드(easeInOutCubic) */}
+      {plOpacity > 0.001 && (
+        <div
+          style={{
+            position: "absolute",
+            left: plX,
+            top: plY,
+            transform: `translate(-50%, -50%) scale(${plScale})`,
+            transformOrigin: "center",
+            fontFamily: SERIF,
+            fontWeight: 700,
+            color: textColor,
+            fontSize: LARGE,
+            lineHeight: 1,
+            letterSpacing: width * 0.012,
+            whiteSpace: "nowrap",
+            textShadow: shadow,
+            opacity: plOpacity,
+          }}
+        >
+          PLAY LIST
+        </div>
+      )}
+
+      {/* 3) 좌하단 블록(타이핑 후 본 영상): 부제(위) + 곡 제목(아래) — 분리 */}
       {blSub && (
         <div
           style={{
-            position: "absolute", left: blLeft, bottom: blSubBottom, opacity: blSubOpacity,
+            position: "absolute", left: blLeft, top: blSubTop,
             fontFamily: SERIF, fontStyle: "italic", color: textColor,
-            fontSize: width * 0.022, textShadow: shadow, maxWidth: width * 0.6,
+            fontSize: width * 0.02, textShadow: shadow, maxWidth: width * 0.6,
           }}
         >
           {blSub}
@@ -201,7 +234,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
       {blTitle && (
         <div
           style={{
-            position: "absolute", left: blLeft, bottom: blTitleBottom, opacity: blTitleOpacity,
+            position: "absolute", left: blLeft, top: blTitleTop, opacity: blTitleOpacity,
             fontFamily: SCRIPT, color: textColor,
             fontSize: width * 0.044, textShadow: shadow, maxWidth: width * 0.7,
           }}
@@ -210,14 +243,14 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
         </div>
       )}
 
-      {/* 4) 맨 아래 굵은 둥근 바 이퀄(3.5초부터 아래에서 등장, 반투명·감쇠) */}
+      {/* 4) 맨 아래 굵은 둥근 바 이퀄(3.5초부터 등장, 반투명·감쇠) */}
       <div
         style={{ position: "absolute", inset: 0, opacity: eqIn, transform: `translateY(${eqTranslateY}px)` }}
       >
         {values.map((v, i) => {
           const tilt = 1 + (i / (BARS - 1)) * 1.6; // 고역 롤오프 보정
           const amp = Math.min(1, v * 2.4 * tilt);
-          const h = 10 + amp * maxBarH;
+          const h = Math.max(16, 12 + amp * maxBarH); // 최소 높이 보장(항상 보이게)
           return (
             <div
               key={i}
@@ -228,7 +261,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
                 width: barW,
                 height: h,
                 borderRadius: barW,
-                opacity: 0.72,
+                opacity: 0.82,
                 background: `linear-gradient(to top, ${c1}, ${c2})`,
               }}
             />
