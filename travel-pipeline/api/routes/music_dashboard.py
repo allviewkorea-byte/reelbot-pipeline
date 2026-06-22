@@ -43,6 +43,18 @@ def queue():
     return {"queue": [_with_thumb_url(r) for r in music_uploads.list_pending()]}
 
 
+@router.delete("/queue/{mix_id}")
+def delete_queue_item(mix_id: str):
+    """큐에서 단일 영상 삭제(깨진/못 쓰는 영상 정리). 해당 mix_id 한 행만 영향.
+
+    R2 mp4·썸네일 파일은 만료 정책에 맡기고 즉시 지우지 않는다(안전).
+    """
+    result = music_uploads.delete_pending(mix_id)
+    if result.get("error"):
+        raise HTTPException(status_code=502, detail=result["error"])
+    return {"ok": True, "deleted": result.get("deleted", 0)}
+
+
 class ThumbnailBody(BaseModel):
     image_base64: str  # data URL 또는 순수 base64
     slug: str | None = None

@@ -3,7 +3,19 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
-import { Copy, Check, Upload, Globe, MonitorPlay, Loader2, BookOpen, Music } from "lucide-react"
+import {
+  Copy,
+  Check,
+  Upload,
+  Globe,
+  MonitorPlay,
+  Loader2,
+  BookOpen,
+  Music,
+  Trash2,
+  Clapperboard,
+  X,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
@@ -36,7 +48,25 @@ function QueueCard({ item, onChanged }: { item: QueueItem; onChanged: () => void
   const [uploading, setUploading] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [published, setPublished] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  const remove = async () => {
+    if (!window.confirm("이 영상을 큐에서 삭제할까요? 되돌릴 수 없습니다.")) return
+    setDeleting(true)
+    try {
+      const res = await fetch(`/api/music/queue/${encodeURIComponent(item.mix_id)}`, {
+        method: "DELETE",
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.detail || "삭제 실패")
+      toast.success("큐에서 삭제했습니다.")
+      onChanged()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "삭제 실패")
+      setDeleting(false)
+    }
+  }
 
   const copyPrompt = async () => {
     try {
@@ -117,6 +147,16 @@ function QueueCard({ item, onChanged }: { item: QueueItem; onChanged: () => void
         >
           {hasThumb ? "썸네일 ✓" : "썸네일 없음"}
         </span>
+        {/* 삭제(위험 액션) — 깨진/못 쓰는 영상 정리 */}
+        <button
+          type="button"
+          onClick={remove}
+          disabled={deleting}
+          title="큐에서 삭제"
+          className="absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/50 text-red-400 hover:bg-red-500/30 hover:text-red-300 disabled:opacity-60"
+        >
+          {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+        </button>
       </div>
 
       {/* 본문 */}
@@ -208,9 +248,20 @@ function QueueCard({ item, onChanged }: { item: QueueItem; onChanged: () => void
   )
 }
 
+const TEST_MOODS: { key: string; label: string }[] = [
+  { key: "citypop", label: "시티팝/드라이브" },
+  { key: "cafe", label: "카페/재즈" },
+  { key: "ballad", label: "이별/발라드" },
+  { key: "workout", label: "운동/동기부여" },
+  { key: "sleep", label: "수면/공부" },
+]
+
 export default function MusicQueuePage() {
   const [items, setItems] = useState<QueueItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [testMood, setTestMood] = useState("citypop")
+  const [testLoading, setTestLoading] = useState(false)
+  const [testVideo, setTestVideo] = useState<{ url: string; engine?: string } | null>(null)
 
   const load = useCallback(() => {
     fetch("/api/music/queue")
@@ -219,6 +270,25 @@ export default function MusicQueuePage() {
       .catch(() => setItems([]))
       .finally(() => setLoading(false))
   }, [])
+
+  const runTest = useCallback(async () => {
+    setTestLoading(true)
+    setTestVideo(null)
+    try {
+      const res = await fetch("/api/music/test-render", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mood: testMood }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data?.video_url) throw new Error(data?.detail || "테스트 렌더 실패")
+      setTestVideo({ url: data.video_url, engine: data.engine })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "테스트 렌더 실패")
+    } finally {
+      setTestLoading(false)
+    }
+  }, [testMood])
 
   useEffect(() => {
     load()
@@ -233,13 +303,70 @@ export default function MusicQueuePage() {
             자동 생성된 음악 영상 — 썸네일 업로드 후 공개 업로드할 수 있습니다.
           </p>
         </div>
-        <Link
-          href="/music/guide"
-          className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-white/5 hover:text-foreground"
-        >
-          <BookOpen className="h-4 w-4" /> 테마 가이드
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* 테스트 영상(#19) — 즉석 10초 렌더로 둥근 바·색상·곡 제목 확인(유튜브 X) */}
+          <select
+            value={testMood}
+            onChange={(e) => setTestMood(e.target.value)}
+            disabled={testLoading}
+            className="h-9 rounded-lg border border-border bg-card px-2 text-sm text-foreground"
+            title="테스트 영상 분위기(색상 매핑)"
+          >
+            {TEST_MOODS.map((m) => (
+              <option key={m.key} value={m.key}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+          <Button onClick={runTest} disabled={testLoading} className="h-9 gap-1.5">
+            {testLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Clapperboard className="h-4 w-4" />
+            )}
+            {testLoading ? "렌더 중…" : "테스트 영상"}
+          </Button>
+          <Link
+            href="/music/guide"
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-sm text-muted-foreground hover:bg-white/5 hover:text-foreground"
+          >
+            <BookOpen className="h-4 w-4" /> 테마 가이드
+          </Link>
+        </div>
       </header>
+
+      {/* 테스트 영상 모달 — 재생/닫기(DB·유튜브 영향 0) */}
+      {testVideo && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setTestVideo(null)}
+        >
+          <div
+            className="relative w-full max-w-3xl overflow-hidden rounded-xl border border-border bg-card"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
+              <span className="text-sm font-medium text-foreground">
+                테스트 영상 미리보기
+                {testVideo.engine && (
+                  <Badge variant="secondary" className="ml-2 align-middle">
+                    {testVideo.engine}
+                  </Badge>
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={() => setTestVideo(null)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-white/5 hover:text-foreground"
+                title="닫기"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <video src={testVideo.url} controls autoPlay className="aspect-video w-full bg-black" />
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex flex-1 items-center justify-center text-muted-foreground">

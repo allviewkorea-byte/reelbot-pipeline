@@ -15,6 +15,7 @@ import logging
 import os
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
+from pydantic import BaseModel
 
 from services import music_suno
 
@@ -76,6 +77,27 @@ def trends_analyze(background: BackgroundTasks, authorization: str | None = Head
         raise HTTPException(status_code=401, detail="unauthorized")
     background.add_task(_run_trend_analysis)
     return {"ok": True, "status": "started"}
+
+
+class TestRenderBody(BaseModel):
+    mood: str | None = None  # citypop/cafe/ballad/workout/sleep (없으면 기본 citypop)
+
+
+@router.post("/test-render")
+def test_render(body: TestRenderBody | None = None):
+    """대시보드 '테스트 영상 생성' — 즉석 10초 영상 렌더(유튜브 X, 큐 저장 X).
+
+    동기 호출(완료 시 mp4 URL 반환). CRON 인증 불필요(대시보드 직접 호출).
+    Remotion(USE_REMOTION on) 우선, 실패/off 면 ffmpeg 폴백.
+    """
+    from services import music_test
+    mood = body.mood if body else None
+    try:
+        result = music_test.render_test(mood=mood)
+    except Exception as e:  # noqa: BLE001 - 실패 원인을 프론트로 전달
+        logger.warning("[music-test] 렌더 실패: %s", e)
+        raise HTTPException(status_code=500, detail=f"테스트 렌더 실패: {e}") from e
+    return {"ok": True, **result}
 
 
 @router.get("/trends")
