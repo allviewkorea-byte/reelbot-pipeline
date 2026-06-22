@@ -1,0 +1,22 @@
+{
+  "name": "reelbot-remotion",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "render": "node render.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/bundler": "4.0.481",
+    "@remotion/media-utils": "4.0.481",
+    "@remotion/renderer": "4.0.481",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "remotion": "4.0.481"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.0",
+    "typescript": "5.6.3"
+  }
+}
