@@ -102,7 +102,12 @@ def publish(mix_id: str):
         "genre": row.get("genre"),
         "mood": row.get("mood"),
     }
-    mix = {"mix_id": mix_id, "tracks": []}
+    # 믹스 복원 — make_video 가 mp3 를 받아야 하므로 mp3_url 도 구성.
+    mix = {
+        "mix_id": mix_id,
+        "tracks": [],
+        "mp3_url": r2_storage.music_mix_url(slug, mix_id, "mp3"),
+    }
     try:
         tmp_json = Path(tempfile.gettempdir()) / f"{slug}_{mix_id}.json"
         r2_storage.download_music_object(
@@ -113,22 +118,30 @@ def publish(mix_id: str):
     except Exception as e:  # noqa: BLE001 - 트랙 없으면 설명만 간소화
         logger.warning("[music-dashboard] 믹스 JSON 로드 실패(설명 간소화): %s", e)
 
+    from services.music_video import make_video
     from services.youtube_upload import upload_music_video
 
     tmpdir = Path(tempfile.mkdtemp(prefix="pub_"))
     try:
+        # 1) 썸네일 다운로드(게이트로 존재 보장 — 실패 시 진행 불가).
         thumb = tmpdir / "thumb.png"
         try:
             r2_storage.download_music_object(row["thumbnail_r2_key"], str(thumb))
         except Exception as e:  # noqa: BLE001
-            logger.warning("[music-dashboard] 썸네일 다운로드 실패(영상만 업로드): %s", e)
-            thumb = None
+            raise HTTPException(status_code=502, detail=f"썸네일 다운로드 실패: {e}") from e
+
+        # 2) 썸네일을 배경(정지화면)으로 영상 재생성 → 새 mp4(R2).
+        vres = make_video(theme, mix, background_path=str(thumb))
+        new_mp4_url = vres["video_url"]
+
+        # 3) 재생성 mp4 + 썸네일 set 으로 공개 업로드.
         result = upload_music_video(
-            mp4_url, theme, mix, privacy="public",
-            thumbnail_path=(str(thumb) if thumb else None),
+            new_mp4_url, theme, mix, privacy="public", thumbnail_path=str(thumb),
         )
+    except HTTPException:
+        raise
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"유튜브 업로드 실패: {e}") from e
+        raise HTTPException(status_code=502, detail=f"공개 업로드(재생성) 실패: {e}") from e
     finally:
         import shutil
         shutil.rmtree(tmpdir, ignore_errors=True)

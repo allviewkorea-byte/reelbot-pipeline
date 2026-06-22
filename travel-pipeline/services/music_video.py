@@ -212,22 +212,30 @@ def generate_background(theme: dict, out_path: str, *, force: bool = False) -> s
 
 # ── ffmpeg 합성 ──────────────────────────────────────────────────────────
 def _build_filter(
-    tracks: list[dict], title_kr: str, duration: float, work: Path, viz: str, font: str
+    tracks: list[dict], title_kr: str, duration: float, work: Path, viz: str, font: str,
+    static_bg: bool = False,
 ) -> str:
-    """Ken Burns 배경 + 비주얼라이저 + drawtext(주제·곡 제목) filter_complex 구성.
+    """배경 + 비주얼라이저 + drawtext(주제·곡 제목) filter_complex 구성.
 
+    static_bg=False: 배경 Ken Burns(느린 줌). True: 정지화면(줌 없음 — 썸네일 배경용).
     textfile 은 work 기준 **상대명**만 쓴다(ffmpeg cwd=work). 절대경로의 '\\'·':' 가
     filtergraph 파싱을 깨뜨리는 걸 회피한다(Windows 호환).
     """
     total_frames = int(duration * FPS) + FPS  # 여유 프레임(루프 reset 회피)
 
-    # 1) 배경 Ken Burns(느린 줌) → 1920x1080.
-    bg = (
-        f"[0:v]scale={W*1.2:.0f}:{H*1.2:.0f}:force_original_aspect_ratio=increase,"
-        f"crop={W*1.2:.0f}:{H*1.2:.0f},"
-        f"zoompan=z='min(zoom+0.0004,1.12)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-        f"d={total_frames}:s={W}x{H}:fps={FPS},setsar=1,format=yuv420p[bg];"
-    )
+    # 1) 배경 — 정지(썸네일) 또는 Ken Burns(느린 줌) → 1920x1080.
+    if static_bg:
+        bg = (
+            f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,"
+            f"crop={W}:{H},setsar=1,format=yuv420p[bg];"
+        )
+    else:
+        bg = (
+            f"[0:v]scale={W*1.2:.0f}:{H*1.2:.0f}:force_original_aspect_ratio=increase,"
+            f"crop={W*1.2:.0f}:{H*1.2:.0f},"
+            f"zoompan=z='min(zoom+0.0004,1.12)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+            f"d={total_frames}:s={W}x{H}:fps={FPS},setsar=1,format=yuv420p[bg];"
+        )
     # 2) 오디오 비주얼라이저.
     if viz == "showcqt":
         v = f"[1:a]showcqt=s={W}x220:fps={FPS}[wave];"
@@ -291,9 +299,11 @@ def compose_video(
     title_kr: str,
     duration: float,
     viz: str | None = None,
+    static_bg: bool = False,
 ) -> str:
     """배경 이미지 + 믹스 오디오 + 비주얼라이저 + 텍스트 → mp4(1920x1080 H.264).
 
+    static_bg=True 면 Ken Burns 줌 없이 정지화면(썸네일 배경용).
     직접 호출 가능(로컬 bg/audio 경로). make_video 가 R2 연동까지 감싼다.
     """
     _require_ffmpeg()
@@ -303,7 +313,7 @@ def compose_video(
         # 폰트는 work 로 복사해 상대명 사용. 입력/출력은 절대경로(=CLI 인자, filtergraph
         # 밖이라 OS 무관)로 둔다 — filtergraph 안에는 상대 textfile/fontfile 만 들어간다.
         font = _stage_font(work)
-        filt = _build_filter(tracks, title_kr, duration, work, viz, font)
+        filt = _build_filter(tracks, title_kr, duration, work, viz, font, static_bg=static_bg)
         _run([
             "-loop", "1", "-i", os.path.abspath(str(bg_path)),
             "-i", os.path.abspath(str(audio_path)),
@@ -328,9 +338,13 @@ def make_video(
     seconds: float | None = None,
     viz: str | None = None,
     force_bg: bool = False,
+    background_path: str | None = None,
 ) -> dict:
-    """주제 + 믹스 → 배경 생성 → ffmpeg 합성 → mp4 → R2. 영상 메타 반환.
+    """주제 + 믹스 → 배경 → ffmpeg 합성 → mp4 → R2. 영상 메타 반환.
 
+    background_path: 주면 그 이미지(검토 큐에서 올린 썸네일)를 배경으로 쓰고 gpt-image-1
+      생성을 스킵하며 정지화면(Ken Burns 줌 없음)으로 합성한다. None 이면 기존
+      gpt-image-1 배경 + Ken Burns(현행 회귀 0).
     seconds: 짧은 테스트 컷(앞 N초만). 미지정 시 믹스 전체 길이.
     Returns: {video_id, video_url, duration, slug}
     """
@@ -350,14 +364,19 @@ def make_video(
         full = _duration(str(audio))
         duration = min(seconds, full) if seconds else full
 
+        # 배경: 썸네일(background_path) 우선 — 있으면 정지화면, 없으면 gpt-image-1 + Ken Burns.
         bg = work / _BG_NAME
-        generate_background(theme, str(bg), force=force_bg)
+        static_bg = bool(background_path)
+        if static_bg:
+            _fetch(background_path, bg)  # R2 URL/로컬 경로 모두 처리
+        else:
+            generate_background(theme, str(bg), force=force_bg)
 
         video_id = mix.get("mix_id") or "video"
         out = work / f"{video_id}.mp4"
         compose_video(
             str(bg), str(audio), str(out),
-            tracks=tracks, title_kr=title_kr, duration=duration, viz=viz,
+            tracks=tracks, title_kr=title_kr, duration=duration, viz=viz, static_bg=static_bg,
         )
 
         video_url = str(out)
