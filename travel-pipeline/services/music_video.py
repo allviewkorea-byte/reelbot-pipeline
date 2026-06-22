@@ -216,6 +216,94 @@ def _thumb_subject() -> str:
     return "A cute dog or small animal naturally in the scene (e.g. swimming or strolling)."
 
 
+def _thumb_subject_kr() -> str:
+    """#31 인물 비중(한국어) — 80% 풍경 / 15% 먼 인물(얼굴X) / 5% 애견·동물."""
+    r = random.random()
+    if r < 0.80:
+        return "사람은 없이 풍경·건축·자연에만 집중."
+    if r < 0.95:
+        return "멀리 작게 보이는 사람 한둘(얼굴은 보이지 않게, 거리감 있게)."
+    return "수영하거나 거니는 강아지 등 작은 동물 한 마리가 자연스럽게."
+
+
+# #31 무드별 글로벌 도시 풀(한국어) — 같은 무드라도 매번 다른 도시(랜덤). 시네마틱 표현 제외.
+_CITY_POOLS: dict[str, dict] = {
+    "citypop": {
+        "keys": ["시티팝", "citypop", "city pop", "드라이브", "drive", "운전", "출근", "퇴근"],
+        "cities": ["뉴욕 맨해튼 도심 거리", "도쿄 시부야 거리", "서울 강남 도심",
+                   "홍콩 도심 거리", "LA 다운타운", "시드니 하버 도심"],
+        "scene": "고층 빌딩과 활기찬 거리", "time": "맑은 한낮",
+        "tone": "맑고 청량하고 밝은 분위기", "light": "따뜻한 햇살",
+        "accent": "도시적 세련미와 여행 감성",
+    },
+    "cafe": {
+        "keys": ["카페", "cafe", "재즈", "jazz", "커피", "coffee", "브런치", "라운지"],
+        "cities": ["파리 골목 카페거리", "서울 한남동 카페거리", "교토 청수사 골목",
+                   "비엔나 구시가 거리", "멜버른 레인웨이 골목"],
+        "scene": "감성적인 카페거리와 창가", "time": "맑은 오후",
+        "tone": "맑고 청량하고 밝은 분위기", "light": "따뜻한 자연광",
+        "accent": "여유로운 여행 감성",
+    },
+    "ballad": {
+        "keys": ["이별", "헤어", "breakup", "발라드", "ballad", "슬픔", "sad", "그리움", "눈물"],
+        "cities": ["비 오는 뉴욕 거리", "도쿄 밤거리", "서울 한강 야경",
+                   "런던 골목", "시애틀 비 오는 거리"],
+        "scene": "고요한 거리와 반짝이는 불빛", "time": "저녁 무렵",
+        "tone": "차분하고 감성적인 분위기", "light": "은은한 자연광",
+        "accent": "잔잔한 여행 감성",
+    },
+    "workout": {
+        "keys": ["운동", "헬스", "workout", "gym", "러닝", "running", "동기", "motivat", "fitness"],
+        "cities": ["바르셀로나 해변", "산타모니카 해변", "시드니 하버", "두바이 도심"],
+        "scene": "탁 트인 해변과 도시 전경", "time": "맑은 아침",
+        "tone": "맑고 청량하고 밝은 분위기", "light": "밝은 햇살",
+        "accent": "활기찬 여행 감성",
+    },
+    "sleep": {
+        "keys": ["수면", "잠", "취침", "sleep", "공부", "스터디", "study", "집중", "focus", "독서", "lofi"],
+        "cities": ["교토 일본 정원", "노르웨이 피요르드", "알프스 산골 마을", "제주 호수"],
+        "scene": "고요한 자연 풍경", "time": "맑은 새벽",
+        "tone": "고요하고 평온한 분위기", "light": "부드러운 자연광",
+        "accent": "차분한 여행 감성",
+    },
+    "summer": {
+        "keys": ["여름", "summer", "수영", "해변", "beach", "pool", "트로피컬", "tropical"],
+        "cities": ["마이애미 해변", "산토리니", "발리 해변", "하와이 해변", "칸쿤"],
+        "scene": "푸른 바다와 야자수", "time": "맑은 한낮",
+        "tone": "맑고 청량하고 밝은 분위기", "light": "눈부신 햇살",
+        "accent": "시원한 여행 감성",
+    },
+}
+
+
+def _city_bucket(theme: dict, viz_spec: dict | None) -> str:
+    """곡 → 도시 풀 키. season=summer 우선, 이후 mood/location 카테고리, 끝으로 키워드."""
+    vs = viz_spec or {}
+    if str(vs.get("season", "")).lower() == "summer":
+        return "summer"
+    mc = str(vs.get("mood_category", "")).lower()
+    lc = str(vs.get("location_category", "")).lower()
+    if mc == "sad":
+        return "ballad"
+    if mc == "energetic" or lc == "beach":
+        return "workout"
+    if mc == "focus" or lc in ("nature", "home"):
+        return "sleep"
+    if lc == "cafe":
+        return "cafe"
+    hay = _haystack_theme(theme)
+    for key, pool in _CITY_POOLS.items():
+        if any(k.lower() in hay for k in pool["keys"]):
+            return key
+    return "citypop"
+
+
+def _haystack_theme(theme: dict) -> str:
+    return " ".join(
+        str(theme.get(k, "")) for k in ("genre", "mood", "situation", "title_kr", "slug")
+    ).lower()
+
+
 def _thumb_trend_hint() -> str:
     """최신 트렌드 mood_keywords 가 있으면 톤에 살짝 섞을 한 줄(없으면 빈값 → 회귀 0)."""
     try:
@@ -240,25 +328,18 @@ def build_thumbnail_prompt(theme: dict, viz_spec: dict | None = None) -> str:
     person = _thumb_person()
 
     if viz_spec:
-        # #27: 풍경 중심 — Remotion 이 PLAY LIST·부제·곡제목·WHERE 를 그린다(이미지엔 글자 0).
-        kws = ", ".join((viz_spec.get("scene_keywords") or [])[:5])
-        scene_bit = kws if kws else scene
-        loc = str(viz_spec.get("location_en") or "").strip()
-        place_bit = f"Location: {loc}. " if loc else ""
-        lighting = str(viz_spec.get("lighting") or "").strip()
-        light_bit = f"{lighting} lighting. " if lighting else ""
-        colors = ", ".join(
-            c for c in (viz_spec.get("primary_color"), viz_spec.get("secondary_color")) if c
-        )
-        color_bit = f"Color tone: {colors}. " if colors else ""
+        # #31: 한국어 톤(맑고 청량하고 밝은 사실적 풍경) + 무드별 글로벌 도시 랜덤.
+        # gpt-image-1 은 한국어를 잘 이해함. 시네마틱/네온/드라마틱 표현 제외, 글자 0.
+        pool = _CITY_POOLS[_city_bucket(theme, viz_spec)]
+        location_label = random.choice(pool["cities"])
         return (
-            f"Cinematic landscape photo for a music playlist thumbnail, 16:9 aspect ratio. "
-            f"{place_bit}"
-            f"Scene: {scene_bit}. "
-            f"{_thumb_subject()} "
-            f"{color_bit}{light_bit}"
-            f"Photographic, high quality, atmospheric depth, no people faces. "
-            f"Absolutely no text, no letters, no words, no logo, no watermark."
+            f"가로형 롱폼사이즈 플레이리스트 썸네일 배경 이미지. "
+            f"{location_label}, {pool['scene']}, {pool['time']}. "
+            f"맑은 날의 사실적인 풍경 사진, {pool['tone']}, {pool['light']}, "
+            f"깊이감 있는 원근감, {pool['accent']}. "
+            f"{_thumb_subject_kr()} "
+            f"실제 사진처럼 선명하고 고급스럽게. "
+            f"사람 얼굴은 보이지 않게, 글자 없음, 영어 없음, 로고 없음, 워터마크 없음."
         )
 
     # viz_spec 없음 → #17 동작(회귀 0).
