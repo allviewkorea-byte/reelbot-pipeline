@@ -119,7 +119,10 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec })
 
       {/* 4) 맨 아래 굵은 둥근 바 이퀄(반투명·감쇠) */}
       {values.map((v, i) => {
-        const amp = Math.min(1, v * 2.4);
+        // 고역 롤오프 보정(tilt): 실제 음악은 고역 에너지가 약해 우측 막대가 죽기 쉽다.
+        // 막대 인덱스가 커질수록 게인을 키워(최대 ~2.6배) 전 대역이 고르게 반응하게 한다.
+        const tilt = 1 + (i / (BARS - 1)) * 1.6;
+        const amp = Math.min(1, v * 2.4 * tilt);
         const h = 10 + amp * maxBarH;
         return (
           <div
