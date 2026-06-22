@@ -445,8 +445,9 @@ export default function CastPage() {
               <div className="flex min-h-0 flex-col gap-2 overflow-hidden">
                 {/* A: 헤더 + colors + 3 시점 */}
                 <div className="flex min-h-0 flex-[3] flex-col rounded-xl border border-border bg-card p-3">
-                  <div className="flex shrink-0 items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
+                  {/* 모바일: 제목 줄 / 컨트롤 줄 세로 스택(제목 세로 깨짐·버튼 겹침 방지). 데스크탑: 기존 가로. */}
+                  <div className="flex shrink-0 flex-col items-start gap-2 md:flex-row md:items-center md:justify-between">
+                    <div className="flex flex-wrap items-center gap-2 md:flex-nowrap">
                       <h2 className="text-sm font-semibold text-foreground">{selected.name}</h2>
                       <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary">
                         {selected.animal}
