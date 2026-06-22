@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
-import { BookOpen, ClipboardList, Power, Globe, Lock, Sparkles, TrendingUp } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { Users, Eye, BarChart3, Video, ClipboardList, Play, Square, Loader2 } from "lucide-react"
+import { PLATFORM_BADGE, PLATFORM_LABELS, TRACK_BADGE, TRACK_LABELS } from "@/lib/channels"
 import { MUSIC_CHANNEL_ID, MUSIC_CHANNEL_NAME, fmtCount, type MusicMetrics } from "@/lib/music"
 import { MusicPipeline } from "@/components/music/MusicPipeline"
 import { MusicMarquee } from "@/components/music/MusicMarquee"
+import { MusicTrendPanel } from "@/components/music/MusicTrendPanel"
+import { MusicTodayCard } from "@/components/music/MusicTodayCard"
 
 interface ChannelStatus {
   isActive: boolean
@@ -16,21 +18,13 @@ interface ChannelStatus {
   dailyCap: number
 }
 
-interface TrendInsight {
-  analyzed_at?: string
-  mood_keywords?: string[]
-  hot_situations?: string[]
-  summary?: string
-}
-
 const DEFAULT_STATUS: ChannelStatus = { isActive: false, mode: "semi", syntheticMedia: false, dailyCap: 3 }
 
 export default function MusicDashboardPage() {
   const [status, setStatus] = useState<ChannelStatus>(DEFAULT_STATUS)
-  const [metrics, setMetrics] = useState<MusicMetrics | null>(null)
-  const [trend, setTrend] = useState<TrendInsight | null>(null)
+  const [stats, setStats] = useState<MusicMetrics | null>(null)
   const [queueCount, setQueueCount] = useState(0)
-  const [saving, setSaving] = useState(false)
+  const [busy, setBusy] = useState(false)
 
   const loadStatus = useCallback(() => {
     fetch(`/api/channel-status?channelId=${MUSIC_CHANNEL_ID}`)
@@ -43,15 +37,13 @@ export default function MusicDashboardPage() {
 
   useEffect(() => {
     loadStatus()
-    fetch("/api/music/metrics").then((r) => r.json()).then(setMetrics).catch(() => setMetrics(null))
-    fetch("/api/music/trends").then((r) => r.json()).then((d) => setTrend(d?.trend ?? null)).catch(() => {})
+    fetch("/api/music/metrics").then((r) => r.json()).then(setStats).catch(() => setStats(null))
     fetch("/api/music/queue").then((r) => r.json()).then((d) => setQueueCount(Array.isArray(d?.queue) ? d.queue.length : 0)).catch(() => {})
   }, [loadStatus])
 
   const patch = useCallback(
     async (body: Partial<{ isActive: boolean; mode: string; syntheticMedia: boolean; dailyCap: number }>) => {
-      setSaving(true)
-      // 낙관적 업데이트
+      setBusy(true)
       setStatus((s) => ({ ...s, ...body } as ChannelStatus))
       try {
         const res = await fetch("/api/channel-status", {
@@ -66,170 +58,151 @@ export default function MusicDashboardPage() {
         toast.error(e instanceof Error ? e.message : "저장 실패")
         loadStatus()
       } finally {
-        setSaving(false)
+        setBusy(false)
       }
     },
     [loadStatus],
   )
 
-  const isPublic = status.mode === "auto"
-  const metricItems = [
-    { label: "구독자", value: metrics?.subscriberCount },
-    { label: "총 조회수", value: metrics?.viewCount },
-    { label: "평균 조회수", value: metrics?.averageViews },
-    { label: "영상 수", value: metrics?.videoCount },
+  const { isActive, mode, syntheticMedia, dailyCap } = status
+  const isPublic = mode === "auto"
+
+  const cards = [
+    { label: "구독자", icon: Users, value: fmtCount(stats?.subscriberCount) },
+    { label: "총 조회수", icon: Eye, value: fmtCount(stats?.viewCount) },
+    { label: "평균 조회수", icon: BarChart3, value: fmtCount(stats?.averageViews) },
+    { label: "영상 수", icon: Video, value: fmtCount(stats?.videoCount) },
   ]
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 overflow-auto p-4 md:p-6">
-      {/* 헤더 */}
-      <header className="flex flex-col gap-3 pl-10 md:pl-0">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-semibold text-foreground">{MUSIC_CHANNEL_NAME}</h1>
-            <p className="text-sm text-muted-foreground">
-              유튜브 · 자동화 · {status.isActive ? "가동 중" : "정지"} — 운영 관제 대시보드
-            </p>
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-auto p-4 md:overflow-hidden">
+      {/* 헤더 — 채널명+뱃지 / 토글들. 백곰 레이아웃 1:1 */}
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0 pl-10 md:pl-0">
+          <div className="flex flex-wrap items-center gap-2 md:flex-nowrap">
+            <h1 className="truncate text-lg font-semibold text-foreground">{MUSIC_CHANNEL_NAME}</h1>
+            <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${PLATFORM_BADGE.youtube}`}>
+              {PLATFORM_LABELS.youtube}
+            </span>
+            <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${TRACK_BADGE.auto}`}>
+              {TRACK_LABELS.auto}
+            </span>
+            <span
+              className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors duration-200 ${
+                isActive ? "bg-emerald-500/15 text-emerald-400" : "bg-secondary/50 text-muted-foreground"
+              }`}
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${isActive ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground/50"}`} />
+              {isActive ? "가동 중" : "대기 중"}
+            </span>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {/* 공개/비공개 */}
-            <button
-              type="button"
-              disabled={saving}
-              onClick={() => patch({ mode: isPublic ? "semi" : "auto" })}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-colors",
-                isPublic ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-400" : "border-border text-muted-foreground hover:border-primary/40",
-              )}
-            >
-              {isPublic ? <Globe className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
-              {isPublic ? "공개 ON" : "공개 OFF"}
-            </button>
-            {/* AI 표시 */}
-            <button
-              type="button"
-              disabled={saving}
-              onClick={() => patch({ syntheticMedia: !status.syntheticMedia })}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-colors",
-                status.syntheticMedia ? "border-sky-500/40 bg-sky-500/15 text-sky-400" : "border-border text-muted-foreground hover:border-primary/40",
-              )}
-            >
-              <Sparkles className="h-3.5 w-3.5" /> AI 표시 {status.syntheticMedia ? "ON" : "OFF"}
-            </button>
-            {/* 하루 1/2/3 */}
-            <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-background px-1.5 py-1">
-              <span className="px-1 text-[11px] text-muted-foreground">하루</span>
+          <p className="mt-0.5 text-sm text-muted-foreground">운영 채널 관제 대시보드</p>
+        </div>
+
+        <div className="flex shrink-0 flex-wrap items-center justify-start gap-2 md:justify-end">
+          {/* 공개/비공개 */}
+          <button
+            onClick={() => patch({ mode: isPublic ? "semi" : "auto" })}
+            disabled={busy}
+            role="switch"
+            aria-checked={isPublic}
+            title="공개=유튜브 공개 업로드 / 비공개=비공개 업로드"
+            className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-2 text-xs font-medium transition-colors hover:border-primary/40 disabled:opacity-60"
+          >
+            <span className={isPublic ? "text-emerald-400" : "text-muted-foreground"}>{isPublic ? "공개" : "비공개"}</span>
+            <span className={`relative h-4 w-7 shrink-0 rounded-full transition-colors ${isPublic ? "bg-emerald-600" : "bg-secondary"}`}>
+              <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${isPublic ? "left-3.5" : "left-0.5"}`} />
+            </span>
+          </button>
+          {/* AI 표시 */}
+          <button
+            onClick={() => patch({ syntheticMedia: !syntheticMedia })}
+            disabled={busy}
+            role="switch"
+            aria-checked={syntheticMedia}
+            title="유튜브 업로드에 'AI 합성 콘텐츠' 표시를 켜고/끕니다"
+            className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-2 text-xs font-medium transition-colors hover:border-primary/40 disabled:opacity-60"
+          >
+            <span className={syntheticMedia ? "text-emerald-400" : "text-muted-foreground"}>AI 표시 {syntheticMedia ? "ON" : "OFF"}</span>
+            <span className={`relative h-4 w-7 shrink-0 rounded-full transition-colors ${syntheticMedia ? "bg-emerald-600" : "bg-secondary"}`}>
+              <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${syntheticMedia ? "left-3.5" : "left-0.5"}`} />
+            </span>
+          </button>
+          {/* 하루 1/2/3 */}
+          <div className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-2 text-xs font-medium" title="하루에 자동 게시할 영상 개수">
+            <span className="text-muted-foreground">하루</span>
+            <div className="inline-flex rounded-md border border-border bg-background p-0.5">
               {[1, 2, 3].map((n) => (
                 <button
                   key={n}
                   type="button"
-                  disabled={saving}
                   onClick={() => patch({ dailyCap: n })}
-                  className={cn(
-                    "rounded px-2 py-0.5 text-xs font-medium transition-colors",
-                    status.dailyCap === n ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
-                  )}
+                  disabled={busy}
+                  aria-pressed={dailyCap === n}
+                  className={`rounded px-2 py-0.5 text-xs font-medium transition-colors disabled:opacity-50 ${
+                    dailyCap === n ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                  }`}
                 >
                   {n}
                 </button>
               ))}
             </div>
-            {/* 검토 대기 N */}
-            <Link
-              href="/music/queue"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium text-muted-foreground hover:border-primary/40 hover:text-foreground"
-            >
-              <ClipboardList className="h-3.5 w-3.5" /> 검토 대기
-              {queueCount > 0 && (
-                <span className="rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary">{queueCount}</span>
-              )}
-            </Link>
-            {/* 가동/중단 */}
-            <button
-              type="button"
-              disabled={saving}
-              onClick={() => patch({ isActive: !status.isActive })}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-opacity hover:opacity-90",
-                status.isActive ? "bg-emerald-600 text-white" : "border border-border text-muted-foreground",
-              )}
-            >
-              <Power className="h-3.5 w-3.5" /> {status.isActive ? "가동 중" : "중단"}
-            </button>
+            <span className="text-muted-foreground">개</span>
           </div>
+          {/* 검토 대기 (백곰 캐릭터 시트 자리 — 보라 강조) */}
+          <Link
+            href="/music/queue"
+            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+          >
+            <ClipboardList className="h-4 w-4" />
+            검토 대기
+            {queueCount > 0 && <span className="rounded-full bg-white/20 px-1.5 text-[10px] font-semibold">{queueCount}</span>}
+          </Link>
+          {/* 가동 토글 */}
+          <button
+            onClick={() => patch({ isActive: !isActive })}
+            disabled={busy}
+            aria-pressed={isActive}
+            className={`flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-all duration-200 disabled:opacity-60 ${
+              isActive ? "border border-red-500/30 text-red-400 hover:bg-red-500/10" : "bg-emerald-600 text-white shadow-sm hover:opacity-90"
+            }`}
+          >
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : isActive ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+            {isActive ? "중단" : "시작"}
+          </button>
         </div>
-      </header>
+      </div>
 
-      {/* 메트릭 4종 */}
-      <section className="grid grid-cols-2 gap-2.5 md:grid-cols-4">
-        {metricItems.map((m) => (
-          <div key={m.label} className="rounded-xl border border-border bg-card p-3">
-            <div className="text-[11px] font-medium text-muted-foreground">{m.label}</div>
-            <div className="mt-1 text-lg font-semibold text-foreground">{fmtCount(m.value)}</div>
+      {/* KPI 줄 — 백곰 1:1 (아이콘 + 라벨 / mono 큰 숫자) */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        {cards.map((s) => (
+          <div key={s.label} className="rounded-xl border border-border bg-card p-2.5">
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <s.icon className="h-4 w-4" />
+              <span className="text-xs">{s.label}</span>
+            </div>
+            <p className="mt-1 text-base font-bold text-foreground" style={{ fontFamily: "var(--font-geist-mono)" }}>
+              {s.value}
+            </p>
           </div>
         ))}
-      </section>
+      </div>
 
-      {/* 트렌드 + 오늘의 콘텐츠 */}
-      <section className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
-          <div className="flex items-center justify-between">
-            <h2 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
-              <TrendingUp className="h-4 w-4 text-primary" /> 트렌드 분석
-            </h2>
-            <Link href="/music/guide" className="text-xs text-muted-foreground hover:text-foreground">전체 보기</Link>
-          </div>
-          {trend ? (
-            <>
-              {trend.summary && <p className="text-sm leading-relaxed text-foreground/90">💡 {trend.summary}</p>}
-              {(trend.mood_keywords?.length ?? 0) > 0 && (
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-[11px] font-medium text-muted-foreground">뜨는 무드</span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {trend.mood_keywords!.slice(0, 8).map((m) => (
-                      <span key={m} className="rounded-full bg-primary/15 px-2 py-0.5 text-xs text-primary">{m}</span>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {trend.analyzed_at && (
-                <span className="text-[11px] text-muted-foreground/70">분석: {new Date(trend.analyzed_at).toLocaleDateString("ko-KR")}</span>
-              )}
-            </>
-          ) : (
-            <p className="text-sm text-muted-foreground">트렌드 분석 데이터가 아직 없습니다.</p>
-          )}
+      {/* 좌 트렌드 / 우 오늘콘텐츠 — 5:5 */}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <div className="[&>div]:h-full">
+          <MusicTrendPanel />
         </div>
-
-        <div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4">
-          <h2 className="text-sm font-semibold text-foreground">오늘의 콘텐츠</h2>
-          <p className="text-sm text-muted-foreground">
-            자동 제작은 매일 새벽 1회 실행됩니다. 가동 {status.isActive ? "ON" : "OFF"} · 모드 {isPublic ? "공개" : "비공개"} · 하루 {status.dailyCap}개.
-          </p>
-          <div className="mt-1 rounded-lg border border-border bg-secondary/20 p-3 text-sm text-foreground/90">
-            다음 자동 제작 → 트렌드 가중 주제로 {status.dailyCap}개 생성 후 {isPublic ? "공개 업로드" : "검토 대기 적재"}
-          </div>
+        <div className="[&>div]:h-full">
+          <MusicTodayCard isActive={isActive} isPublic={isPublic} dailyCap={dailyCap} />
         </div>
-      </section>
+      </div>
 
       {/* 파이프라인 */}
-      <section className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4">
-        <h2 className="text-sm font-semibold text-foreground">음악 파이프라인</h2>
-        <MusicPipeline />
-      </section>
+      <MusicPipeline />
 
       {/* 최근 업로드 마퀴 */}
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">최근 업로드</h2>
-        <MusicMarquee />
-      </section>
-
-      <div className="flex justify-end">
-        <Link href="/music/guide" className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
-          <BookOpen className="h-3.5 w-3.5" /> 테마 가이드
-        </Link>
-      </div>
+      <MusicMarquee />
     </div>
   )
 }
