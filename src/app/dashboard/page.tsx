@@ -241,11 +241,12 @@ export default function DashboardPage() {
   ]
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden p-4">
-      {/* 헤더 — 채널명+뱃지(왼쪽) / 사연 제작·가동 토글(오른쪽). NEXT UP 줄은 제거됨. */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-auto p-4 md:overflow-hidden">
+      {/* 헤더 — 채널명+뱃지(왼쪽) / 사연 제작·가동 토글(오른쪽). NEXT UP 줄은 제거됨.
+          모바일: 세로 스택(제목 줄 / 컨트롤 줄). 데스크탑(md+): 기존 가로 배치 그대로. */}
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0 pl-10 md:pl-0">
+          <div className="flex flex-wrap items-center gap-2 md:flex-nowrap">
             <h1 className="text-lg font-semibold text-foreground truncate">{BAEKGOM.name}</h1>
             <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${PLATFORM_BADGE[BAEKGOM.platform]}`}>
               {PLATFORM_LABELS[BAEKGOM.platform]}
@@ -270,8 +271,9 @@ export default function DashboardPage() {
           <p className="mt-0.5 text-sm text-muted-foreground">운영 채널 관제 대시보드</p>
         </div>
 
-        {/* 액션 — 공개/비공개 토글 + 캐릭터 시트 + 가동 시작↔중단 토글 */}
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+        {/* 액션 — 공개/비공개 토글 + 캐릭터 시트 + 가동 시작↔중단 토글.
+            모바일: 왼쪽 정렬 + 줄바꿈(넘침 방지, 버튼 축소 없음). 데스크탑: 기존 오른쪽 정렬. */}
+        <div className="flex shrink-0 flex-wrap items-center justify-start gap-2 md:justify-end">
           {/* 공개/비공개 — 스케줄 제작(produce-due)의 유튜브 업로드 공개범위를 결정.
               공개=public / 비공개=private. (내부 저장 필드는 mode auto/semi 그대로.) */}
           <button
