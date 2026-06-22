@@ -17,6 +17,7 @@ import base64
 import logging
 import os
 import platform
+import random
 import shutil
 import subprocess
 import tempfile
@@ -152,19 +153,89 @@ def _bg_prompt(theme: dict) -> str:
     )
 
 
+# ── 썸네일 GPT 프롬프트 (After Rain 스타일) ─────────────────────────────
+# 주제 → 썸네일 배경 장소 매핑(데이터). 첫 매칭 우선. tone 은 라이팅 톤 결정.
+_THUMB_SCENES: list[tuple[tuple[str, ...], str, str]] = [
+    (("카페", "cafe", "coffee", "커피", "재즈", "jazz", "브런치", "라운지", "lounge"),
+     "a cozy cafe interior with warm window light and coffee on a wooden table", "bright"),
+    (("출근", "퇴근", "운전", "드라이브", "commute", "drive", "driving", "시티팝",
+      "city pop", "citypop", "도로", "road", "highway", "통근"),
+     "an early-morning city road seen from inside a car, soft dawn light through the windshield",
+     "bright"),
+    (("운동", "헬스", "러닝", "조깅", "workout", "gym", "running", "fitness", "exercise", "트레이닝"),
+     "an outdoor running track and a modern gym, bright energetic daylight", "bright"),
+    (("공부", "스터디", "집중", "study", "studying", "focus", "독서", "reading", "작업", "desk"),
+     "a tidy study desk beside a bright window with open books and a warm lamp", "bright"),
+    (("이별", "헤어", "슬픔", "눈물", "breakup", "sad", "lonely", "발라드", "ballad", "그리움"),
+     "a rain-streaked window at night overlooking a quiet city street with soft neon glow",
+     "moody"),
+    (("수면", "잠", "취침", "자장", "sleep", "bedtime", "꿈", "밤하늘", "lullaby"),
+     "a calm dark bedroom at night with a starry sky outside and soft moonlight", "moody"),
+]
+
+# 매핑 미스 시 톤만 가르는 mood 힌트(밝음 기본, 아래 단어 매칭되면 무드).
+_MOODY_HINTS = (
+    "밤", "차분", "잔잔", "쓸쓸", "감성", "새벽", "비", "night", "calm", "chill",
+    "mellow", "moody", "lonely", "dark", "rain",
+)
+
+
+def _thumb_scene(theme: dict) -> tuple[str, str]:
+    """주제(situation/genre/mood/제목) → (배경 장소, 톤). 미매칭 시 mood 기반 일반 장면."""
+    hay = " ".join(
+        str(theme.get(k, "")) for k in ("situation", "genre", "mood", "title_kr", "slug")
+    ).lower()
+    for keys, scene, tone in _THUMB_SCENES:
+        if any(k.lower() in hay for k in keys):
+            return scene, tone
+    if any(h.lower() in hay for h in _MOODY_HINTS):
+        return "a moody atmospheric lifestyle scene with soft low light and gentle bokeh", "moody"
+    return "a bright clean lifestyle scene with soft natural light", "bright"
+
+
+def _thumb_person() -> str:
+    """싱글/커플 + 성별 다양화(매 호출 랜덤)."""
+    return random.choice([
+        "a young woman", "a young man", "a young woman",
+        "a young couple", "a young couple",
+    ])
+
+
+def _thumb_trend_hint() -> str:
+    """최신 트렌드 mood_keywords 가 있으면 톤에 살짝 섞을 한 줄(없으면 빈값 → 회귀 0)."""
+    try:
+        from services import music_trend
+        insight = music_trend.get_latest() or {}
+    except Exception:  # noqa: BLE001 - 트렌드 미설정/오류는 영감 생략(주제는 불변)
+        return ""
+    kws = [k.strip() for k in (insight.get("mood_keywords") or []) if isinstance(k, str) and k.strip()]
+    if not kws:
+        return ""
+    return f", with a {', '.join(kws[:2])} feel"
+
+
 def build_thumbnail_prompt(theme: dict) -> str:
-    """주제 → ChatGPT(gpt-image)에 붙여넣을 영어 썸네일 프롬프트(#8 대시보드 복사용)."""
-    genre = theme.get("genre", "")
-    mood = theme.get("mood", "")
-    situation = theme.get("situation", "")
-    title_kr = theme.get("title_kr", "")
-    bits = [b for b in (situation, mood, f"{genre} music") if b]
-    scene = ", ".join(bits) if bits else "music vibe"
-    note = f' (theme: "{title_kr}")' if title_kr else ""
+    """주제 → ChatGPT(gpt-image)에 붙여넣을 영어 썸네일 프롬프트(#8 큐 복사용).
+
+    After Rain 스타일: 대형 "PLAY LIST" 텍스트 + 주제 매칭 배경 + 인물(싱글/커플 랜덤).
+    배경은 데이터(_THUMB_SCENES) 매핑, 인물·성별은 매 호출 랜덤, 톤은 주제(밝음/무드)로 결정.
+    트렌드 mood_keywords 가 있으면 톤 묘사에 살짝 섞는다(없으면 회귀 0). 영어 한 문단.
+    """
+    scene, tone = _thumb_scene(theme)
+    person = _thumb_person()
+    trend = _thumb_trend_hint()
+    tone_desc = (
+        "bright, clean, airy lighting"
+        if tone == "bright"
+        else "moody, warm low-key lighting"
+    )
     return (
-        f"Cinematic photo, {scene}{note}, atmospheric lighting, rich color grade, "
-        "evocative composition, no text, no watermark, 16:9, high quality, "
-        "YouTube music thumbnail aesthetic"
+        f"YouTube playlist thumbnail, 16:9 aspect ratio. "
+        f"Background: {scene}. "
+        f"{person} in the scene, natural candid pose. "
+        f'Large bold "PLAY LIST" text overlay as the main title. '
+        f"{tone_desc}{trend}. "
+        f"Cinematic, high quality, photographic, no extra random text, no watermark."
     )
 
 
