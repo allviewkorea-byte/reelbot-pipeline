@@ -36,7 +36,7 @@ _DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 _SLUG_RE = re.compile(r"^[a-z0-9_]+$")
 _REQUIRED = ("slug", "title_kr", "genre", "situation", "mood", "type", "style_prompt")
 _VALID_TYPES = ("vocal", "instrumental")
-_DEFAULT_TRACK_COUNT = 8
+_DEFAULT_TRACK_COUNT = 1  # #30 비용 절감 — 영상 1개당 suno 1회(12크레딧). 대시보드에서 곡수 조절.
 
 
 def _model(model: str | None = None) -> str:

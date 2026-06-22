@@ -16,9 +16,10 @@ interface ChannelStatus {
   mode: "auto" | "semi"
   syntheticMedia: boolean
   dailyCap: number
+  trackCount: number
 }
 
-const DEFAULT_STATUS: ChannelStatus = { isActive: false, mode: "semi", syntheticMedia: false, dailyCap: 3 }
+const DEFAULT_STATUS: ChannelStatus = { isActive: false, mode: "semi", syntheticMedia: false, dailyCap: 3, trackCount: 1 }
 
 export default function MusicDashboardPage() {
   const [status, setStatus] = useState<ChannelStatus>(DEFAULT_STATUS)
@@ -30,7 +31,7 @@ export default function MusicDashboardPage() {
     fetch(`/api/channel-status?channelId=${MUSIC_CHANNEL_ID}`)
       .then((r) => r.json())
       .then((d) => {
-        if (d?.success) setStatus({ isActive: d.isActive, mode: d.mode, syntheticMedia: d.syntheticMedia, dailyCap: d.dailyCap })
+        if (d?.success) setStatus({ isActive: d.isActive, mode: d.mode, syntheticMedia: d.syntheticMedia, dailyCap: d.dailyCap, trackCount: d.trackCount })
       })
       .catch(() => {})
   }, [])
@@ -42,7 +43,7 @@ export default function MusicDashboardPage() {
   }, [loadStatus])
 
   const patch = useCallback(
-    async (body: Partial<{ isActive: boolean; mode: string; syntheticMedia: boolean; dailyCap: number }>) => {
+    async (body: Partial<{ isActive: boolean; mode: string; syntheticMedia: boolean; dailyCap: number; trackCount: number }>) => {
       setBusy(true)
       setStatus((s) => ({ ...s, ...body } as ChannelStatus))
       try {
@@ -53,7 +54,7 @@ export default function MusicDashboardPage() {
         })
         const d = await res.json()
         if (!d?.success) throw new Error(d?.error || "저장 실패")
-        setStatus({ isActive: d.isActive, mode: d.mode, syntheticMedia: d.syntheticMedia, dailyCap: d.dailyCap })
+        setStatus({ isActive: d.isActive, mode: d.mode, syntheticMedia: d.syntheticMedia, dailyCap: d.dailyCap, trackCount: d.trackCount })
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "저장 실패")
         loadStatus()
@@ -64,7 +65,7 @@ export default function MusicDashboardPage() {
     [loadStatus],
   )
 
-  const { isActive, mode, syntheticMedia, dailyCap } = status
+  const { isActive, mode, syntheticMedia, dailyCap, trackCount } = status
   const isPublic = mode === "auto"
 
   const cards = [
@@ -148,6 +149,26 @@ export default function MusicDashboardPage() {
               ))}
             </div>
             <span className="text-muted-foreground">개</span>
+          </div>
+          {/* 곡수 1/2/3/5/8 (#30) — 영상 1개당 suno 생성 곡수(비용 직접 제어) */}
+          <div className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-2 text-xs font-medium" title="영상 1개당 생성할 곡 수(suno 비용에 비례 — 곡당 약 12크레딧)">
+            <span className="text-muted-foreground">곡수</span>
+            <div className="inline-flex rounded-md border border-border bg-background p-0.5">
+              {[1, 2, 3, 5, 8].map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => patch({ trackCount: n })}
+                  disabled={busy}
+                  aria-pressed={trackCount === n}
+                  className={`rounded px-2 py-0.5 text-xs font-medium transition-colors disabled:opacity-50 ${
+                    trackCount === n ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
           </div>
           {/* 검토 대기 (백곰 캐릭터 시트 자리 — 보라 강조) */}
           <Link

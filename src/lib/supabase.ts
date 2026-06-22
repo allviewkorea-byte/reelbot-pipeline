@@ -172,42 +172,52 @@ export async function upsertContentPlans(plans: ContentPlan[]): Promise<void> {
 //    GRANT 누락 시 permission denied 500 — content_plans 때의 함정이라 반드시 부여.
 // 조회는 테이블 미존재/에러/환경변수 미설정에도 안전 기본값(false) → 앱 안 깨짐.
 
+// #30 음악 채널 곡수(track_count) — 컬럼 미존재/이상값 → 1(안전: 비용 최소). 1~8.
+const DEFAULT_TRACK_COUNT = 1
+function clampTrackCount(v: unknown): number {
+  const n = Math.round(Number(v))
+  if (!Number.isFinite(n)) return DEFAULT_TRACK_COUNT
+  return Math.max(1, Math.min(8, n))
+}
+
 export interface ChannelStatusState {
   isActive: boolean
   mode: ChannelMode
   syntheticMedia: boolean
   dailyCap: number // 하루 생산 개수(1~3, 기본 3)
+  trackCount: number // #30 음악 채널 곡수(1~8, 기본 1)
 }
 
 export async function getChannelStatus(channelId: string): Promise<ChannelStatusState> {
   try {
     const supabase = getSupabaseAdmin()
-    // select("*") 로 읽어 synthetic_media/daily_cap 컬럼 추가 전에도 안 깨지게 한다(미존재 → 기본).
+    // select("*") 로 읽어 synthetic_media/daily_cap/track_count 컬럼 추가 전에도 안 깨지게(미존재 → 기본).
     const { data, error } = await supabase
       .from(CHANNEL_STATUS_TABLE)
       .select("*")
       .eq("channel_id", channelId)
       .maybeSingle()
-    if (error) return { isActive: false, mode: "semi", syntheticMedia: false, dailyCap: DEFAULT_DAILY_CAP }
+    if (error) return { isActive: false, mode: "semi", syntheticMedia: false, dailyCap: DEFAULT_DAILY_CAP, trackCount: DEFAULT_TRACK_COUNT }
     return {
       isActive: Boolean(data?.is_active),
       mode: data?.mode === "auto" ? "auto" : "semi", // 미설정/이상값 → semi(안전: 비공개)
       syntheticMedia: Boolean(data?.synthetic_media), // 컬럼 미존재/미설정 → false
       dailyCap: clampDailyCap(data?.daily_cap), // 컬럼 미존재/이상값 → 3
+      trackCount: data?.track_count == null ? DEFAULT_TRACK_COUNT : clampTrackCount(data?.track_count),
     }
   } catch {
-    return { isActive: false, mode: "semi", syntheticMedia: false, dailyCap: DEFAULT_DAILY_CAP }
+    return { isActive: false, mode: "semi", syntheticMedia: false, dailyCap: DEFAULT_DAILY_CAP, trackCount: DEFAULT_TRACK_COUNT }
   }
 }
 
-// isActive / mode / syntheticMedia / dailyCap 중 제공된 것만 갱신(부분 upsert). 없으면 no-op.
+// isActive / mode / syntheticMedia / dailyCap / trackCount 중 제공된 것만 갱신(부분 upsert). 없으면 no-op.
 export async function setChannelStatus(
   channelId: string,
-  patch: { isActive?: boolean; mode?: ChannelMode; syntheticMedia?: boolean; dailyCap?: number },
+  patch: { isActive?: boolean; mode?: ChannelMode; syntheticMedia?: boolean; dailyCap?: number; trackCount?: number },
 ): Promise<void> {
   if (
     patch.isActive === undefined && patch.mode === undefined &&
-    patch.syntheticMedia === undefined && patch.dailyCap === undefined
+    patch.syntheticMedia === undefined && patch.dailyCap === undefined && patch.trackCount === undefined
   ) return
   const supabase = getSupabaseAdmin()
   const row: Record<string, unknown> = { channel_id: channelId, updated_at: new Date().toISOString() }
@@ -215,6 +225,7 @@ export async function setChannelStatus(
   if (patch.mode !== undefined) row.mode = patch.mode
   if (patch.syntheticMedia !== undefined) row.synthetic_media = patch.syntheticMedia
   if (patch.dailyCap !== undefined) row.daily_cap = clampDailyCap(patch.dailyCap)
+  if (patch.trackCount !== undefined) row.track_count = clampTrackCount(patch.trackCount)
   const { error } = await supabase
     .from(CHANNEL_STATUS_TABLE)
     .upsert(row, { onConflict: "channel_id" })
