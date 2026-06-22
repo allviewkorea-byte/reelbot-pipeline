@@ -12,14 +12,48 @@ MUSIC_CALLBACK_BASE_URL 미설정이면 suno 가 콜백을 보내지 않으며, 
 from __future__ import annotations
 
 import logging
+import os
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 
 from services import music_suno
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _authorized_cron(authorization: str | None) -> bool:
+    """크론 인증 — Authorization: Bearer ${CRON_SECRET}. 미설정 시 무조건 거부(안전 기본값)."""
+    secret = (os.getenv("CRON_SECRET") or "").strip()
+    if not secret:
+        return False
+    return authorization == f"Bearer {secret}"
+
+
+def _run_produce() -> None:
+    """백그라운드: 주제 자동 생성 → 음원 → 영상 → 검토 대기 큐 적재(run_theme)."""
+    try:
+        from services import music_produce
+        result = music_produce.run_theme(video=True, upload=False)
+        slug = (result.get("theme") or {}).get("slug")
+        vid = (result.get("video") or {}).get("video_id")
+        logger.info("[music-produce] 완료 slug=%s video_id=%s", slug, vid)
+    except Exception as e:  # noqa: BLE001 - 백그라운드 실패는 로깅만(큐는 비어 있게 둠)
+        logger.warning("[music-produce] 백그라운드 실패: %s", e)
+
+
+@router.post("/produce")
+def produce(background: BackgroundTasks, authorization: str | None = Header(default=None)):
+    """cron 트리거 — 주제→음원→영상→큐 적재를 비동기로 시작하고 즉시 반환.
+
+    10분+ 작업이라 fire-and-forget(BackgroundTasks)으로 타임아웃을 피한다.
+    CRON_SECRET 헤더 필수(백곰 cron 패턴 동일).
+    """
+    if not _authorized_cron(authorization):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    background.add_task(_run_produce)
+    return {"ok": True, "status": "started"}
 
 
 @router.post("/suno-callback")
