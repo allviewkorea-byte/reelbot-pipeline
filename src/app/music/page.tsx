@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import { Copy, Check, Upload, Globe, MonitorPlay, Loader2, BookOpen, Music } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { cn } from "@/lib/utils"
 
 interface QueueItem {
   slug: string
@@ -98,22 +99,30 @@ function QueueCard({ item, onChanged }: { item: QueueItem; onChanged: () => void
   const hasThumb = Boolean(thumbUrl)
 
   return (
-    <div className="flex flex-col gap-4 rounded-lg border border-border bg-card p-4 md:flex-row">
-      {/* 영상 플레이어(작게, 가로) */}
-      <div className="w-full shrink-0 overflow-hidden rounded-md border border-border bg-black md:w-80">
+    <div className="flex flex-col overflow-hidden rounded-lg border border-border bg-card">
+      {/* 16:9 영상 + 썸네일 상태 배지 */}
+      <div className="relative aspect-video w-full bg-black">
         {item.mp4_url ? (
-          <video src={item.mp4_url} controls preload="metadata" className="aspect-video w-full" />
+          <video src={item.mp4_url} controls preload="metadata" className="h-full w-full" />
         ) : (
-          <div className="flex aspect-video w-full items-center justify-center text-muted-foreground">
+          <div className="flex h-full w-full items-center justify-center text-muted-foreground">
             <Music className="h-8 w-8" />
           </div>
         )}
+        <span
+          className={cn(
+            "absolute left-2 top-2 rounded-full px-2 py-0.5 text-[11px] font-medium",
+            hasThumb ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-300",
+          )}
+        >
+          {hasThumb ? "썸네일 ✓" : "썸네일 없음"}
+        </span>
       </div>
 
       {/* 본문 */}
-      <div className="flex min-w-0 flex-1 flex-col gap-3">
+      <div className="flex flex-1 flex-col gap-3 p-4">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="truncate text-base font-semibold text-foreground">
+          <h3 className="min-w-0 flex-1 truncate text-base font-semibold text-foreground">
             {item.title_kr || item.slug}
           </h3>
           {item.genre && <Badge variant="secondary">{item.genre}</Badge>}
@@ -134,62 +143,66 @@ function QueueCard({ item, onChanged }: { item: QueueItem; onChanged: () => void
           <p className="text-sm leading-relaxed text-foreground/90">{item.gpt_prompt}</p>
         </div>
 
-        {/* 썸네일 업로드 + 공개 업로드 */}
-        <div className="flex flex-wrap items-center gap-3">
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => handleFile(e.target.files?.[0])}
-          />
-          <div
-            onClick={() => fileRef.current?.click()}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault()
-              handleFile(e.dataTransfer.files?.[0])
-            }}
-            className="flex h-16 w-28 cursor-pointer items-center justify-center overflow-hidden rounded-md border border-dashed border-border bg-secondary/20 text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
-            title="클릭 또는 드래그&드롭"
-          >
-            {uploading ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
-            ) : thumbUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={thumbUrl} alt="썸네일" className="h-full w-full object-cover" />
-            ) : (
-              <span className="flex flex-col items-center gap-1 text-[11px]">
-                <Upload className="h-4 w-4" />
-                썸네일
-              </span>
-            )}
-          </div>
-
-          {published ? (
-            <a
-              href={published}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-400 hover:underline"
-            >
-              <MonitorPlay className="h-4 w-4" /> 업로드됨 — 영상 보기
-            </a>
+        {/* 썸네일 업로드(점선 박스, 업로드 시 미리보기) */}
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => handleFile(e.target.files?.[0])}
+        />
+        <div
+          onClick={() => fileRef.current?.click()}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault()
+            handleFile(e.dataTransfer.files?.[0])
+          }}
+          className="flex min-h-[88px] cursor-pointer items-center justify-center overflow-hidden rounded-md border border-dashed border-border bg-secondary/20 text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
+          title="클릭(모바일=사진첩) 또는 드래그&드롭"
+        >
+          {uploading ? (
+            <Loader2 className="h-6 w-6 animate-spin" />
+          ) : thumbUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={thumbUrl} alt="썸네일 미리보기" className="max-h-40 w-full object-contain" />
           ) : (
-            <Button
-              onClick={publish}
-              disabled={!hasThumb || publishing}
-              className="gap-1.5"
-              title={hasThumb ? "유튜브 공개 업로드" : "썸네일을 먼저 업로드하세요"}
-            >
-              {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Globe className="h-4 w-4" />}
-              유튜브 공개 업로드
-            </Button>
-          )}
-          {!hasThumb && !published && (
-            <span className="text-xs text-muted-foreground">썸네일 업로드 후 공개 가능</span>
+            <span className="flex flex-col items-center gap-1.5 py-3 text-xs">
+              <Upload className="h-5 w-5" />
+              썸네일 업로드
+            </span>
           )}
         </div>
+
+        {/* 공개 업로드(썸네일 게이트) */}
+        {published ? (
+          <a
+            href={published}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-11 items-center justify-center gap-1.5 rounded-md bg-emerald-500/15 text-sm font-medium text-emerald-400 hover:bg-emerald-500/25"
+          >
+            <MonitorPlay className="h-4 w-4" /> 업로드 완료 — 영상 보기
+          </a>
+        ) : (
+          <Button
+            onClick={publish}
+            disabled={!hasThumb || publishing}
+            className={cn(
+              "h-11 w-full gap-1.5",
+              hasThumb && "bg-emerald-500 text-white hover:bg-emerald-500/90",
+            )}
+            title={hasThumb ? "유튜브 공개 업로드" : "썸네일을 먼저 업로드하세요"}
+          >
+            {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Globe className="h-4 w-4" />}
+            유튜브 공개 업로드
+          </Button>
+        )}
+        {!hasThumb && !published && (
+          <span className="text-center text-xs text-muted-foreground">
+            썸네일 업로드 후 공개 가능
+          </span>
+        )}
       </div>
     </div>
   )
@@ -213,7 +226,7 @@ export default function MusicQueuePage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-auto p-4 md:p-6">
-      <header className="flex flex-wrap items-center justify-between gap-3">
+      <header className="flex flex-wrap items-center justify-between gap-3 pl-10 md:pl-0">
         <div>
           <h1 className="text-xl font-semibold text-foreground">검토 대기 큐</h1>
           <p className="text-sm text-muted-foreground">
@@ -238,7 +251,8 @@ export default function MusicQueuePage() {
           <p>검토 대기 중인 영상이 없습니다.</p>
         </div>
       ) : (
-        <div className="flex flex-col gap-4">
+        // B안 세로 카드 그리드 — 데스크탑 2~3열, 모바일 1열 자동(auto-fit minmax).
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-[repeat(auto-fit,minmax(280px,1fr))]">
           {items.map((item) => (
             <QueueCard key={item.mix_id} item={item} onChanged={load} />
           ))}
