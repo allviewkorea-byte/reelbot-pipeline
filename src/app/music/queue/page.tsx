@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
-import { ArrowLeft, Loader2, Music, Clapperboard } from "lucide-react"
+import { ArrowLeft, Loader2, Music, Music2, Clapperboard } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { MusicQueueCard, TestCard, type QueueItem } from "@/components/music/MusicQueueCard"
 
@@ -46,6 +46,12 @@ export default function MusicQueueGridPage() {
   const [testVideo, setTestVideo] = useState<{ url: string; engine?: string } | null>(null)
   const [showTestCard, setShowTestCard] = useState(false)
 
+  // 1곡 풀 테스트(#25)
+  const [fullLoading, setFullLoading] = useState(false)
+  const [fullStep, setFullStep] = useState("대기")
+  const [fullVideo, setFullVideo] = useState<{ url: string } | null>(null)
+  const [showFullCard, setShowFullCard] = useState(false)
+
   const load = useCallback(() => {
     fetch("/api/music/queue")
       .then((r) => r.json())
@@ -77,6 +83,49 @@ export default function MusicQueueGridPage() {
     }
   }, [testMood])
 
+  const runFull = useCallback(async () => {
+    setFullLoading(true)
+    setFullVideo(null)
+    setFullStep("대기")
+    setShowFullCard(true)
+    try {
+      const res = await fetch("/api/music/test-render-full", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mood: testMood }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data?.job_id) throw new Error(data?.detail || "풀 테스트 시작 실패")
+      const jobId = data.job_id as string
+      // 폴링 — 3초 간격, done/error 까지.
+      await new Promise<void>((resolve) => {
+        const tick = async () => {
+          try {
+            const sr = await fetch(`/api/music/test-render-full/status/${jobId}`)
+            const sd = await sr.json()
+            if (sd?.step) setFullStep(sd.step)
+            if (sd?.status === "done" && sd?.video_url) {
+              setFullVideo({ url: sd.video_url })
+              resolve(); return
+            }
+            if (sd?.status === "error") {
+              toast.error(sd?.error || "풀 테스트 실패")
+              setShowFullCard(false)
+              resolve(); return
+            }
+          } catch { /* 일시 실패는 다음 틱에 재시도 */ }
+          setTimeout(tick, 3000)
+        }
+        tick()
+      })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "풀 테스트 시작 실패")
+      setShowFullCard(false)
+    } finally {
+      setFullLoading(false)
+    }
+  }, [testMood])
+
   const filtered = useMemo(() => items.filter((it) => matchesCategory(it, filter)), [items, filter])
 
   return (
@@ -94,12 +143,12 @@ export default function MusicQueueGridPage() {
       <div className="flex min-h-0 flex-1 flex-col gap-4 md:flex-row">
         {/* 좌측 패널 — 모바일은 가로 스크롤, md+ 사이드바 */}
         <aside className="flex shrink-0 flex-row gap-2 overflow-x-auto md:w-[240px] md:flex-col md:overflow-x-visible">
-          {/* 테스트 영상 */}
+          {/* 테스트 영상 — 빠른 10초 + 1곡 풀(3~4분) */}
           <div className="flex shrink-0 flex-col gap-1.5 rounded-xl border border-dashed border-border bg-secondary/20 p-2.5">
             <select
               value={testMood}
               onChange={(e) => setTestMood(e.target.value)}
-              disabled={testLoading}
+              disabled={testLoading || fullLoading}
               className="h-8 rounded-md border border-border bg-background px-1.5 text-xs text-foreground"
             >
               {TEST_MOODS.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
@@ -110,7 +159,16 @@ export default function MusicQueueGridPage() {
               disabled={testLoading}
               className="inline-flex items-center justify-center gap-1.5 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
             >
-              {testLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Clapperboard className="h-3.5 w-3.5" />} 테스트 영상
+              {testLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Clapperboard className="h-3.5 w-3.5" />} 빠른 테스트 10초
+            </button>
+            <button
+              type="button"
+              onClick={runFull}
+              disabled={fullLoading}
+              className="inline-flex items-center justify-center gap-1.5 rounded-md border border-cyan-500/40 bg-cyan-500/10 px-2.5 py-1.5 text-xs font-medium text-cyan-300 hover:bg-cyan-500/20 disabled:opacity-60"
+              title="진짜 음원 1곡을 생성해 풀 렌더(수 분 소요, 유튜브·DB 미저장)"
+            >
+              {fullLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Music2 className="h-3.5 w-3.5" />} 1곡 풀 테스트 3~4분
             </button>
           </div>
 
@@ -136,7 +194,7 @@ export default function MusicQueueGridPage() {
         <div className="min-h-0 flex-1">
           {loading ? (
             <div className="flex h-40 items-center justify-center text-muted-foreground"><Loader2 className="h-6 w-6 animate-spin" /></div>
-          ) : filtered.length === 0 && !showTestCard ? (
+          ) : filtered.length === 0 && !showTestCard && !showFullCard ? (
             <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border/60 py-16 text-center text-muted-foreground">
               <Music className="h-10 w-10 opacity-40" />
               <p>{items.length === 0 ? "아직 영상이 없어요. cron이 매일 자동 생성합니다." : "이 카테고리에 해당하는 영상이 없습니다."}</p>
@@ -146,7 +204,8 @@ export default function MusicQueueGridPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {showTestCard && <TestCard loading={testLoading} video={testVideo} />}
+              {showFullCard && <TestCard loading={fullLoading} video={fullVideo} variant="full" step={fullStep} />}
+              {showTestCard && <TestCard loading={testLoading} video={testVideo} variant="quick" />}
               {filtered.map((it) => (
                 <MusicQueueCard key={it.mix_id} item={it} onChanged={load} />
               ))}

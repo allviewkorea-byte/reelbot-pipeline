@@ -100,6 +100,31 @@ def test_render(body: TestRenderBody | None = None):
     return {"ok": True, **result}
 
 
+@router.post("/test-render-full")
+def test_render_full(background: BackgroundTasks, body: TestRenderBody | None = None):
+    """1곡 풀 테스트(#25) — 진짜 음원 1곡 → 풀 렌더(비동기). 유튜브 X, DB 영구 X.
+
+    수 분 걸려 BackgroundTasks 로 시작하고 job_id 즉시 반환. 동시 1개 제한.
+    상태는 GET /test-render-full/status/{job_id} 폴링.
+    """
+    from services import music_test_full
+    started = music_test_full.start(mood=body.mood if body else None)
+    if not started.get("ok"):
+        raise HTTPException(status_code=409, detail=started.get("error") or "이미 진행 중")
+    background.add_task(music_test_full.run, started["job_id"])
+    return {"ok": True, "job_id": started["job_id"]}
+
+
+@router.get("/test-render-full/status/{job_id}")
+def test_render_full_status(job_id: str):
+    """풀 테스트 진행 상태 폴링 — {status, step, video_url, error}. 없으면 404."""
+    from services import music_test_full
+    st = music_test_full.get_status(job_id)
+    if st is None:
+        raise HTTPException(status_code=404, detail="해당 job 을 찾을 수 없습니다(재시작 시 소실).")
+    return st
+
+
 @router.get("/trends")
 def trends_latest():
     """최신 트렌드 인사이트(대시보드/가이드 표시용). 없으면 trend=None."""

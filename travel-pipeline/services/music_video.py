@@ -504,6 +504,7 @@ def make_video(
     force_bg: bool = False,
     background_path: str | None = None,
     viz_spec: dict | None = None,
+    persist: bool = True,
 ) -> dict:
     """주제 + 믹스 → 배경 → 합성(Remotion/ffmpeg) → mp4 → R2. 영상 메타 반환.
 
@@ -512,6 +513,7 @@ def make_video(
     Remotion 경로(USE_REMOTION on): 인트로·텍스트·이퀄 + 첫프레임 자동 썸네일.
     off/실패 시 기존 ffmpeg 폴백(인트로·텍스트·자동썸네일 없음, 회귀 0).
     seconds: 짧은 테스트 컷(앞 N초만). 미지정 시 믹스 전체 길이.
+    persist=False(#25 풀 테스트): record_pending(큐 DB) 기록을 건너뛴다(영구 저장 X).
     """
     _require_ffmpeg()
     slug = theme.get("slug") or theme.get("theme_slug") or mix.get("theme_slug") or "untitled"
@@ -602,15 +604,16 @@ def make_video(
 
         # 검토 대기 큐(#8): pending 행 기록 + GPT 프롬프트(viz_spec 색감 반영) + viz_spec 캐시.
         gpt_prompt = build_thumbnail_prompt(theme, viz_spec)
-        try:
-            from services.music_uploads import record_pending
-            record_pending(
-                slug, video_id, mp4_url=video_url, title_kr=title_kr,
-                genre=theme.get("genre", ""), mood=theme.get("mood", ""),
-                gpt_prompt=gpt_prompt, viz_spec=viz_spec,
-            )
-        except Exception as e:  # noqa: BLE001
-            logger.warning("[video] 검토 큐 기록 실패(영상은 생성됨): %s", e)
+        if persist:
+            try:
+                from services.music_uploads import record_pending
+                record_pending(
+                    slug, video_id, mp4_url=video_url, title_kr=title_kr,
+                    genre=theme.get("genre", ""), mood=theme.get("mood", ""),
+                    gpt_prompt=gpt_prompt, viz_spec=viz_spec,
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[video] 검토 큐 기록 실패(영상은 생성됨): %s", e)
 
         return {
             "video_id": video_id,
