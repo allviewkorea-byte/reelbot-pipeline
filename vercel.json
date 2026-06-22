@@ -1,0 +1,5 @@
+{
+  "crons": [
+    { "path": "/api/music/produce", "schedule": "0 0 * * *" }
+  ]
+}
