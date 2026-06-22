@@ -5,7 +5,7 @@ import Link from "next/link"
 import { toast } from "sonner"
 import { ArrowLeft, Loader2, Music, Music2, Clapperboard } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { MusicQueueCard, TestCard, type QueueItem } from "@/components/music/MusicQueueCard"
+import { MusicQueueCard, TestCard, ManualProgressCard, type QueueItem } from "@/components/music/MusicQueueCard"
 
 // 카테고리(음악 헌법 상황·장르 → 대표 5종) + 전체. 클라이언트 사이드 필터.
 const CATEGORIES = [
@@ -46,11 +46,9 @@ export default function MusicQueueGridPage() {
   const [testVideo, setTestVideo] = useState<{ url: string; engine?: string } | null>(null)
   const [showTestCard, setShowTestCard] = useState(false)
 
-  // 1곡 풀 테스트(#25)
-  const [fullLoading, setFullLoading] = useState(false)
-  const [fullStep, setFullStep] = useState("대기")
-  const [fullVideo, setFullVideo] = useState<{ url: string } | null>(null)
-  const [showFullCard, setShowFullCard] = useState(false)
+  // 수동 영상 생성(#26) — 검토 큐 정식 적재
+  const [manualLoading, setManualLoading] = useState(false)
+  const [manualStep, setManualStep] = useState("주제")
 
   const load = useCallback(() => {
     fetch("/api/music/queue")
@@ -83,34 +81,32 @@ export default function MusicQueueGridPage() {
     }
   }, [testMood])
 
-  const runFull = useCallback(async () => {
-    setFullLoading(true)
-    setFullVideo(null)
-    setFullStep("대기")
-    setShowFullCard(true)
+  const runManual = useCallback(async () => {
+    setManualLoading(true)
+    setManualStep("주제")
     try {
-      const res = await fetch("/api/music/test-render-full", {
+      const res = await fetch("/api/music/manual-render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mood: testMood }),
       })
       const data = await res.json()
-      if (!res.ok || !data?.job_id) throw new Error(data?.detail || "풀 테스트 시작 실패")
+      if (!res.ok || !data?.job_id) throw new Error(data?.detail || "수동 생성 시작 실패")
       const jobId = data.job_id as string
       // 폴링 — 3초 간격, done/error 까지.
       await new Promise<void>((resolve) => {
         const tick = async () => {
           try {
-            const sr = await fetch(`/api/music/test-render-full/status/${jobId}`)
+            const sr = await fetch(`/api/music/manual-render/status/${jobId}`)
             const sd = await sr.json()
-            if (sd?.step) setFullStep(sd.step)
-            if (sd?.status === "done" && sd?.video_url) {
-              setFullVideo({ url: sd.video_url })
+            if (sd?.step) setManualStep(sd.step)
+            if (sd?.status === "done") {
+              toast.success("영상 생성 완료 — 검토 큐에 추가되었습니다.")
+              load() // 큐 새로고침 → 새 pending 카드 등장(일반 카드)
               resolve(); return
             }
             if (sd?.status === "error") {
-              toast.error(sd?.error || "풀 테스트 실패")
-              setShowFullCard(false)
+              toast.error(sd?.error || "영상 생성 실패")
               resolve(); return
             }
           } catch { /* 일시 실패는 다음 틱에 재시도 */ }
@@ -119,12 +115,11 @@ export default function MusicQueueGridPage() {
         tick()
       })
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "풀 테스트 시작 실패")
-      setShowFullCard(false)
+      toast.error(e instanceof Error ? e.message : "수동 생성 시작 실패")
     } finally {
-      setFullLoading(false)
+      setManualLoading(false)
     }
-  }, [testMood])
+  }, [testMood, load])
 
   const filtered = useMemo(() => items.filter((it) => matchesCategory(it, filter)), [items, filter])
 
@@ -143,32 +138,35 @@ export default function MusicQueueGridPage() {
       <div className="flex min-h-0 flex-1 flex-col gap-4 md:flex-row">
         {/* 좌측 패널 — 모바일은 가로 스크롤, md+ 사이드바 */}
         <aside className="flex shrink-0 flex-row gap-2 overflow-x-auto md:w-[240px] md:flex-col md:overflow-x-visible">
-          {/* 테스트 영상 — 빠른 10초 + 1곡 풀(3~4분) */}
+          {/* 영상 생성 — 수동(검토 큐 정식) + 빠른 테스트(폐기) */}
           <div className="flex shrink-0 flex-col gap-1.5 rounded-xl border border-dashed border-border bg-secondary/20 p-2.5">
             <select
               value={testMood}
               onChange={(e) => setTestMood(e.target.value)}
-              disabled={testLoading || fullLoading}
+              disabled={testLoading || manualLoading}
               className="h-8 rounded-md border border-border bg-background px-1.5 text-xs text-foreground"
             >
               {TEST_MOODS.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
             </select>
+            {/* 메인 액션 — 수동 영상 생성(검토 큐에 정식 적재) */}
+            <button
+              type="button"
+              onClick={runManual}
+              disabled={manualLoading}
+              className="inline-flex items-center justify-center gap-1.5 rounded-md bg-primary px-2.5 py-2 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-60"
+              title="진짜 음원 1곡을 생성해 검토 큐에 추가(수 분~수십 분, 유튜브 X)"
+            >
+              {manualLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Music2 className="h-3.5 w-3.5" />} 수동 영상 생성
+            </button>
+            {/* 보조 — 빠른 테스트 10초(합성 음원, 폐기) */}
             <button
               type="button"
               onClick={runTest}
               disabled={testLoading}
-              className="inline-flex items-center justify-center gap-1.5 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
+              className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground hover:border-primary/40 hover:text-foreground disabled:opacity-60"
+              title="합성 음원으로 10초 미리보기(폐기, 유튜브·DB 미저장)"
             >
-              {testLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Clapperboard className="h-3.5 w-3.5" />} 빠른 테스트 10초
-            </button>
-            <button
-              type="button"
-              onClick={runFull}
-              disabled={fullLoading}
-              className="inline-flex items-center justify-center gap-1.5 rounded-md border border-cyan-500/40 bg-cyan-500/10 px-2.5 py-1.5 text-xs font-medium text-cyan-300 hover:bg-cyan-500/20 disabled:opacity-60"
-              title="진짜 음원 1곡을 생성해 풀 렌더(수 분 소요, 유튜브·DB 미저장)"
-            >
-              {fullLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Music2 className="h-3.5 w-3.5" />} 1곡 풀 테스트 3~4분
+              {testLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Clapperboard className="h-3 w-3" />} 🧪 빠른 테스트 10초
             </button>
           </div>
 
@@ -194,7 +192,7 @@ export default function MusicQueueGridPage() {
         <div className="min-h-0 flex-1">
           {loading ? (
             <div className="flex h-40 items-center justify-center text-muted-foreground"><Loader2 className="h-6 w-6 animate-spin" /></div>
-          ) : filtered.length === 0 && !showTestCard && !showFullCard ? (
+          ) : filtered.length === 0 && !showTestCard && !manualLoading ? (
             <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border/60 py-16 text-center text-muted-foreground">
               <Music className="h-10 w-10 opacity-40" />
               <p>{items.length === 0 ? "아직 영상이 없어요. cron이 매일 자동 생성합니다." : "이 카테고리에 해당하는 영상이 없습니다."}</p>
@@ -204,8 +202,8 @@ export default function MusicQueueGridPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {showFullCard && <TestCard loading={fullLoading} video={fullVideo} variant="full" step={fullStep} />}
-              {showTestCard && <TestCard loading={testLoading} video={testVideo} variant="quick" />}
+              {manualLoading && <ManualProgressCard step={manualStep} />}
+              {showTestCard && <TestCard loading={testLoading} video={testVideo} />}
               {filtered.map((it) => (
                 <MusicQueueCard key={it.mix_id} item={it} onChanged={load} />
               ))}
