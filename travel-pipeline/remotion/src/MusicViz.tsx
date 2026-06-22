@@ -8,17 +8,36 @@ import {
   useVideoConfig,
 } from "remotion";
 import { useAudioData, visualizeAudio } from "@remotion/media-utils";
+import { loadFont as loadPlayfair } from "@remotion/google-fonts/PlayfairDisplay";
+import { loadFont as loadDancing } from "@remotion/google-fonts/DancingScript";
 import { moodColors } from "./colors";
 import { currentTrack, Track } from "./tracks";
 
-// Composition Props 제약(Record<string, unknown>)을 만족하려면 interface 가 아닌 type 별칭이어야 한다.
+// Google Fonts(무료, OFL) — Playfair Display(세리프: PLAY LIST·부제), Dancing Script(필기: 곡 제목).
+const playfair = loadPlayfair();
+const dancing = loadDancing();
+const SERIF = playfair.fontFamily;
+const SCRIPT = dancing.fontFamily;
+
+// 곡 분석 결과(#20). null 이면 mood 기반 색상으로 폴백.
+export type VizSpec = {
+  primary_color?: string;
+  secondary_color?: string;
+  text_color?: string;
+  subtitle_en?: string;
+  dominant_emotion?: string;
+  scene_keywords?: string[];
+  lighting?: string;
+};
+
+// Composition Props 제약(Record<string, unknown>)을 만족하려면 type 별칭이어야 한다.
 export type MusicVizProps = {
   tracks: Track[];
   mood: string;
   durationSec: number;
+  vizSpec: VizSpec | null;
 };
 
-// 자산은 render.mjs 가 publicDir 로 복사한 고정 이름을 staticFile 로 참조한다.
 const AUDIO = "audio.mp3";
 const BG = "bg.png";
 
@@ -26,11 +45,26 @@ const BARS = 48;
 const NUM_SAMPLES = 256; // visualizeAudio 는 2의 거듭제곱 필요.
 const SMOOTH_FRAMES = 4; // 최근 N프레임 평균 → 부드러운 감쇠(차분).
 
-export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec }) => {
+// 인트로 타임라인(초) — A 옵션 확정.
+const STATIC_END = 3.5; // 0~3.5 정지(PLAY LIST·부제·곡제목)
+const FADE_END = 4.7; // 3.5~4.7 페이드아웃 + 이퀄 등장
+const TYPE_START = 4.9; // 4.9~6.1 타이프라이터 재등장
+const TYPE_END = 6.1; // 6.1~ 본 영상
+
+const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp" } as const;
+
+export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, vizSpec }) => {
   const frame = useCurrentFrame();
   const { width, height, fps } = useVideoConfig();
   const audioData = useAudioData(staticFile(AUDIO));
-  const [c1, c2] = moodColors(mood);
+
+  // ── 색상: vizSpec 우선, 없으면 mood 매핑 ──────────────────────────
+  const [mc1, mc2] = moodColors(mood);
+  const c1 = vizSpec?.primary_color || mc1;
+  const c2 = vizSpec?.secondary_color || mc2;
+  const textColor = vizSpec?.text_color || "#F5F0E6";
+  const subtitleEn = (vizSpec?.subtitle_en || "").trim();
+  const firstTitle = (tracks[0]?.title || "").trim();
 
   // ── 이퀄 막대 진폭(최근 프레임 평균으로 감쇠) ──────────────────────
   const values: number[] = new Array(BARS).fill(0);
@@ -38,16 +72,10 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec })
     const windows = [];
     for (let d = 0; d < SMOOTH_FRAMES; d++) {
       windows.push(
-        visualizeAudio({
-          audioData,
-          frame: Math.max(0, frame - d),
-          fps,
-          numberOfSamples: NUM_SAMPLES,
-        }),
+        visualizeAudio({ audioData, frame: Math.max(0, frame - d), fps, numberOfSamples: NUM_SAMPLES }),
       );
     }
     for (let i = 0; i < BARS; i++) {
-      // 저~중역(에너지 많은 구간)을 펼쳐 매핑.
       const idx = 1 + Math.round((i / (BARS - 1)) * (NUM_SAMPLES * 0.45));
       let sum = 0;
       for (const w of windows) sum += w[idx] || 0;
@@ -55,15 +83,22 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec })
     }
   }
 
-  // ── 레이아웃: 맨 아래 얇은 띠(높이 ~12%), 가로 66% 중앙 ──────────
+  // ── 레이아웃 ──────────────────────────────────────────────────────
   const bandWidth = width * 0.66;
   const left = (width - bandWidth) / 2;
   const slot = bandWidth / BARS;
-  const barW = slot * 0.5; // 굵은 막대
-  const maxBarH = height * 0.12; // 띠 높이 ~12%
-  const baseBottom = height * 0.035; // 화면 맨 아래에서 살짝 띄움
+  const barW = slot * 0.5;
+  const maxBarH = height * 0.12;
+  const baseBottom = height * 0.035;
 
-  // ── 곡 제목(구간별, 경계 페이드) ─────────────────────────────────
+  // ── 인트로 모션 진행도 ────────────────────────────────────────────
+  const introOpacity = interpolate(frame, [STATIC_END * fps, FADE_END * fps], [1, 0], clamp);
+  const eqIn = interpolate(frame, [STATIC_END * fps, FADE_END * fps], [0, 1], clamp);
+  const eqTranslateY = (1 - eqIn) * (maxBarH + baseBottom + 60);
+  const typeProgress = interpolate(frame, [TYPE_START * fps, TYPE_END * fps], [0, 1], clamp);
+  const inIntroType = frame < TYPE_END * fps;
+
+  // ── 곡 제목(본 영상 구간별, 경계 페이드) ─────────────────────────
   const t = frame / fps;
   const active = currentTrack(tracks, t, durationSec);
   let titleOpacity = 0;
@@ -72,74 +107,134 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec })
     const sf = active.start * fps;
     const ef = active.end * fps;
     titleOpacity = Math.min(
-      interpolate(frame, [sf, sf + fadeFrames], [0, 1], {
-        extrapolateLeft: "clamp",
-        extrapolateRight: "clamp",
-      }),
-      interpolate(frame, [ef - fadeFrames, ef], [1, 0], {
-        extrapolateLeft: "clamp",
-        extrapolateRight: "clamp",
-      }),
+      interpolate(frame, [sf, sf + fadeFrames], [0, 1], clamp),
+      interpolate(frame, [ef - fadeFrames, ef], [1, 0], clamp),
     );
   }
 
-  // 제목은 이퀄 위, 그 위가 자막 자리(#6b 후속). 썸네일 상단(PLAY LIST·인물)과 겹치지 않게 하단에.
-  const titleBottom = baseBottom + maxBarH + 56;
+  // ── 좌하단 블록(부제 고정 + 곡 제목): 4.9초부터 타이핑, 6.1초부터 본 영상 ──
+  const blLeft = width * 0.06;
+  const blSubBottom = baseBottom + maxBarH + 96;
+  const blTitleBottom = baseBottom + maxBarH + 36;
+  let blSub = "";
+  let blTitle = "";
+  let blSubOpacity = 0;
+  let blTitleOpacity = 0;
+  if (frame >= TYPE_START * fps) {
+    blSubOpacity = 1;
+    if (inIntroType) {
+      blSub = subtitleEn.slice(0, Math.floor(typeProgress * subtitleEn.length));
+      blTitle = firstTitle.slice(0, Math.floor(typeProgress * firstTitle.length));
+      blTitleOpacity = 1;
+    } else {
+      blSub = subtitleEn;
+      blTitle = active ? active.title : "";
+      blTitleOpacity = titleOpacity; // 곡 전환 페이드
+    }
+  }
+
+  const shadow = "0 2px 14px rgba(0,0,0,0.78)";
 
   return (
     <AbsoluteFill>
-      {/* 1) 배경 썸네일(정지, PLAY LIST·인물 포함 — 대표 제작) */}
+      {/* 1) 배경(깨끗한 이미지 — 텍스트 0, Remotion 이 모든 글자를 그린다) */}
       <Img src={staticFile(BG)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-
-      {/* 오디오 트랙(영상에 믹스 mp3 포함) */}
       <Audio src={staticFile(AUDIO)} />
 
-      {/* 2) 자막 자리 — 곡 제목과 이퀄 사이(이번엔 비움) */}
+      {/* 하단 가독성 스크림(은은) */}
+      <div
+        style={{
+          position: "absolute", left: 0, right: 0, bottom: 0, height: height * 0.42,
+          background: "linear-gradient(to top, rgba(0,0,0,0.45), rgba(0,0,0,0))",
+        }}
+      />
 
-      {/* 3) 곡 구간별 제목(하단, 페이드) */}
-      {active ? (
+      {/* 2) 인트로 정지 화면(0~4.7 페이드) — PLAY LIST 상단 / 부제 좌중 / 곡제목 우중하단 */}
+      {introOpacity > 0.001 && (
+        <div style={{ position: "absolute", inset: 0, opacity: introOpacity }}>
+          <div
+            style={{
+              position: "absolute", top: height * 0.08, width: "100%", textAlign: "center",
+              fontFamily: SERIF, fontWeight: 700, color: textColor,
+              fontSize: width * 0.075, letterSpacing: width * 0.012, textShadow: shadow,
+            }}
+          >
+            PLAY LIST
+          </div>
+          {subtitleEn && (
+            <div
+              style={{
+                position: "absolute", left: width * 0.08, top: height * 0.46,
+                fontFamily: SERIF, fontStyle: "italic", color: textColor,
+                fontSize: width * 0.026, textShadow: shadow, maxWidth: width * 0.5,
+              }}
+            >
+              {subtitleEn}
+            </div>
+          )}
+          {firstTitle && (
+            <div
+              style={{
+                position: "absolute", right: width * 0.08, bottom: height * 0.2,
+                fontFamily: SCRIPT, color: textColor,
+                fontSize: width * 0.05, textShadow: shadow, textAlign: "right", maxWidth: width * 0.55,
+              }}
+            >
+              {firstTitle}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 3) 좌하단 블록(타이핑 후 본 영상): 부제 고정 + 곡 제목(전환 페이드) */}
+      {blSub && (
         <div
           style={{
-            position: "absolute",
-            bottom: titleBottom,
-            width: "100%",
-            textAlign: "center",
-            opacity: titleOpacity,
-            color: "white",
-            fontSize: 46,
-            fontWeight: 700,
-            fontFamily: "sans-serif",
-            letterSpacing: 0.5,
-            textShadow: "0 2px 12px rgba(0,0,0,0.75)",
+            position: "absolute", left: blLeft, bottom: blSubBottom, opacity: blSubOpacity,
+            fontFamily: SERIF, fontStyle: "italic", color: textColor,
+            fontSize: width * 0.022, textShadow: shadow, maxWidth: width * 0.6,
           }}
         >
-          {active.title}
+          {blSub}
         </div>
-      ) : null}
+      )}
+      {blTitle && (
+        <div
+          style={{
+            position: "absolute", left: blLeft, bottom: blTitleBottom, opacity: blTitleOpacity,
+            fontFamily: SCRIPT, color: textColor,
+            fontSize: width * 0.044, textShadow: shadow, maxWidth: width * 0.7,
+          }}
+        >
+          {blTitle}
+        </div>
+      )}
 
-      {/* 4) 맨 아래 굵은 둥근 바 이퀄(반투명·감쇠) */}
-      {values.map((v, i) => {
-        // 고역 롤오프 보정(tilt): 실제 음악은 고역 에너지가 약해 우측 막대가 죽기 쉽다.
-        // 막대 인덱스가 커질수록 게인을 키워(최대 ~2.6배) 전 대역이 고르게 반응하게 한다.
-        const tilt = 1 + (i / (BARS - 1)) * 1.6;
-        const amp = Math.min(1, v * 2.4 * tilt);
-        const h = 10 + amp * maxBarH;
-        return (
-          <div
-            key={i}
-            style={{
-              position: "absolute",
-              bottom: baseBottom,
-              left: left + i * slot + (slot - barW) / 2,
-              width: barW,
-              height: h,
-              borderRadius: barW, // 끝이 둥근 막대
-              opacity: 0.72, // 반투명 — 배경 안 가림
-              background: `linear-gradient(to top, ${c1}, ${c2})`,
-            }}
-          />
-        );
-      })}
+      {/* 4) 맨 아래 굵은 둥근 바 이퀄(3.5초부터 아래에서 등장, 반투명·감쇠) */}
+      <div
+        style={{ position: "absolute", inset: 0, opacity: eqIn, transform: `translateY(${eqTranslateY}px)` }}
+      >
+        {values.map((v, i) => {
+          const tilt = 1 + (i / (BARS - 1)) * 1.6; // 고역 롤오프 보정
+          const amp = Math.min(1, v * 2.4 * tilt);
+          const h = 10 + amp * maxBarH;
+          return (
+            <div
+              key={i}
+              style={{
+                position: "absolute",
+                bottom: baseBottom,
+                left: left + i * slot + (slot - barW) / 2,
+                width: barW,
+                height: h,
+                borderRadius: barW,
+                opacity: 0.72,
+                background: `linear-gradient(to top, ${c1}, ${c2})`,
+              }}
+            />
+          );
+        })}
+      </div>
     </AbsoluteFill>
   );
 };

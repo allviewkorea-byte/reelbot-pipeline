@@ -219,15 +219,36 @@ def _thumb_trend_hint() -> str:
     return f", with a {', '.join(kws[:2])} feel"
 
 
-def build_thumbnail_prompt(theme: dict) -> str:
+def build_thumbnail_prompt(theme: dict, viz_spec: dict | None = None) -> str:
     """주제 → ChatGPT(gpt-image)에 붙여넣을 영어 썸네일 프롬프트(#8 큐 복사용).
 
-    After Rain 스타일: 대형 "PLAY LIST" 텍스트 + 주제 매칭 배경 + 인물(싱글/커플 랜덤).
-    배경은 데이터(_THUMB_SCENES) 매핑, 인물·성별은 매 호출 랜덤, 톤은 주제(밝음/무드)로 결정.
-    트렌드 mood_keywords 가 있으면 톤 묘사에 살짝 섞는다(없으면 회귀 0). 영어 한 문단.
+    #20: viz_spec(곡 분석) 이 있으면 색감·씬키워드·조명을 주입하고 **텍스트 0개**(PLAY LIST·
+    글자는 Remotion 이 그림)로 만든다. viz_spec 없으면 #17 동작(시그니처 호환).
+    배경은 데이터(_THUMB_SCENES) 매핑, 인물·성별은 매 호출 랜덤. 영어 한 문단.
     """
     scene, tone = _thumb_scene(theme)
     person = _thumb_person()
+
+    if viz_spec:
+        # #20: 깨끗한(텍스트 없는) 이미지 — Remotion 이 PLAY LIST·부제·곡제목을 그린다.
+        kws = ", ".join((viz_spec.get("scene_keywords") or [])[:5])
+        scene_bit = f"{scene}" + (f" ({kws})" if kws else "")
+        lighting = str(viz_spec.get("lighting") or "").strip()
+        light_bit = f"{lighting} lighting. " if lighting else ""
+        colors = ", ".join(
+            c for c in (viz_spec.get("primary_color"), viz_spec.get("secondary_color")) if c
+        )
+        color_bit = f"Color tone: {colors}. " if colors else ""
+        return (
+            f"YouTube music thumbnail, 16:9 aspect ratio. "
+            f"Background: {scene_bit}. "
+            f"{person} in the scene, natural candid pose. "
+            f"{color_bit}{light_bit}"
+            f"Cinematic, high quality, photographic. "
+            f"Absolutely no text, no letters, no words, no logo, no watermark."
+        )
+
+    # viz_spec 없음 → #17 동작(회귀 0).
     trend = _thumb_trend_hint()
     tone_desc = (
         "bright, clean, airy lighting"
@@ -312,8 +333,9 @@ def _render_remotion(
     tracks: list[dict],
     mood: str,
     duration: float,
+    viz_spec: dict | None = None,
 ) -> str:
-    """Remotion(굵은 둥근 바) 렌더 → mp4. 실패 시 예외(호출부가 ffmpeg 로 폴백)."""
+    """Remotion(둥근 바 + 인트로 + 텍스트) 렌더 → mp4. 실패 시 예외(호출부가 ffmpeg 폴백)."""
     props = {
         "tracks": [
             {
@@ -324,6 +346,7 @@ def _render_remotion(
         ],
         "mood": mood,
         "durationSec": round(duration, 3),
+        "vizSpec": viz_spec or None,
     }
     cmd = [
         "node", str(_REMOTION_DIR / "render.mjs"),
@@ -339,6 +362,16 @@ def _render_remotion(
     if result.returncode != 0:
         raise RuntimeError(f"Remotion 렌더 오류:\n{result.stderr[-2500:]}")
     return str(out_path)
+
+
+def _extract_first_frame(mp4_path: str, out_png: str) -> str:
+    """mp4 0초 프레임 → png(#20 유튜브 썸네일 = 영상 첫 화면 100% 일치)."""
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", os.path.abspath(str(mp4_path)),
+         "-vframes", "1", "-q:v", "2", os.path.abspath(str(out_png))],
+        check=True, capture_output=True, text=True,
+    )
+    return str(out_png)
 
 
 # ── ffmpeg 합성 ──────────────────────────────────────────────────────────
@@ -470,14 +503,15 @@ def make_video(
     viz: str | None = None,
     force_bg: bool = False,
     background_path: str | None = None,
+    viz_spec: dict | None = None,
 ) -> dict:
-    """주제 + 믹스 → 배경 → ffmpeg 합성 → mp4 → R2. 영상 메타 반환.
+    """주제 + 믹스 → 배경 → 합성(Remotion/ffmpeg) → mp4 → R2. 영상 메타 반환.
 
-    background_path: 주면 그 이미지(검토 큐에서 올린 썸네일)를 배경으로 쓰고 gpt-image-1
-      생성을 스킵하며 정지화면(Ken Burns 줌 없음)으로 합성한다. None 이면 기존
-      gpt-image-1 배경 + Ken Burns(현행 회귀 0).
+    background_path: 주면 그 이미지(대표가 올린 깨끗한 이미지)를 배경으로 쓴다.
+    viz_spec(#20): 곡 분석. None 이고 Remotion on 이면 캐시→분석으로 채운다.
+    Remotion 경로(USE_REMOTION on): 인트로·텍스트·이퀄 + 첫프레임 자동 썸네일.
+    off/실패 시 기존 ffmpeg 폴백(인트로·텍스트·자동썸네일 없음, 회귀 0).
     seconds: 짧은 테스트 컷(앞 N초만). 미지정 시 믹스 전체 길이.
-    Returns: {video_id, video_url, duration, slug}
     """
     _require_ffmpeg()
     slug = theme.get("slug") or theme.get("theme_slug") or mix.get("theme_slug") or "untitled"
@@ -486,6 +520,17 @@ def make_video(
         raise ValueError("mix['mp3_url'] 이 필요합니다.")
     tracks = mix.get("tracks") or []
     title_kr = theme.get("title_kr") or theme.get("title") or slug
+    video_id = mix.get("mix_id") or "video"
+    use_remotion = remotion_enabled()
+
+    # #20 곡 분석(viz_spec) — Remotion 경로에서만(회귀 안전). 캐시 우선.
+    if use_remotion and viz_spec is None:
+        try:
+            from services import music_uploads, music_viz_analyzer
+            viz_spec = music_uploads.get_viz_spec(video_id) or music_viz_analyzer.analyze_song(theme, mix)
+        except Exception as e:  # noqa: BLE001 - 분석 실패해도 렌더는 진행(텍스트 기본색)
+            logger.warning("[video] 곡 분석 실패(기본값 진행): %s", e)
+            viz_spec = None
 
     work = Path(tempfile.mkdtemp(prefix="makevid_"))
     try:
@@ -495,7 +540,7 @@ def make_video(
         full = _duration(str(audio))
         duration = min(seconds, full) if seconds else full
 
-        # 배경: 썸네일(background_path) 우선 — 있으면 정지화면, 없으면 gpt-image-1 + Ken Burns.
+        # 배경: 깨끗한 이미지(background_path) 우선, 없으면 gpt-image-1 생성.
         bg = work / _BG_NAME
         static_bg = bool(background_path)
         if static_bg:
@@ -503,19 +548,18 @@ def make_video(
         else:
             generate_background(theme, str(bg), force=force_bg)
 
-        video_id = mix.get("mix_id") or "video"
         out = work / f"{video_id}.mp4"
 
-        # 합성: Remotion(굵은 둥근 바) 우선, 실패/off 면 기존 ffmpeg 폴백(회귀 0).
+        # 합성: Remotion(인트로+텍스트+이퀄) 우선, 실패/off 면 ffmpeg 폴백(회귀 0).
         rendered = False
-        if remotion_enabled():
+        if use_remotion:
             mood_hint = " ".join(
                 str(theme.get(k, "")) for k in ("mood", "genre", "situation")
             ).strip()
             try:
                 _render_remotion(
                     str(bg), str(audio), str(out),
-                    tracks=tracks, mood=mood_hint, duration=duration,
+                    tracks=tracks, mood=mood_hint, duration=duration, viz_spec=viz_spec,
                 )
                 rendered = True
                 logger.info("[video] Remotion 렌더 완료 slug=%s", slug)
@@ -538,14 +582,32 @@ def make_video(
         else:
             logger.warning("[video] R2 미설정 — mp4 가 로컬에만 있습니다.")
 
-        # 검토 대기 큐(#8): pending 행 기록 + 썸네일 GPT 프롬프트 저장(best-effort).
-        gpt_prompt = build_thumbnail_prompt(theme)
+        # #20 첫프레임 추출(유튜브 썸네일 = 영상 첫 화면 100% 일치). Remotion 렌더일 때만.
+        # ⚠️ 대표가 올린 '깨끗한 배경'(thumbnail_r2_key)과 충돌하지 않게 **별도 키**에 저장한다
+        #    (덮어쓰면 재렌더 시 텍스트 위에 텍스트). 게이트는 그대로(대표 업로드 유지).
+        frame_thumb_key: str | None = None
+        frame_thumb_url: str | None = None
+        if rendered:
+            try:
+                thumb_png = work / f"{video_id}_frame.png"
+                _extract_first_frame(str(out), str(thumb_png))
+                if r2_storage.is_available():
+                    frame_name = f"{video_id}_frame.png"
+                    frame_thumb_url = r2_storage.upload_music_video(
+                        str(thumb_png), slug, frame_name, content_type="image/png"
+                    )
+                    frame_thumb_key = r2_storage.music_video_key(slug, frame_name)
+            except Exception as e:  # noqa: BLE001 - 첫프레임 실패해도 영상은 유효
+                logger.warning("[video] 첫프레임 추출/업로드 실패: %s", e)
+
+        # 검토 대기 큐(#8): pending 행 기록 + GPT 프롬프트(viz_spec 색감 반영) + viz_spec 캐시.
+        gpt_prompt = build_thumbnail_prompt(theme, viz_spec)
         try:
             from services.music_uploads import record_pending
             record_pending(
                 slug, video_id, mp4_url=video_url, title_kr=title_kr,
                 genre=theme.get("genre", ""), mood=theme.get("mood", ""),
-                gpt_prompt=gpt_prompt,
+                gpt_prompt=gpt_prompt, viz_spec=viz_spec,
             )
         except Exception as e:  # noqa: BLE001
             logger.warning("[video] 검토 큐 기록 실패(영상은 생성됨): %s", e)
@@ -556,6 +618,9 @@ def make_video(
             "duration": round(duration, 3),
             "slug": slug,
             "gpt_prompt": gpt_prompt,
+            "viz_spec": viz_spec,
+            "frame_thumb_key": frame_thumb_key,
+            "frame_thumb_url": frame_thumb_url,
         }
     finally:
         shutil.rmtree(work, ignore_errors=True)

@@ -142,13 +142,25 @@ def publish(mix_id: str):
         except Exception as e:  # noqa: BLE001
             raise HTTPException(status_code=502, detail=f"썸네일 다운로드 실패: {e}") from e
 
-        # 2) 썸네일을 배경(정지화면)으로 영상 재생성 → 새 mp4(R2).
+        # 2) 깨끗한 이미지를 배경으로 영상 재생성 → 새 mp4(R2). Remotion 이 인트로·텍스트·이퀄 합성.
         vres = make_video(theme, mix, background_path=str(thumb))
         new_mp4_url = vres["video_url"]
 
-        # 3) 재생성 mp4 + 썸네일 set 으로 공개 업로드.
+        # 3) 유튜브 썸네일 = 영상 첫 프레임(#20, Remotion 텍스트 포함) — 있으면 다운로드해 사용,
+        #    없으면(폴백 렌더) 대표가 올린 이미지로.
+        yt_thumb = str(thumb)
+        frame_key = vres.get("frame_thumb_key")
+        if frame_key:
+            try:
+                frame_png = tmpdir / "frame.png"
+                r2_storage.download_music_object(frame_key, str(frame_png))
+                yt_thumb = str(frame_png)
+            except Exception as e:  # noqa: BLE001 - 실패 시 업로드 이미지로 폴백
+                logger.warning("[music-dashboard] 첫프레임 썸네일 다운로드 실패(업로드본 사용): %s", e)
+
+        # 4) 재생성 mp4 + 썸네일 set 으로 공개 업로드.
         result = upload_music_video(
-            new_mp4_url, theme, mix, privacy="public", thumbnail_path=str(thumb),
+            new_mp4_url, theme, mix, privacy="public", thumbnail_path=yt_thumb,
         )
     except HTTPException:
         raise
