@@ -11,8 +11,10 @@ MUSIC_CALLBACK_BASE_URL 미설정이면 suno 가 콜백을 보내지 않으며, 
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import random
 import threading
 from datetime import datetime, timedelta, timezone
 
@@ -24,8 +26,12 @@ from services import music_suno
 logger = logging.getLogger(__name__)
 
 # #28 cron 중복 생성 방지 — 8/9/10시 3개 cron 중 '오늘 첫 호출'만 생성, 나머지 스킵.
+# #28-A: 첫 호출이 0~120분 랜덤 지연 후 생성(봇 패턴 회피). 선점은 지연 시작 전에 잡는다.
 _PRODUCE_LOCK = threading.Lock()
 _produced_date: str | None = None  # 'YYYY-MM-DD'(KST) — 이 프로세스가 오늘 생성을 선점
+_produced_at: datetime | None = None  # 선점 시각(UTC) — 인스턴스 재시작/멈춤 대비 stale 무효화
+_PREEMPT_TTL = 3 * 3600  # 선점 유효시간(초). 초과 시 무효화(그날 영상 누락 방지)
+_MAX_DELAY = 7200  # 최대 지연(초) = 120분
 _KST = timezone(timedelta(hours=9))
 
 router = APIRouter()
@@ -39,9 +45,15 @@ def _authorized_cron(authorization: str | None) -> bool:
     return authorization == f"Bearer {secret}"
 
 
+def _release_preempt() -> None:
+    global _produced_date, _produced_at
+    with _PRODUCE_LOCK:
+        _produced_date = None
+        _produced_at = None
+
+
 def _run_produce() -> None:
     """백그라운드: 주제 자동 생성 → 음원 → 영상 → 검토 대기 큐 적재(run_theme)."""
-    global _produced_date
     try:
         from services import music_produce
         result = music_produce.run_theme(video=True, upload=False)
@@ -50,35 +62,62 @@ def _run_produce() -> None:
         logger.info("[music-produce] 완료 slug=%s video_id=%s", slug, vid)
     except Exception as e:  # noqa: BLE001 - 백그라운드 실패는 로깅만(큐는 비어 있게 둠)
         # 실패 시 오늘 선점 해제 → 다음 cron(9/10시)이 재시도하도록.
-        with _PRODUCE_LOCK:
-            _produced_date = None
+        _release_preempt()
         logger.warning("[music-produce] 백그라운드 실패(선점 해제, 재시도 허용): %s", e)
+
+
+async def _produce_with_delay(delay_seconds: int) -> None:
+    """랜덤 지연(asyncio.sleep, 이벤트루프 안 막음) 후 생성(블로킹은 to_thread)."""
+    logger.info("[music-produce] %d초(%d분) 지연 후 생성 예약", delay_seconds, delay_seconds // 60)
+    try:
+        await asyncio.sleep(delay_seconds)
+    except Exception:  # noqa: BLE001 - 취소 등은 무시하고 진행 시도
+        pass
+    # _run_produce 는 자체적으로 성공 시 선점 유지 / 실패 시 선점 해제한다.
+    await asyncio.to_thread(_run_produce)
 
 
 @router.post("/produce")
 def produce(background: BackgroundTasks, authorization: str | None = Header(default=None)):
-    """cron 트리거 — 주제→음원→영상→큐 적재를 비동기로 시작하고 즉시 반환.
+    """cron 트리거 — 0~120분 랜덤 지연 후 영상 생성을 예약하고 즉시 반환.
 
-    #28: 8/9/10시 3개 cron 등록 → '오늘 첫 호출'만 생성, 이미 오늘 생성됐으면 스킵
-    (시간 자연 분산). 프로세스 선점(_produced_date) + DB(오늘 row) 이중 확인으로
-    동시 호출에도 1개만 실행. 10분+ 작업이라 fire-and-forget. CRON_SECRET 필수.
+    #28: 8/9/10시 3개 cron → '오늘 첫 호출'만 생성, 나머지 스킵(프로세스 선점 + DB 이중 확인).
+    #28-A: 첫 호출은 0~120분 랜덤 지연 후 생성(봇 패턴 회피). 선점은 지연 시작 전에 잡으므로
+    지연 중 들어온 다른 cron 은 즉시 skip. 선점이 3시간 넘으면 무효화(재시작/멈춤 대비).
+    CRON_SECRET 필수.
     """
     if not _authorized_cron(authorization):
         raise HTTPException(status_code=401, detail="unauthorized")
 
-    global _produced_date
+    global _produced_date, _produced_at
     today = datetime.now(_KST).strftime("%Y-%m-%d")
+    now_utc = datetime.now(timezone.utc)
     with _PRODUCE_LOCK:
+        # 선점이 오래됐으면(인스턴스 재시작으로 지연 작업 유실 등) 무효화 → 재시도 허용.
+        if (
+            _produced_date == today and _produced_at is not None
+            and (now_utc - _produced_at).total_seconds() > _PREEMPT_TTL
+        ):
+            _produced_date = None
+            _produced_at = None
         if _produced_date == today:
             return {"ok": True, "skipped": True, "reason": "이미 오늘 영상 생성됨(프로세스 선점)"}
         from services import music_uploads
         if music_uploads.count_today_kst() > 0:
             _produced_date = today
+            _produced_at = now_utc
             return {"ok": True, "skipped": True, "reason": "이미 오늘 영상 생성됨"}
         # 선점 — 동시 호출(8/9시 동시 도착)이라도 두 번째는 위 가드로 스킵.
         _produced_date = today
-        background.add_task(_run_produce)
-    return {"ok": True, "status": "started"}
+        _produced_at = now_utc
+        delay = random.randint(0, _MAX_DELAY)
+        background.add_task(_produce_with_delay, delay)
+    return {
+        "ok": True,
+        "status": "scheduled",
+        "delay_seconds": delay,
+        "estimated_start_minutes": delay // 60,
+    }
 
 
 def _run_trend_analysis() -> None:
