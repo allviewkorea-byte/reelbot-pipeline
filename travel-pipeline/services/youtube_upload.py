@@ -202,6 +202,140 @@ def upload_video(
     return {"video_id": video_id, "video_url": f"https://www.youtube.com/watch?v={video_id}"}
 
 
+# ── 음악 채널(Revezen) 업로드 — 백곰과 분리, additive ──────────────────────
+def build_music_metadata(theme: dict, mix: dict) -> tuple[str, str, list[str]]:
+    """음악 영상 메타데이터 (제목, 설명, 태그).
+
+    제목: '{title_kr} | {genre} Mix'
+    설명: 장르·상황·무드 + 곡 목록(mix 오프셋 기반, mm:ss).
+    태그: 장르·상황·무드(키워드) + style_prompt 영어 토큰 + 일반 음악 태그.
+    """
+    title_kr = (theme.get("title_kr") or theme.get("title") or "").strip()
+    genre = (theme.get("genre") or "").strip()
+    situation = (theme.get("situation") or "").strip()
+    mood = (theme.get("mood") or "").strip()
+
+    title = f"{title_kr} | {genre} Mix".strip(" |") if genre else title_kr
+    title = title[:100]
+
+    # 설명: 첫 줄 요약(장르·상황·무드) + 곡 목록 타임스탬프.
+    head_bits = [b for b in (genre, situation, mood) if b]
+    head = " · ".join(head_bits)
+    lines = [head] if head else []
+    tracks = mix.get("tracks") or []
+    if tracks:
+        lines.append("")
+        lines.append("🎵 Tracklist")
+        for t in tracks:
+            start = float(t.get("start_sec") or 0.0)
+            mm, ss = divmod(int(start), 60)
+            name = (t.get("title") or "").strip()
+            if name:
+                lines.append(f"{mm:02d}:{ss:02d} {name}")
+    description = "\n".join(lines).strip()
+
+    # 태그: 한국어 키워드 + style_prompt 영어 토큰 + 일반.
+    tags: list[str] = []
+    for kw in (genre, situation, mood):
+        for part in re.split(r"[·,/]", kw or ""):
+            part = part.strip()
+            if part and part not in tags:
+                tags.append(part)
+    for tok in re.split(r"[,\n]", theme.get("style_prompt") or ""):
+        tok = tok.strip()
+        if tok and len(tok) <= 30 and tok not in tags:
+            tags.append(tok)
+    for generic in ("music", "playlist", "mix", "Rooftop Music"):
+        if generic not in tags:
+            tags.append(generic)
+    return title, description, tags[:30]
+
+
+def _verify_music_channel(youtube) -> None:
+    """업로드 토큰 채널이 YOUTUBE_CHANNEL_ID_MUSIC 과 일치하는지 검증(불일치 시 차단)."""
+    target = (os.getenv("YOUTUBE_CHANNEL_ID_MUSIC") or "").strip()
+    try:
+        resp = youtube.channels().list(part="id,snippet", mine=True).execute()
+        items = resp.get("items", [])
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[music-youtube] 채널 확인 실패(업로드는 계속): %s", e)
+        return
+    if not items:
+        logger.warning("[music-youtube] 인증 토큰에 연결된 채널이 없습니다.")
+        return
+    actual_id = items[0].get("id", "")
+    actual_title = items[0].get("snippet", {}).get("title", "")
+    logger.warning(
+        "[music-youtube] 인증 채널: id=%s title=%s (목표=%s)",
+        actual_id, actual_title, target or "(미설정)",
+    )
+    if target and actual_id != target:
+        raise RuntimeError(
+            f"음악 업로드 대상 채널 불일치: 토큰 채널={actual_id}({actual_title}) ≠ "
+            f"YOUTUBE_CHANNEL_ID_MUSIC={target}. /api/music/youtube/auth 재인증 시 "
+            "Revezen 채널을 선택하세요."
+        )
+
+
+def upload_music_video(mp4_path: str, theme: dict, mix: dict) -> dict:
+    """음악 영상(mp4)을 음악 채널(Revezen)에 비공개 업로드. Returns {video_id, video_url}.
+
+    백곰 upload_video 와 분리: 음악 OAuth(music_youtube_oauth.get_credentials),
+    카테고리 10(음악), privacyStatus=private. mp4_path 는 R2 URL/로컬 경로 모두 가능.
+    업로드 성공 시 music_uploads 에 기록(실패해도 업로드는 성공).
+    """
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaFileUpload
+
+    from services.music_uploads import record_upload
+    from services.music_youtube_oauth import get_credentials as music_get_credentials
+
+    title, description, tags = build_music_metadata(theme, mix)
+
+    with tempfile.TemporaryDirectory(prefix="ytmusic_") as tmp:
+        local = Path(tmp) / "video.mp4"
+        _fetch(mp4_path, local)  # URL/로컬 모두 처리
+        if not local.exists() or local.stat().st_size == 0:
+            raise FileNotFoundError(f"업로드할 음악 영상 없음/빈 파일: {mp4_path}")
+
+        creds = music_get_credentials()
+        youtube = build("youtube", "v3", credentials=creds, cache_discovery=False)
+        _verify_music_channel(youtube)
+
+        body = {
+            "snippet": {
+                "title": title[:100],
+                "description": description,
+                "tags": tags,
+                "categoryId": "10",        # 음악
+                "defaultLanguage": "ko",
+            },
+            "status": {
+                "privacyStatus": "private",  # 비공개(수동 공개)
+                "selfDeclaredMadeForKids": False,
+            },
+        }
+        logger.warning("[music-youtube] 업로드 시작: title=%s", title)
+        media = MediaFileUpload(str(local), mimetype="video/mp4", chunksize=-1, resumable=True)
+        response = youtube.videos().insert(part="snippet,status", body=body, media_body=media).execute()
+        video_id = response["id"]
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+        logger.warning("[music-youtube] 업로드 성공: video_id=%s", video_id)
+
+    # 기록(best-effort).
+    try:
+        record_upload(
+            theme.get("slug") or theme.get("theme_slug") or "",
+            mix.get("mix_id") or "",
+            video_id,
+            video_url,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[music-youtube] 업로드 기록 실패(영상은 업로드됨): %s", e)
+
+    return {"video_id": video_id, "video_url": video_url}
+
+
 def publish_to_youtube(
     video_url: str, thumbnail_url: str, hook_text: str, script: str,
     privacy: str | None = None, synthetic_media: bool | None = None,

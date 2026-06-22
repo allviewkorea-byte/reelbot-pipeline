@@ -15,7 +15,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from api.routes import health, music, sayeon, status, storyboard, trends, video, youtube
+from api.routes import (
+    health,
+    music,
+    music_youtube,
+    sayeon,
+    status,
+    storyboard,
+    trends,
+    video,
+    youtube,
+)
 from services.scheduler import shutdown_scheduler, start_scheduler
 
 load_dotenv()
@@ -68,6 +78,7 @@ app.include_router(trends.channels_router, tags=["trends"])
 app.include_router(sayeon.router, prefix="/sayeon", tags=["sayeon"])
 app.include_router(youtube.router, prefix="/api/youtube", tags=["youtube"])
 app.include_router(music.router, prefix="/api/music", tags=["music"])
+app.include_router(music_youtube.router, prefix="/api/music/youtube", tags=["music"])
 
 
 if __name__ == "__main__":

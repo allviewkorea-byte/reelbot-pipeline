@@ -221,6 +221,7 @@ def run_theme(
     lyrics_model: str | None = None,
     video: bool = False,
     video_seconds: float | None = None,
+    upload: bool = False,
     progress=None,
 ) -> dict:
     """주제 1개 → 음원 믹스 1개(얇은 오케스트레이터).
@@ -265,5 +266,14 @@ def run_theme(
             progress("영상 합성...")
         out["video"] = music_video.make_video(
             theme, result["mix"], seconds=video_seconds
+        )
+
+    # (선택) 음악 채널 유튜브 비공개 업로드 — 영상이 있을 때만.
+    if upload and out.get("video"):
+        from services.youtube_upload import upload_music_video  # 지연 import
+        if progress:
+            progress("유튜브 업로드(비공개)...")
+        out["upload"] = upload_music_video(
+            out["video"]["video_url"], theme, result["mix"]
         )
     return out
