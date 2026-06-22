@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 _TABLE = "music_uploads"
 _SELECT = (
-    "slug,mix_id,title_kr,genre,mood,mp4_url,gpt_prompt,thumbnail_r2_key,"
+    "slug,mix_id,title_kr,genre,mood,mp4_url,gpt_prompt,thumbnail_r2_key,viz_spec,"
     "status,youtube_video_id,youtube_url,created_at"
 )
 
@@ -44,8 +44,14 @@ def record_pending(
     genre: str = "",
     mood: str = "",
     gpt_prompt: str = "",
+    thumbnail_r2_key: str | None = None,
+    viz_spec: dict | None = None,
 ) -> dict:
-    """영상 생성 완료 → 검토 대기(pending) 행 upsert(mix_id 기준). {stored, error}."""
+    """영상 생성 완료 → 검토 대기(pending) 행 upsert(mix_id 기준). {stored, error}.
+
+    thumbnail_r2_key: 첫프레임 자동 썸네일(#20) 키. 주면 공개 업로드 게이트가 자동 충족.
+    viz_spec: 곡 분석 결과(#20) 캐시 — 같은 mix 재렌더 시 재사용.
+    """
     url, key = _supabase_cfg()
     if not (url and key):
         logger.warning("[music-uploads] SUPABASE 미설정 — pending 기록 생략")
@@ -60,6 +66,10 @@ def record_pending(
         "gpt_prompt": gpt_prompt,
         "status": "pending",
     }
+    if thumbnail_r2_key:
+        record["thumbnail_r2_key"] = thumbnail_r2_key
+    if viz_spec is not None:
+        record["viz_spec"] = viz_spec
     try:
         with httpx.Client(timeout=30.0) as c:
             r = c.post(
@@ -143,6 +153,15 @@ def get_upload(mix_id: str) -> dict | None:
     except Exception as e:  # noqa: BLE001
         logger.warning("[music-uploads] 행 조회 실패(mix_id=%s): %s", mix_id, _http_err(e))
         return None
+
+
+def get_viz_spec(mix_id: str) -> dict | None:
+    """mix_id 의 캐시된 곡 분석(viz_spec) 조회(#20). 없으면 None."""
+    row = get_upload(mix_id)
+    if not row:
+        return None
+    spec = row.get("viz_spec")
+    return spec if isinstance(spec, dict) and spec else None
 
 
 def set_thumbnail(mix_id: str, thumbnail_r2_key: str) -> dict:

@@ -121,6 +121,13 @@ def render_test(mood: str | None = None, *, seconds: float = 10.0) -> dict:
     mood_hint = " ".join(
         str(preset.get(k, "")) for k in ("mood", "genre", "situation")
     ).strip()
+    # #20: 테스트도 인트로·텍스트·색감을 보여주도록 viz_spec 동봉(결정적 fallback, GPT 미사용).
+    theme = {
+        "slug": key, "title_kr": preset["title_kr"], "genre": preset["genre"],
+        "mood": preset["mood"], "situation": preset["situation"],
+    }
+    from services import music_viz_analyzer
+    viz_spec = music_viz_analyzer.analyze_song(theme, None, use_gpt=False)
 
     work = Path(tempfile.mkdtemp(prefix="mtest_"))
     try:
@@ -134,7 +141,7 @@ def render_test(mood: str | None = None, *, seconds: float = 10.0) -> dict:
             try:
                 music_video._render_remotion(
                     str(bg), str(audio), str(out),
-                    tracks=tracks, mood=mood_hint, duration=seconds,
+                    tracks=tracks, mood=mood_hint, duration=seconds, viz_spec=viz_spec,
                 )
                 rendered = True
                 engine = "remotion"
