@@ -41,9 +41,10 @@ logger = logging.getLogger(__name__)
 
 SUNO_BASE = "https://api.sunoapi.org/api/v1"
 
-# 폴링 기본값 — suno 생성은 보통 2~3분. KIE 패턴(블로킹 폴링)과 동일한 톤.
+# 폴링 기본값 — suno 생성은 보통 2~3분. #30: 600→900(15분)으로 늘려 타임아웃으로
+# 과금만 되고 버려지는 곡을 방지(콜백 도착 시엔 폴링 안 기다리고 즉시 진행).
 POLL_INTERVAL = 15
-POLL_TIMEOUT = 600
+POLL_TIMEOUT = 900
 
 # 종료 상태(이 외에는 진행 중으로 보고 계속 폴링).
 _SUCCESS = "SUCCESS"
@@ -64,13 +65,30 @@ def _headers() -> dict:
     }
 
 
+def _public_base() -> str:
+    """suno 가 콜백을 보낼 수 있는 **외부 공개** 베이스 URL.
+
+    우선순위: MUSIC_CALLBACK_BASE_URL > BACKEND_PUBLIC_URL > RAILWAY_PUBLIC_DOMAIN(자동).
+    #30: '*.railway.internal'(Railway 내부 도메인)은 외부 suno 서버가 접근 불가 →
+    무시하고 다음 후보로 넘어간다(잘못 설정돼도 자동 복구).
+    """
+    for var in ("MUSIC_CALLBACK_BASE_URL", "BACKEND_PUBLIC_URL"):
+        v = (os.getenv(var) or "").strip().rstrip("/")
+        if v and "railway.internal" not in v:
+            return v
+    dom = (os.getenv("RAILWAY_PUBLIC_DOMAIN") or "").strip().rstrip("/")
+    if dom and "railway.internal" not in dom:
+        return dom if dom.startswith("http") else f"https://{dom}"
+    return ""
+
+
 def callback_url(theme_slug: str = "") -> str:
-    """MUSIC_CALLBACK_BASE_URL 이 있으면 콜백 URL 을 구성(theme_slug 쿼리 포함).
+    """외부 공개 베이스가 있으면 콜백 URL 을 구성(theme_slug 쿼리 포함).
 
     콜백은 theme_slug 를 모르므로 callBackUrl 쿼리에 실어 R2 키를 구성하게 한다.
-    미설정 시 빈 문자열(→ callBackUrl 생략, 폴링만으로 동작).
+    미설정/내부도메인뿐이면 빈 문자열(→ callBackUrl 생략, 폴링만으로 동작).
     """
-    base = (os.getenv("MUSIC_CALLBACK_BASE_URL") or "").strip().rstrip("/")
+    base = _public_base()
     if not base:
         return ""
     q = f"?theme_slug={quote(theme_slug)}" if theme_slug else ""

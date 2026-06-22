@@ -55,8 +55,10 @@ def _release_preempt() -> None:
 def _run_produce() -> None:
     """백그라운드: 주제 자동 생성 → 음원 → 영상 → 검토 대기 큐 적재(run_theme)."""
     try:
-        from services import music_produce
-        result = music_produce.run_theme(video=True, upload=False)
+        from services import music_channel, music_produce
+        n = music_channel.get_track_count()  # 대시보드 곡수(기본 1) — 비용 직접 제어(#30)
+        logger.info("[music-produce] 곡수=%d 로 생성 시작", n)
+        result = music_produce.run_theme(video=True, upload=False, n=n)
         slug = (result.get("theme") or {}).get("slug")
         vid = (result.get("video") or {}).get("video_id")
         logger.info("[music-produce] 완료 slug=%s video_id=%s", slug, vid)
