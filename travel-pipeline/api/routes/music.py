@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 from pydantic import BaseModel
@@ -20,6 +22,11 @@ from pydantic import BaseModel
 from services import music_suno
 
 logger = logging.getLogger(__name__)
+
+# #28 cron 중복 생성 방지 — 8/9/10시 3개 cron 중 '오늘 첫 호출'만 생성, 나머지 스킵.
+_PRODUCE_LOCK = threading.Lock()
+_produced_date: str | None = None  # 'YYYY-MM-DD'(KST) — 이 프로세스가 오늘 생성을 선점
+_KST = timezone(timedelta(hours=9))
 
 router = APIRouter()
 
@@ -34,6 +41,7 @@ def _authorized_cron(authorization: str | None) -> bool:
 
 def _run_produce() -> None:
     """백그라운드: 주제 자동 생성 → 음원 → 영상 → 검토 대기 큐 적재(run_theme)."""
+    global _produced_date
     try:
         from services import music_produce
         result = music_produce.run_theme(video=True, upload=False)
@@ -41,19 +49,35 @@ def _run_produce() -> None:
         vid = (result.get("video") or {}).get("video_id")
         logger.info("[music-produce] 완료 slug=%s video_id=%s", slug, vid)
     except Exception as e:  # noqa: BLE001 - 백그라운드 실패는 로깅만(큐는 비어 있게 둠)
-        logger.warning("[music-produce] 백그라운드 실패: %s", e)
+        # 실패 시 오늘 선점 해제 → 다음 cron(9/10시)이 재시도하도록.
+        with _PRODUCE_LOCK:
+            _produced_date = None
+        logger.warning("[music-produce] 백그라운드 실패(선점 해제, 재시도 허용): %s", e)
 
 
 @router.post("/produce")
 def produce(background: BackgroundTasks, authorization: str | None = Header(default=None)):
     """cron 트리거 — 주제→음원→영상→큐 적재를 비동기로 시작하고 즉시 반환.
 
-    10분+ 작업이라 fire-and-forget(BackgroundTasks)으로 타임아웃을 피한다.
-    CRON_SECRET 헤더 필수(백곰 cron 패턴 동일).
+    #28: 8/9/10시 3개 cron 등록 → '오늘 첫 호출'만 생성, 이미 오늘 생성됐으면 스킵
+    (시간 자연 분산). 프로세스 선점(_produced_date) + DB(오늘 row) 이중 확인으로
+    동시 호출에도 1개만 실행. 10분+ 작업이라 fire-and-forget. CRON_SECRET 필수.
     """
     if not _authorized_cron(authorization):
         raise HTTPException(status_code=401, detail="unauthorized")
-    background.add_task(_run_produce)
+
+    global _produced_date
+    today = datetime.now(_KST).strftime("%Y-%m-%d")
+    with _PRODUCE_LOCK:
+        if _produced_date == today:
+            return {"ok": True, "skipped": True, "reason": "이미 오늘 영상 생성됨(프로세스 선점)"}
+        from services import music_uploads
+        if music_uploads.count_today_kst() > 0:
+            _produced_date = today
+            return {"ok": True, "skipped": True, "reason": "이미 오늘 영상 생성됨"}
+        # 선점 — 동시 호출(8/9시 동시 도착)이라도 두 번째는 위 가드로 스킵.
+        _produced_date = today
+        background.add_task(_run_produce)
     return {"ok": True, "status": "started"}
 
 
