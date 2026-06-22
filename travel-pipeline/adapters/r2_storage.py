@@ -481,6 +481,30 @@ def lyrics_url(theme_slug: str, audio_id: str) -> str:
     return f"{_music_public_base()}/{lyrics_key(theme_slug, audio_id)}"
 
 
+# ── 음악 썸네일 — music-thumbnails/{slug}/{mix_id}.png (대시보드 업로드본) ──
+def music_thumbnail_key(theme_slug: str, mix_id: str) -> str:
+    return f"music-thumbnails/{theme_slug.strip('/')}/{mix_id}.png"
+
+
+def upload_music_thumbnail(file_path: str, theme_slug: str, mix_id: str) -> str:
+    """대시보드에서 올린 썸네일(png)을 R2 에 저장하고 공개 URL 반환."""
+    bucket = os.environ.get("R2_MUSIC_BUCKET")
+    public_base = os.environ.get("R2_MUSIC_PUBLIC_BASE_URL")
+    if not bucket:
+        logger.warning("R2_MUSIC_BUCKET 미설정 — 기본 버킷 사용(썸네일).")
+    return upload_image(
+        file_path,
+        music_thumbnail_key(theme_slug, mix_id),
+        bucket=bucket,
+        public_base_url=public_base,
+        content_type="image/png",
+    )
+
+
+def music_thumbnail_url(theme_slug: str, mix_id: str) -> str:
+    return f"{_music_public_base()}/{music_thumbnail_key(theme_slug, mix_id)}"
+
+
 # ── 음악 영상 — music-videos/{slug}/{name} (배경 bg.png · 완성 mp4) ──
 # 음악 버킷(R2_MUSIC_BUCKET)을 prefix 만 달리해 재사용한다(신규 버킷 없음).
 def music_video_key(theme_slug: str, name: str) -> str:

@@ -53,6 +53,9 @@ function useChannelActive(channelId: string): boolean {
 // /dashboard 로 이동(거기서 "사연 제작 열기" 버튼으로 /sayeon 진입).
 // (채널 시스템(useChannels/ChannelProvider/api/channels/lib/supabase, /channels 라우트)은
 //  보존 — 여기서 호출만 안 할 뿐. 미래 재도입 대비.)
+// 음악 채널명(비밀 아님 → NEXT_PUBLIC 허용). 기본 "음악 채널".
+const MUSIC_CHANNEL_NAME = process.env.NEXT_PUBLIC_MUSIC_CHANNEL_NAME || "음악 채널"
+
 export function Sidebar() {
   const pathname = usePathname()
   const baekgomLive = useChannelActive(BAEKGOM_CHANNEL_ID)
@@ -60,6 +63,8 @@ export function Sidebar() {
   // 백곰 관제 대시보드 = /dashboard(루트 / 도 리다이렉트). 상단 '대시보드' 메뉴와
   // 중복이므로 별도 대시보드 메뉴는 두지 않고 이 항목으로 통합.
   const baekgomActive = pathname === "/dashboard" || pathname === "/"
+  // 음악 채널 = /music (검토 대기 큐) + /music/guide.
+  const musicActive = pathname === "/music" || pathname.startsWith("/music/")
   const settingsActive =
     pathname === "/settings" || pathname.startsWith("/settings/")
 
@@ -110,6 +115,23 @@ export function Sidebar() {
                 )}
               />
               <span className="truncate">유튜브 · {baekgomLive ? "가동 중" : "대기 중"}</span>
+            </span>
+          </Link>
+
+          {/* 음악 채널(Revezen) — 검토 대기 큐. 백곰 항목과 동일 클래스/토큰 재사용. */}
+          <Link
+            href="/music"
+            className={cn(
+              "flex flex-col gap-1 rounded-lg border px-3 py-2 transition-all duration-150",
+              musicActive
+                ? "border-primary/30 bg-primary/20 text-white"
+                : "border-transparent text-muted-foreground hover:bg-white/5 hover:text-foreground"
+            )}
+          >
+            <span className="truncate text-sm font-medium">{MUSIC_CHANNEL_NAME}</span>
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-500" />
+              <span className="truncate">유튜브 · 검토 대기 큐</span>
             </span>
           </Link>
         </nav>

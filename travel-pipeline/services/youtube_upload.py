@@ -277,11 +277,19 @@ def _verify_music_channel(youtube) -> None:
         )
 
 
-def upload_music_video(mp4_path: str, theme: dict, mix: dict) -> dict:
-    """음악 영상(mp4)을 음악 채널(Revezen)에 비공개 업로드. Returns {video_id, video_url}.
+def upload_music_video(
+    mp4_path: str,
+    theme: dict,
+    mix: dict,
+    *,
+    privacy: str = "private",
+    thumbnail_path: str | None = None,
+) -> dict:
+    """음악 영상(mp4)을 음악 채널(Revezen)에 업로드. Returns {video_id, video_url}.
 
     백곰 upload_video 와 분리: 음악 OAuth(music_youtube_oauth.get_credentials),
-    카테고리 10(음악), privacyStatus=private. mp4_path 는 R2 URL/로컬 경로 모두 가능.
+    카테고리 10(음악). privacy 기본 'private'(검토 큐), 대시보드 공개 시 'public'.
+    thumbnail_path 가 있으면 썸네일도 첨부. mp4_path 는 R2 URL/로컬 경로 모두 가능.
     업로드 성공 시 music_uploads 에 기록(실패해도 업로드는 성공).
     """
     from googleapiclient.discovery import build
@@ -291,6 +299,7 @@ def upload_music_video(mp4_path: str, theme: dict, mix: dict) -> dict:
     from services.music_youtube_oauth import get_credentials as music_get_credentials
 
     title, description, tags = build_music_metadata(theme, mix)
+    privacy = (privacy or "private").strip().lower()
 
     with tempfile.TemporaryDirectory(prefix="ytmusic_") as tmp:
         local = Path(tmp) / "video.mp4"
@@ -311,16 +320,27 @@ def upload_music_video(mp4_path: str, theme: dict, mix: dict) -> dict:
                 "defaultLanguage": "ko",
             },
             "status": {
-                "privacyStatus": "private",  # 비공개(수동 공개)
+                "privacyStatus": privacy,
                 "selfDeclaredMadeForKids": False,
             },
         }
-        logger.warning("[music-youtube] 업로드 시작: title=%s", title)
+        logger.warning("[music-youtube] 업로드 시작: title=%s privacy=%s", title, privacy)
         media = MediaFileUpload(str(local), mimetype="video/mp4", chunksize=-1, resumable=True)
         response = youtube.videos().insert(part="snippet,status", body=body, media_body=media).execute()
         video_id = response["id"]
         video_url = f"https://www.youtube.com/watch?v={video_id}"
         logger.warning("[music-youtube] 업로드 성공: video_id=%s", video_id)
+
+        # 썸네일 첨부(있으면). 실패해도 영상은 업로드됨.
+        if thumbnail_path and os.path.exists(thumbnail_path):
+            try:
+                youtube.thumbnails().set(
+                    videoId=video_id,
+                    media_body=MediaFileUpload(thumbnail_path, mimetype="image/png"),
+                ).execute()
+                logger.warning("[music-youtube] 썸네일 첨부 완료: video_id=%s", video_id)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[music-youtube] 썸네일 첨부 실패(영상은 업로드됨): %s", e)
 
     # 기록(best-effort).
     try:
