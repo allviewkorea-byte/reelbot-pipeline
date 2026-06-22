@@ -268,9 +268,11 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
         style={{ position: "absolute", inset: 0, opacity: eqIn, transform: `translateY(${eqTranslateY}px)` }}
       >
         {values.map((v, i) => {
-          const tilt = 1 + (i / (BARS - 1)) * 1.6; // 고역 롤오프 보정
+          // #31 고역 롤오프 보정 5배 강화(1.6→5.0) — 진짜 음원에서도 우측 막대 활발히 움직임.
+          // amp 는 Math.min(1, …) 으로 1에 캡 → 최대 높이(12+maxBarH≈화면 13%)는 그대로(폭주 방지).
+          const tilt = 1 + (i / (BARS - 1)) * 5.0;
           const amp = Math.min(1, v * 2.4 * tilt);
-          const h = Math.max(16, 12 + amp * maxBarH); // 최소 높이 보장(항상 보이게)
+          const h = Math.min(maxBarH + 12, Math.max(16, 12 + amp * maxBarH)); // 캡 + 최소 높이
           return (
             <div
               key={i}
