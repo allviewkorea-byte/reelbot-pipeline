@@ -56,15 +56,31 @@ def available_moods() -> list[str]:
 
 
 def _synth_audio(work: Path, seconds: float) -> Path:
-    """둥근 바가 또렷이 움직이도록 3개 배음 + 트레몰로(진폭 LFO) 합성 mp3."""
+    """이퀄 전 대역(저~고역)이 골고루 움직이도록 만든 합성 mp3.
+
+    이전 버전은 196/330/523Hz 저주파만 있어 좌측 막대 ~10개만 반응했다(나머지 0).
+    Remotion visualizeAudio 는 512샘플 FFT로 86Hz~10kHz 를 선형 매핑하므로, 전 대역을
+    채우려면 광대역 소스가 필요하다. 화이트 노이즈(전 빈 평탄)로 모든 막대를 채우고,
+    저역·고역 스윕 사인 2개로 '춤추는' 움직임을 준 뒤 트레몰로로 펄스를 얹는다.
+    """
     out = work / "audio.mp3"
-    expr = "0.25*sin(2*PI*196*t)+0.2*sin(2*PI*330*t)+0.16*sin(2*PI*523*t)"
+    d = f"{seconds}"
+    # 코드(앵커) + 저역 스윕(150~1450Hz) + 고역 스윕(2200~7400Hz).
+    expr = (
+        "0.05*(sin(2*PI*220*t)+sin(2*PI*880*t)+sin(2*PI*3520*t))"
+        "+0.08*sin(2*PI*(150+1300*(0.5+0.5*sin(2*PI*0.35*t)))*t)"
+        "+0.07*sin(2*PI*(2200+5200*(0.5+0.5*sin(2*PI*0.22*t)))*t)"
+    )
     subprocess.run(
         [
             "ffmpeg", "-y",
-            "-f", "lavfi",
-            "-i", f"aevalsrc={expr}:s=44100:d={seconds}:c=stereo",
-            "-af", "tremolo=f=6:d=0.7",
+            "-f", "lavfi", "-i", f"aevalsrc={expr}:s=44100:d={d}",
+            "-f", "lavfi", "-i", f"anoisesrc=d={d}:c=white:r=44100:a=0.05",
+            "-filter_complex",
+            "[1:a]highpass=f=80,lowpass=f=12000[n];"
+            "[0:a][n]amix=inputs=2:duration=first:weights=0.7 1.0,"
+            "tremolo=f=5:d=0.45,aformat=channel_layouts=stereo[a]",
+            "-map", "[a]",
             "-c:a", "libmp3lame", "-q:a", "5",
             str(out),
         ],
