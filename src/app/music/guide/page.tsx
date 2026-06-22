@@ -33,7 +33,7 @@ export default function MusicGuidePage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-6 overflow-auto p-4 md:p-6">
-      <header className="flex items-center gap-3">
+      <header className="flex items-center gap-3 pl-10 md:pl-0">
         <Link
           href="/music"
           className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-white/5 hover:text-foreground"

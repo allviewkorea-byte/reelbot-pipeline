@@ -97,7 +97,7 @@ export function RecentVideosMarquee() {
   const videos = tab === "all" ? source : source.filter((v) => v.platform === tab)
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-card p-3">
+    <div className="flex min-h-[300px] flex-1 flex-col rounded-xl border border-border bg-card p-3 md:min-h-0">
       <div className="mb-2 flex shrink-0 items-center justify-between gap-3">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
           최근 업로드 영상
