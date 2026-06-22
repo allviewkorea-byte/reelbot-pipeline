@@ -400,8 +400,9 @@ export default function CastPage() {
       ) : (
         <>
           {/* 메인 3존 — 명단(C) / 중앙(A+B) / 테스트 영상.
-              모바일: 1열 스택 + 각 존 고정 높이(auto-rows)로 내부 flex-1 렌더. 데스크탑: 기존 3열. */}
-          <div className="grid min-h-0 grid-cols-1 auto-rows-[460px] gap-2 md:flex-1 md:auto-rows-auto md:grid-cols-[220px_minmax(0,1fr)_280px] md:overflow-hidden">
+              모바일: 1열 스택 + 각 존 고정 높이(auto-rows) + shrink-0(그리드가 줄지 않게 →
+              내용이 흘러넘쳐 하단 키비교 줄과 겹치던 문제 해소, 페이지가 스크롤). 데스크탑: 기존 3열. */}
+          <div className="grid min-h-0 shrink-0 grid-cols-1 auto-rows-[460px] gap-2 md:flex-1 md:auto-rows-auto md:grid-cols-[220px_minmax(0,1fr)_280px] md:overflow-hidden">
             {/* ── C: 역할 명단 (세로로 꽉 채움) ──────────────────────── */}
             <div className="flex min-h-0 flex-col gap-1.5 overflow-hidden rounded-xl border border-border bg-card p-2">
               {cast.map((c) => {
@@ -616,7 +617,9 @@ export default function CastPage() {
           </div>
 
           {/* ── 하단: 전체 키 비교(relative_height) ───────────────────── */}
-          <div className="flex shrink-0 items-end justify-center gap-4 rounded-xl border border-border bg-card px-4 py-2">
+          {/* 모바일: 가로 스크롤 + 버튼 shrink-0 → w-auto 이미지가 눌려 인접 캐릭터로
+              겹치던 내부 겹침도 방지. 데스크탑: 기존 가운데 정렬(넓어 안 넘침). */}
+          <div className="flex shrink-0 items-end justify-start gap-4 overflow-x-auto rounded-xl border border-border bg-card px-4 py-2 md:justify-center md:overflow-x-visible">
             <div className="flex h-24 items-end justify-center gap-4">
               {cast.map((c) => (
                 <button
@@ -624,7 +627,7 @@ export default function CastPage() {
                   onClick={() => setSelectedRole(c.role)}
                   title={c.name}
                   style={{ height: `${Math.round(c.relative_height * 100)}%` }}
-                  className={`flex items-end transition-opacity hover:opacity-80 ${
+                  className={`flex shrink-0 items-end transition-opacity hover:opacity-80 md:shrink ${
                     c.role === selectedRole ? "" : "opacity-90"
                   }`}
                 >
