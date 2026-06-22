@@ -375,9 +375,9 @@ export default function CastPage() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-2 overflow-hidden p-3">
-      {/* Header (compact) */}
-      <div className="flex shrink-0 items-center justify-between gap-3">
+    <div className="flex h-full min-h-0 flex-col gap-2 overflow-auto p-3 md:overflow-hidden">
+      {/* Header (compact). 모바일: 햄버거 자리 확보(pl-10). 데스크탑 무변경. */}
+      <div className="flex shrink-0 items-center justify-between gap-3 pl-10 md:pl-0">
         <div className="flex items-center gap-2">
           <h1 className="text-base font-semibold text-foreground">캐릭터 시트</h1>
           {!loading && cast.length > 0 && (
@@ -399,8 +399,9 @@ export default function CastPage() {
         </div>
       ) : (
         <>
-          {/* 메인 3존 — 명단(C) / 중앙(A+B) / 테스트 영상 */}
-          <div className="grid min-h-0 flex-1 grid-cols-[220px_minmax(0,1fr)_280px] gap-2 overflow-hidden">
+          {/* 메인 3존 — 명단(C) / 중앙(A+B) / 테스트 영상.
+              모바일: 1열 스택 + 각 존 고정 높이(auto-rows)로 내부 flex-1 렌더. 데스크탑: 기존 3열. */}
+          <div className="grid min-h-0 grid-cols-1 auto-rows-[460px] gap-2 md:flex-1 md:auto-rows-auto md:grid-cols-[220px_minmax(0,1fr)_280px] md:overflow-hidden">
             {/* ── C: 역할 명단 (세로로 꽉 채움) ──────────────────────── */}
             <div className="flex min-h-0 flex-col gap-1.5 overflow-hidden rounded-xl border border-border bg-card p-2">
               {cast.map((c) => {
