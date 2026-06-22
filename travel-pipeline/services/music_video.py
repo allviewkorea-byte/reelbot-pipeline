@@ -152,6 +152,22 @@ def _bg_prompt(theme: dict) -> str:
     )
 
 
+def build_thumbnail_prompt(theme: dict) -> str:
+    """주제 → ChatGPT(gpt-image)에 붙여넣을 영어 썸네일 프롬프트(#8 대시보드 복사용)."""
+    genre = theme.get("genre", "")
+    mood = theme.get("mood", "")
+    situation = theme.get("situation", "")
+    title_kr = theme.get("title_kr", "")
+    bits = [b for b in (situation, mood, f"{genre} music") if b]
+    scene = ", ".join(bits) if bits else "music vibe"
+    note = f' (theme: "{title_kr}")' if title_kr else ""
+    return (
+        f"Cinematic photo, {scene}{note}, atmospheric lighting, rich color grade, "
+        "evocative composition, no text, no watermark, 16:9, high quality, "
+        "YouTube music thumbnail aesthetic"
+    )
+
+
 def generate_background(theme: dict, out_path: str, *, force: bool = False) -> str:
     """주제 분위기 배경 1장(gpt-image-1, 가로) → out_path. R2 멱등(있으면 다운로드).
 
@@ -355,11 +371,24 @@ def make_video(
         else:
             logger.warning("[video] R2 미설정 — mp4 가 로컬에만 있습니다.")
 
+        # 검토 대기 큐(#8): pending 행 기록 + 썸네일 GPT 프롬프트 저장(best-effort).
+        gpt_prompt = build_thumbnail_prompt(theme)
+        try:
+            from services.music_uploads import record_pending
+            record_pending(
+                slug, video_id, mp4_url=video_url, title_kr=title_kr,
+                genre=theme.get("genre", ""), mood=theme.get("mood", ""),
+                gpt_prompt=gpt_prompt,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[video] 검토 큐 기록 실패(영상은 생성됨): %s", e)
+
         return {
             "video_id": video_id,
             "video_url": video_url,
             "duration": round(duration, 3),
             "slug": slug,
+            "gpt_prompt": gpt_prompt,
         }
     finally:
         shutil.rmtree(work, ignore_errors=True)
