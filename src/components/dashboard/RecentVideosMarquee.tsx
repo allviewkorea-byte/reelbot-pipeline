@@ -144,7 +144,7 @@ export function RecentVideosMarquee() {
               height: 100%;
               max-height: 330px;
               width: max-content;
-              animation: marquee-scroll 30s linear infinite;
+              animation: marquee-scroll 15s linear infinite;
             }
             .marquee:hover .marquee__track {
               animation-play-state: paused;
