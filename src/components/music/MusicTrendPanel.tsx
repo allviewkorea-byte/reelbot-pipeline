@@ -1,10 +1,11 @@
 "use client"
 
 // 음악 트렌드 분석 — 백곰 TrendPanel(ConceptBar) 구조·className 1:1 복제(직접 import 금지).
-// /api/music/trends 의 mood_keywords + hot_situations 를 5개 카테고리로 분류 → 빈도 % 가로 막대.
+// /api/music/trends 의 mood_keywords + hot_situations 를 14장르(SSOT)로 분류 → 빈도 % 가로 막대.
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { ChevronDown, Loader2, TrendingUp } from "lucide-react"
+import { MUSIC_GENRES } from "@/lib/music-genres"
 
 interface TrendInsight {
   analyzed_at?: string
@@ -12,14 +13,6 @@ interface TrendInsight {
   hot_situations?: string[]
   summary?: string
 }
-
-const CATEGORIES = [
-  { key: "citypop", label: "시티팝", color: "#8b5cf6", keywords: ["시티팝", "citypop", "city pop", "드라이브", "drive", "운전", "출근", "퇴근", "commute"] },
-  { key: "cafe", label: "카페·재즈", color: "#f59e0b", keywords: ["카페", "cafe", "재즈", "jazz", "커피", "coffee", "브런치", "lounge", "라운지"] },
-  { key: "ballad", label: "이별·발라드", color: "#3b82f6", keywords: ["이별", "헤어", "breakup", "발라드", "ballad", "슬픔", "sad", "그리움", "눈물", "비", "rain"] },
-  { key: "workout", label: "운동·동기", color: "#ef4444", keywords: ["운동", "헬스", "workout", "gym", "러닝", "running", "동기", "motivat", "fitness", "energetic"] },
-  { key: "sleep", label: "수면·공부", color: "#34d399", keywords: ["수면", "잠", "취침", "sleep", "공부", "스터디", "study", "집중", "focus", "독서", "lofi", "lo-fi", "chill", "calm"] },
-]
 
 interface Bar {
   label: string
@@ -29,7 +22,7 @@ interface Bar {
 
 function classify(trend: TrendInsight): Bar[] {
   const signals = [...(trend.mood_keywords ?? []), ...(trend.hot_situations ?? [])].map((s) => String(s).toLowerCase())
-  const counts = CATEGORIES.map((c) => ({
+  const counts = MUSIC_GENRES.map((c) => ({
     ...c,
     n: signals.filter((s) => c.keywords.some((k) => s.includes(k.toLowerCase()))).length,
   }))

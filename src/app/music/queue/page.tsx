@@ -9,24 +9,17 @@ import { MusicQueueCard, TestCard, type QueueItem } from "@/components/music/Mus
 import { MusicJobCard } from "@/components/music/MusicJobCard"
 import type { MusicJob } from "@/lib/music-jobs"
 import { estimateProductionTime, fmtMinutes } from "@/lib/music"
+import { MUSIC_GENRES } from "@/lib/music-genres"
 
-// 카테고리(음악 헌법 상황·장르 → 대표 5종) + 전체. 클라이언트 사이드 필터.
+// 카테고리(14장르 SSOT) + 전체. 클라이언트 사이드 필터(genre·mood 등 텍스트 키워드 매칭).
+// 옛 5분류로 저장된 영상도 raw genre 라벨을 그대로 표시하고, 키워드로 해당 장르 필터에 잡힌다.
 const CATEGORIES = [
   { key: "all", label: "전체", keywords: [] as string[] },
-  { key: "citypop", label: "시티팝/드라이브", keywords: ["시티팝", "citypop", "city pop", "드라이브", "drive", "운전", "출근", "퇴근", "commute"] },
-  { key: "cafe", label: "카페/재즈", keywords: ["카페", "cafe", "재즈", "jazz", "커피", "coffee", "브런치", "lounge", "라운지"] },
-  { key: "ballad", label: "이별/발라드", keywords: ["이별", "헤어", "breakup", "발라드", "ballad", "슬픔", "sad", "그리움", "눈물"] },
-  { key: "workout", label: "운동/동기부여", keywords: ["운동", "헬스", "workout", "gym", "러닝", "running", "동기", "motivat", "fitness", "트레이닝"] },
-  { key: "sleep", label: "수면/공부", keywords: ["수면", "잠", "취침", "sleep", "공부", "스터디", "study", "집중", "focus", "독서", "lofi", "lo-fi"] },
+  ...MUSIC_GENRES.map((g) => ({ key: g.id, label: g.label, keywords: g.keywords })),
 ]
 
-const TEST_MOODS = [
-  { key: "citypop", label: "시티팝/드라이브" },
-  { key: "cafe", label: "카페/재즈" },
-  { key: "ballad", label: "이별/발라드" },
-  { key: "workout", label: "운동/동기부여" },
-  { key: "sleep", label: "수면/공부" },
-]
+// 테스트/수동 생성 무드 드롭다운 — 14장르.
+const TEST_MOODS = MUSIC_GENRES.map((g) => ({ key: g.id, label: g.label }))
 
 function matchesCategory(item: QueueItem, catKey: string): boolean {
   if (catKey === "all") return true
