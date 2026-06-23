@@ -79,11 +79,14 @@ export interface TextStyleConfig {
   font_weight: number
   color: string
   opacity: number
+  italic?: boolean // #36 title/subtitle 만 사용
   border: TextBorder
 }
 export interface MusicDesignConfig {
   play_list: TextStyleConfig
   where_label: TextStyleConfig
+  title: TextStyleConfig    // #36 곡 제목(좌하단)
+  subtitle: TextStyleConfig // #36 부제(좌하단)
 }
 
 // UI 초기 기본값(백엔드 default_design_config 와 동일). 저장 전엔 렌더 무영향(MusicViz 가 현재값 폴백).
@@ -95,5 +98,13 @@ export const DEFAULT_DESIGN_CONFIG: MusicDesignConfig = {
   where_label: {
     font_family: "Inter", font_size: 24, font_weight: 600,
     color: "#FFFFFF", opacity: 0.9, border: { enabled: false, width: 1, color: "#000000" },
+  },
+  title: {
+    font_family: "Playfair Display", font_size: 84, font_weight: 700,
+    color: "#FFFFFF", opacity: 1.0, italic: false, border: { enabled: false, width: 1, color: "#000000" },
+  },
+  subtitle: {
+    font_family: "Playfair Display", font_size: 38, font_weight: 400,
+    color: "#FFFFFF", opacity: 1.0, italic: true, border: { enabled: false, width: 1, color: "#000000" },
   },
 }

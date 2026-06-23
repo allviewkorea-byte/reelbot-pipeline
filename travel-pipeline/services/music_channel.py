@@ -103,6 +103,7 @@ PRESET_FONTS = (
 
 # UI 초기값(GET 기본). 비어 있을 때의 '렌더'는 MusicViz 가 현재 하드코딩값으로 폴백하므로,
 # 이 기본값은 사용자가 디자인 본부를 처음 열었을 때 보이는 값일 뿐(저장 전엔 렌더 무영향).
+# #36: title(곡 제목)·subtitle(부제) 추가 — italic 필드 포함(부제 기본 italic on = 현재 모습).
 DEFAULT_DESIGN_CONFIG = {
     "play_list": {
         "font_family": "Playfair Display", "font_size": 324, "font_weight": 700,
@@ -114,7 +115,20 @@ DEFAULT_DESIGN_CONFIG = {
         "color": "#FFFFFF", "opacity": 0.9,
         "border": {"enabled": False, "width": 1, "color": "#000000"},
     },
+    "title": {
+        "font_family": "Playfair Display", "font_size": 84, "font_weight": 700,
+        "color": "#FFFFFF", "opacity": 1.0, "italic": False,
+        "border": {"enabled": False, "width": 1, "color": "#000000"},
+    },
+    "subtitle": {
+        "font_family": "Playfair Display", "font_size": 38, "font_weight": 400,
+        "color": "#FFFFFF", "opacity": 1.0, "italic": True,
+        "border": {"enabled": False, "width": 1, "color": "#000000"},
+    },
 }
+# 항상 존재하는 핵심 대상(#35-A) vs 옵션 대상(#36, 저장됐을 때만 렌더에 포함 → 기존 row 회귀 0).
+_CORE_TARGETS = ("play_list", "where_label")
+_OPT_TARGETS = ("title", "subtitle")
 _HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
@@ -143,6 +157,9 @@ def _norm_target(raw, dflt: dict) -> dict:
         out["font_weight"] = _num(raw.get("font_weight"), 100, 900, dflt["font_weight"])
         out["color"] = _hex(raw.get("color"), dflt["color"])
         out["opacity"] = _num(raw.get("opacity"), 0.0, 1.0, dflt["opacity"])
+        if "italic" in dflt:  # #36 title/subtitle 만 italic 보유. 비bool 이면 기본값.
+            iv = raw.get("italic", dflt["italic"])
+            out["italic"] = iv if isinstance(iv, bool) else dflt["italic"]
         b = raw.get("border") if isinstance(raw.get("border"), dict) else {}
         out["border"] = {
             "enabled": bool(b.get("enabled", False)),
@@ -152,17 +169,23 @@ def _norm_target(raw, dflt: dict) -> dict:
     return out
 
 
-def normalize_design_config(raw) -> dict:
-    """제출/조회 데이터를 스키마(2 대상 × 6 필드)로 정규화. 알 수 없는 키 무시, 값 클램프."""
+def normalize_design_config(raw, *, include_all: bool = False) -> dict:
+    """제출/조회 데이터를 스키마로 정규화. 알 수 없는 키 무시, 값 클램프.
+
+    핵심 대상(play_list/where_label)은 항상 포함(#35-A). 옵션 대상(title/subtitle, #36)은
+    include_all 이거나 raw 에 실제로 있을 때만 포함 → 기존(#35-A) 저장 row 의 렌더 회귀 0
+    (title/subtitle 키 없으면 MusicViz 가 현재 하드코딩값으로 폴백).
+    """
     raw = raw if isinstance(raw, dict) else {}
-    return {
-        "play_list": _norm_target(raw.get("play_list"), DEFAULT_DESIGN_CONFIG["play_list"]),
-        "where_label": _norm_target(raw.get("where_label"), DEFAULT_DESIGN_CONFIG["where_label"]),
-    }
+    out = {name: _norm_target(raw.get(name), DEFAULT_DESIGN_CONFIG[name]) for name in _CORE_TARGETS}
+    for name in _OPT_TARGETS:
+        if include_all or isinstance(raw.get(name), dict):
+            out[name] = _norm_target(raw.get(name), DEFAULT_DESIGN_CONFIG[name])
+    return out
 
 
 def default_design_config() -> dict:
-    return normalize_design_config(DEFAULT_DESIGN_CONFIG)
+    return normalize_design_config(DEFAULT_DESIGN_CONFIG, include_all=True)
 
 
 def get_design_config() -> dict | None:

@@ -306,7 +306,8 @@ def design_config_get():
     저장값 없으면 기본값 반환(UI 초기 표시용). 렌더는 별도로 None 일 때 현재값 폴백.
     """
     from services import music_channel
-    cfg = music_channel.get_design_config() or music_channel.default_design_config()
+    # UI 는 4개 패널 전부 필요 → include_all 로 title/subtitle 기본값까지 채워 반환(렌더 경로와 분리).
+    cfg = music_channel.normalize_design_config(music_channel.get_design_config() or {}, include_all=True)
     return {"design_config": cfg, "presets": list(music_channel.PRESET_FONTS)}
 
 
@@ -322,12 +323,15 @@ class _DesignTarget(BaseModel):
     font_weight: float | None = None
     color: str | None = None
     opacity: float | None = None
+    italic: bool | None = None  # #36 title/subtitle 만 사용(play_list/where_label 은 무시)
     border: _DesignBorder | None = None
 
 
 class DesignConfigBody(BaseModel):
     play_list: _DesignTarget | None = None
     where_label: _DesignTarget | None = None
+    title: _DesignTarget | None = None       # #36 곡 제목
+    subtitle: _DesignTarget | None = None     # #36 부제
 
 
 @router.post("/design-config")
@@ -340,7 +344,7 @@ def design_config_set(body: DesignConfigBody):
     res = music_channel.set_design_config(body.model_dump(exclude_none=True))
     if not res.get("ok"):
         raise HTTPException(status_code=502, detail=res.get("error") or "저장 실패")
-    cfg = music_channel.get_design_config() or music_channel.default_design_config()
+    cfg = music_channel.normalize_design_config(music_channel.get_design_config() or {}, include_all=True)
     return {"ok": True, "design_config": cfg}
 
 

@@ -88,6 +88,24 @@ export default function MusicDesignPage() {
               sizeRange={[12, 80]}
               onChange={(p) => patchTarget("where_label", p)}
             />
+            <TargetPanel
+              title="제목 (곡 제목)"
+              sample="시티팝 드라이브"
+              previewScale={0.6}
+              withItalic
+              value={config.title}
+              sizeRange={[24, 160]}
+              onChange={(p) => patchTarget("title", p)}
+            />
+            <TargetPanel
+              title="부제목"
+              sample="morning light on endless urban roads"
+              previewScale={0.7}
+              withItalic
+              value={config.subtitle}
+              sizeRange={[16, 120]}
+              onChange={(p) => patchTarget("subtitle", p)}
+            />
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -108,7 +126,7 @@ export default function MusicDesignPage() {
 }
 
 function TargetPanel({
-  title, sample, previewScale, value, sizeRange, onChange,
+  title, sample, previewScale, value, sizeRange, onChange, withItalic = false,
 }: {
   title: string
   sample: string
@@ -116,6 +134,7 @@ function TargetPanel({
   value: TextStyleConfig
   sizeRange: [number, number]
   onChange: (patch: Partial<TextStyleConfig>) => void
+  withItalic?: boolean
 }) {
   const stroke = value.border.enabled
     ? { WebkitTextStroke: `${value.border.width}px ${value.border.color}`, paintOrder: "stroke fill" as const }
@@ -132,6 +151,7 @@ function TargetPanel({
             fontFamily: `"${value.font_family}", sans-serif`,
             fontSize: value.font_size,
             fontWeight: value.font_weight,
+            fontStyle: withItalic && value.italic ? "italic" : "normal",
             color: value.color,
             opacity: value.opacity,
             letterSpacing: "0.02em",
@@ -175,6 +195,17 @@ function TargetPanel({
           {WEIGHTS.map((w) => <option key={w} value={w}>{w}</option>)}
         </select>
       </Field>
+
+      {/* 기울임(제목·부제만) */}
+      {withItalic && (
+        <label className="flex items-center gap-2 text-sm text-foreground">
+          <input
+            type="checkbox" checked={!!value.italic}
+            onChange={(e) => onChange({ italic: e.target.checked })}
+          />
+          기울임 (italic)
+        </label>
+      )}
 
       {/* 색상 */}
       <Field label="색상">
