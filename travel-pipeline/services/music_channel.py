@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 MUSIC_CHANNEL_ID = "rooftop_music"
 _TABLE = "channel_status"
-_MIN, _MAX = 1, 8
+_MIN, _MAX = 1, 50  # #34 곡수 1~50
 DEFAULT_TRACK_COUNT = 1
 
 

@@ -150,26 +150,8 @@ export default function MusicDashboardPage() {
             </div>
             <span className="text-muted-foreground">개</span>
           </div>
-          {/* 곡수 1/2/3/5/8 (#30) — 영상 1개당 suno 생성 곡수(비용 직접 제어) */}
-          <div className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-2 text-xs font-medium" title="영상 1개당 생성할 곡 수(suno 비용에 비례 — 곡당 약 12크레딧)">
-            <span className="text-muted-foreground">곡수</span>
-            <div className="inline-flex rounded-md border border-border bg-background p-0.5">
-              {[1, 2, 3, 5, 8].map((n) => (
-                <button
-                  key={n}
-                  type="button"
-                  onClick={() => patch({ trackCount: n })}
-                  disabled={busy}
-                  aria-pressed={trackCount === n}
-                  className={`rounded px-2 py-0.5 text-xs font-medium transition-colors disabled:opacity-50 ${
-                    trackCount === n ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {n}
-                </button>
-              ))}
-            </div>
-          </div>
+          {/* 곡수 입력창 1~50 (#34) — 영상 1개당 suno 생성 곡수(비용 직접 제어) */}
+          <TrackCountInput key={trackCount} current={trackCount} busy={busy} onApply={(n) => patch({ trackCount: n })} />
           {/* 검토 대기 (백곰 캐릭터 시트 자리 — 보라 강조) */}
           <Link
             href="/music/queue"
@@ -224,6 +206,50 @@ export default function MusicDashboardPage() {
 
       {/* 최근 업로드 마퀴 */}
       <MusicMarquee />
+    </div>
+  )
+}
+
+// #34 곡수 입력창(1~50) — 숫자 입력 + [적용] + 예상(크레딧/비용/길이/렌더) 즉시 표시.
+function TrackCountInput({ current, busy, onApply }: { current: number; busy: boolean; onApply: (n: number) => void }) {
+  // current 변경 시 부모가 key={current} 로 재마운트 → 입력값 재초기화(setState-in-effect 회피).
+  const [val, setVal] = useState(String(current))
+  const n = Number(val)
+  const valid = Number.isInteger(n) && n >= 1 && n <= 50
+  const credits = valid ? n * 12 : 0
+  const cost = (credits * 0.005).toFixed(2)
+  const songMin = valid ? (n * 3.5).toFixed(0) : "0"
+  const renderMin = valid ? n : 0
+
+  return (
+    <div className="flex flex-col gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium">
+      <div className="flex items-center gap-1.5">
+        <span className="text-muted-foreground">곡수</span>
+        <input
+          type="number"
+          min={1}
+          max={50}
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          className="h-7 w-14 rounded-md border border-border bg-background px-1.5 text-center text-xs text-foreground"
+        />
+        <span className="text-muted-foreground">곡</span>
+        <button
+          type="button"
+          disabled={busy || !valid || n === current}
+          onClick={() => valid && onApply(n)}
+          className="rounded-md bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-40"
+        >
+          적용
+        </button>
+      </div>
+      {!valid ? (
+        <span className="text-[10px] text-red-400">1~50 사이 숫자를 입력하세요</span>
+      ) : (
+        <span className="text-[10px] text-muted-foreground">
+          예상: {credits} 크레딧 (~${cost}) · 영상 약 {songMin}분 · 렌더 약 {renderMin}분
+        </span>
+      )}
     </div>
   )
 }
