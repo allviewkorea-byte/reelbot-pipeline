@@ -17,42 +17,12 @@ import threading
 import time
 import uuid
 
+# 장르 체계 SSOT(#45) — 14장르 프리셋·기본값. music_genres 는 의존성 0(순환 안전).
+from services import music_genres
+
 logger = logging.getLogger(__name__)
 
-# mood → 제작용 주제(스타일·톤 포함). genre/situation/mood 는 music_test 와 일관.
-_THEMES: dict[str, dict] = {
-    "citypop": {
-        "genre": "시티팝", "situation": "출근 드라이브", "mood": "상쾌한",
-        "title_kr": "시티팝 드라이브",
-        "style_prompt": "city pop, 80s Japanese citypop, warm analog, lush chords, nostalgic",
-        "lyric_tone": "상쾌하고 자유로운 아침 드라이브",
-    },
-    "cafe": {
-        "genre": "재즈", "situation": "카페", "mood": "잔잔한",
-        "title_kr": "카페 재즈",
-        "style_prompt": "smooth jazz, cafe lounge, mellow piano, relaxed, warm",
-        "lyric_tone": "잔잔하고 따뜻한 오후의 커피",
-    },
-    "ballad": {
-        "genre": "발라드", "situation": "이별", "mood": "쓸쓸한",
-        "title_kr": "이별 발라드",
-        "style_prompt": "korean ballad, emotional piano, sad strings, tender",
-        "lyric_tone": "쓸쓸한 이별의 밤",
-    },
-    "workout": {
-        "genre": "EDM", "situation": "운동", "mood": "동기부여",
-        "title_kr": "운동 EDM",
-        "style_prompt": "energetic EDM, motivational, driving beat, uplifting",
-        "lyric_tone": "힘차고 동기부여되는",
-    },
-    "sleep": {
-        "genre": "Lo-fi", "situation": "수면 공부", "mood": "차분한",
-        "title_kr": "수면 Lo-fi",
-        "style_prompt": "lofi chill, calm, soft piano, ambient, sleepy",
-        "lyric_tone": "나른하고 평온한 밤",
-    },
-}
-_DEFAULT_MOOD = "citypop"
+_DEFAULT_MOOD = music_genres.DEFAULT_GENRE
 
 # 진행 단계(프론트 표시용 한국어): 주제 → 음원 → 가사 → 렌더 → 완료.
 # 인메모리 job 저장소 + 동시 1개 제한 락.
@@ -62,7 +32,7 @@ _active_job: str | None = None
 
 
 def available_moods() -> list[str]:
-    return list(_THEMES.keys())
+    return list(music_genres.GENRE_IDS)
 
 
 # #42 수동 생성 곡수 1~100(범위 밖 클램프). 미지정 → 1(기존 동작 = 회귀 0).
@@ -77,7 +47,7 @@ def _clamp_track_count(n) -> int:
 
 
 def _build_theme(mood: str, track_count: int = 1) -> dict:
-    preset = _THEMES.get(mood, _THEMES[_DEFAULT_MOOD])
+    preset = music_genres.preset(mood)
     return {
         "slug": f"manual_{uuid.uuid4().hex[:12]}",
         "title_kr": preset["title_kr"],
@@ -97,7 +67,7 @@ def start(mood: str | None = None, track_count: int | None = None) -> dict:
     track_count(#42): 영상에 넣을 곡수 1~100(미지정→1). 곡수 = Suno 호출 수 = 영상 길이(#40).
     """
     global _active_job
-    key = (mood or _DEFAULT_MOOD).strip().lower()
+    key = music_genres.normalize_mood_key(mood or _DEFAULT_MOOD)
     tc = _clamp_track_count(track_count if track_count is not None else 1)
     with _LOCK:
         if _active_job and _JOBS.get(_active_job, {}).get("status") == "running":

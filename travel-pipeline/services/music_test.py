@@ -16,43 +16,24 @@ import uuid
 from pathlib import Path
 
 from adapters import r2_storage
-from services import music_video
+from services import music_genres, music_video
 
 logger = logging.getLogger(__name__)
 
-# mood 키 → 테스트 주제(색상 매핑이 의미 있도록 장르/상황 키워드 포함) + 곡 제목 2개.
-_PRESETS: dict[str, dict] = {
-    "citypop": {
-        "genre": "시티팝", "situation": "출근 드라이브", "mood": "상쾌한",
-        "title_kr": "테스트 · 시티팝 드라이브",
-        "tracks": ["Morning Drive", "City Lights"],
-    },
-    "cafe": {
-        "genre": "재즈", "situation": "카페", "mood": "잔잔한",
-        "title_kr": "테스트 · 카페 재즈",
-        "tracks": ["Coffee Break", "Afternoon Jazz"],
-    },
-    "ballad": {
-        "genre": "발라드", "situation": "이별", "mood": "쓸쓸한",
-        "title_kr": "테스트 · 이별 발라드",
-        "tracks": ["비 오는 밤", "그날의 우리"],
-    },
-    "workout": {
-        "genre": "EDM", "situation": "운동", "mood": "동기부여",
-        "title_kr": "테스트 · 운동 EDM",
-        "tracks": ["Power Up", "Run Faster"],
-    },
-    "sleep": {
-        "genre": "Lo-fi", "situation": "수면 공부", "mood": "차분한",
-        "title_kr": "테스트 · 수면 Lo-fi",
-        "tracks": ["깊은 밤", "꿈속으로"],
-    },
-}
-_DEFAULT_MOOD = "citypop"
+# mood(장르) 키 → 테스트 주제. 14장르 프리셋은 music_genres SSOT(#45)에서 가져온다.
+_DEFAULT_MOOD = music_genres.DEFAULT_GENRE
+
+
+def _test_preset(key: str) -> dict:
+    """장르 프리셋 → 테스트용(제목에 '테스트 ·' 접두) 사본."""
+    base = music_genres.preset(key)
+    p = dict(base)
+    p["title_kr"] = f"테스트 · {base['title_kr']}"
+    return p
 
 
 def available_moods() -> list[str]:
-    return list(_PRESETS.keys())
+    return list(music_genres.GENRE_IDS)
 
 
 def _synth_audio(work: Path, seconds: float) -> Path:
@@ -109,8 +90,8 @@ def render_test(mood: str | None = None, *, seconds: float = 10.0) -> dict:
     Remotion(USE_REMOTION on) 우선, 실패/off 면 ffmpeg 폴백. 유튜브·큐 미경유.
     """
     music_video._require_ffmpeg()
-    key = (mood or _DEFAULT_MOOD).strip().lower()
-    preset = _PRESETS.get(key, _PRESETS[_DEFAULT_MOOD])
+    key = music_genres.normalize_mood_key(mood or _DEFAULT_MOOD)
+    preset = _test_preset(key)
 
     # 곡 2개: 전반부/후반부 → 곡 제목 전환 페이드 확인.
     half = round(seconds / 2.0, 3)
