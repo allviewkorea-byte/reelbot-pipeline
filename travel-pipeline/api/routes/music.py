@@ -52,17 +52,56 @@ def _release_preempt() -> None:
         _produced_at = None
 
 
+def _produce_step_for(msg: str) -> str | None:
+    """produce/run_theme 진행 메시지 → 표준 단계(music_jobs.STEPS) 매핑(파이프라인 시각화)."""
+    if "가사" in msg:
+        return "lyrics"
+    if "영상" in msg:
+        return "video"
+    if "유튜브" in msg or "업로드" in msg:
+        return "upload"
+    if "마스터" in msg or "믹스" in msg:
+        return "mix"
+    if "보컬" in msg or "연주" in msg or "음원" in msg:
+        return "vocal"
+    return None
+
+
 def _run_produce() -> None:
-    """백그라운드: 주제 자동 생성 → 음원 → 영상 → 검토 대기 큐 적재(run_theme)."""
+    """백그라운드: 주제 자동 생성 → 음원 → 영상 → 검토 대기 큐 적재(run_theme).
+
+    #36 운영 가시성 — music_jobs 로 단계 진행을 DB 기록(대시보드 파이프라인 시각화).
+    추적은 best-effort 라 실패해도 제작 흐름·비용에 영향 없음.
+    """
+    from services import music_jobs
+    job_id = music_jobs.start_job("cron")
     try:
         from services import music_channel, music_produce
         n = music_channel.get_track_count()  # 대시보드 곡수(기본 1) — 비용 직접 제어(#30)
         logger.info("[music-produce] 곡수=%d 로 생성 시작", n)
-        result = music_produce.run_theme(video=True, upload=False, n=n)
+        music_jobs.update_job_step(job_id, "theme")
+
+        def _progress(msg: str) -> None:
+            step = _produce_step_for(msg)
+            if step:
+                try:
+                    music_jobs.update_job_step(job_id, step)
+                except Exception:  # noqa: BLE001
+                    pass
+
+        result = music_produce.run_theme(video=True, upload=False, n=n, progress=_progress)
         slug = (result.get("theme") or {}).get("slug")
         vid = (result.get("video") or {}).get("video_id")
+        try:
+            music_jobs.complete_job(job_id, mix_id=vid)
+        except Exception:  # noqa: BLE001
+            pass
         logger.info("[music-produce] 완료 slug=%s video_id=%s", slug, vid)
     except Exception as e:  # noqa: BLE001 - 백그라운드 실패는 로깅만(큐는 비어 있게 둠)
+        try:
+            music_jobs.fail_job(job_id, str(e))
+        except Exception:  # noqa: BLE001
+            pass
         # 실패 시 오늘 선점 해제 → 다음 cron(9/10시)이 재시도하도록.
         _release_preempt()
         logger.warning("[music-produce] 백그라운드 실패(선점 해제, 재시도 허용): %s", e)
@@ -189,6 +228,75 @@ def manual_render_status(job_id: str):
     if st is None:
         raise HTTPException(status_code=404, detail="해당 job 을 찾을 수 없습니다(재시작 시 소실).")
     return st
+
+
+@router.get("/jobs/active")
+def jobs_active():
+    """진행 중(+미확인 실패) 작업 목록 — 대시보드 파이프라인·검토대기 진행 카드용(#36)."""
+    from services import music_jobs
+    return {"jobs": music_jobs.list_active()}
+
+
+@router.get("/jobs/history")
+def jobs_history(limit: int = 20):
+    """최근 완료/실패 작업 — 대시보드 통계용(#36)."""
+    from services import music_jobs
+    return {"jobs": music_jobs.list_history(limit)}
+
+
+@router.get("/jobs/{job_id}")
+def jobs_detail(job_id: str):
+    """특정 작업 상세(#36). 없으면 404."""
+    from services import music_jobs
+    job = music_jobs.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="해당 job 을 찾을 수 없습니다.")
+    return {"job": job}
+
+
+@router.post("/jobs/{job_id}/dismiss")
+def jobs_dismiss(job_id: str):
+    """실패 카드 [닫기](#36) — active 목록에서 제거(상태는 failed 보존)."""
+    from services import music_jobs
+    res = music_jobs.dismiss_job(job_id)
+    if not res.get("ok"):
+        raise HTTPException(status_code=502, detail=res.get("error") or "닫기 실패")
+    return {"ok": True}
+
+
+@router.post("/jobs/{job_id}/retry")
+def jobs_retry(job_id: str, background: BackgroundTasks):
+    """실패 카드 [재시도](#36) — 같은 종류 작업을 다시 시작. 기존 실패 건은 닫는다.
+
+    manual_render: 같은 mood 로 재생성 / rerender: 같은 mix_id 로 재렌더.
+    cron 작업은 다음 cron 이 자동 재시도하므로 재시도 버튼 미지원(400).
+    """
+    from services import music_jobs
+    job = music_jobs.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="해당 job 을 찾을 수 없습니다.")
+    jtype = job.get("type")
+    meta = job.get("metadata") or {}
+    if jtype == "manual_render":
+        from services import music_manual
+        started = music_manual.start(mood=meta.get("mood"))
+        if not started.get("ok"):
+            raise HTTPException(status_code=409, detail=started.get("error") or "이미 진행 중")
+        music_jobs.dismiss_job(job_id)
+        background.add_task(music_manual.run, started["job_id"])
+        return {"ok": True, "job_id": started["job_id"]}
+    if jtype == "rerender":
+        mix_id = job.get("mix_id")
+        if not mix_id:
+            raise HTTPException(status_code=400, detail="mix_id 가 없어 재렌더할 수 없습니다.")
+        from services import music_rerender
+        started = music_rerender.start(mix_id)
+        if not started.get("ok"):
+            raise HTTPException(status_code=409, detail=started.get("error") or "이미 진행 중")
+        music_jobs.dismiss_job(job_id)
+        background.add_task(music_rerender.run, started["job_id"])
+        return {"ok": True, "job_id": started["job_id"]}
+    raise HTTPException(status_code=400, detail="이 작업은 재시도를 지원하지 않습니다(cron 은 자동 재시도).")
 
 
 @router.get("/trends")

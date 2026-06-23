@@ -94,6 +94,12 @@ def start(mood: str | None = None) -> dict:
             "created_at": time.time(),
         }
         _active_job = job_id
+    # #36 운영 가시성 — DB 작업 추적(인메모리와 같은 job_id). best-effort.
+    try:
+        from services import music_jobs
+        music_jobs.start_job("manual_render", job_id=job_id, metadata={"mood": key})
+    except Exception as e:  # noqa: BLE001
+        logger.debug("[music-manual] job 추적 시작 실패(무시): %s", e)
     return {"ok": True, "job_id": job_id}
 
 
@@ -111,9 +117,20 @@ def run(job_id: str) -> None:
     if not job:
         return
 
+    from services import music_jobs
+
+    # 한국어 표시 단계 → 표준 단계(music_jobs.STEPS) 매핑(파이프라인 시각화용).
+    _CANON = {"주제": "theme", "음원": "vocal", "가사": "lyrics", "음원·믹스": "mix", "렌더": "video"}
+
     def _step(name: str) -> None:
         job["step"] = name
         logger.info("[music-manual] job=%s step=%s", job_id, name)
+        canon = _CANON.get(name)
+        if canon:
+            try:
+                music_jobs.update_job_step(job_id, canon)
+            except Exception:  # noqa: BLE001 - 추적 실패는 무시
+                pass
 
     def _produce_progress(msg: str) -> None:
         if "가사" in msg:
@@ -151,10 +168,18 @@ def run(job_id: str) -> None:
         job["mix_id"] = video.get("video_id")
         job["status"] = "done"
         _step("완료")
+        try:
+            music_jobs.complete_job(job_id, mix_id=job["mix_id"])
+        except Exception:  # noqa: BLE001
+            pass
         logger.info("[music-manual] 완료 job=%s mix_id=%s url=%s", job_id, job["mix_id"], job["video_url"])
     except Exception as e:  # noqa: BLE001 - 실패 원인 폴링으로 전달
         job["status"] = "error"
         job["error"] = str(e)[:300]
+        try:
+            music_jobs.fail_job(job_id, str(e))
+        except Exception:  # noqa: BLE001
+            pass
         logger.warning("[music-manual] 실패 job=%s: %s", job_id, e)
     finally:
         with _LOCK:

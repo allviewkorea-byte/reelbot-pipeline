@@ -1,7 +1,9 @@
 "use client"
 
+import { STEP_NODE_INDEX, type MusicJob } from "@/lib/music-jobs"
+
 // 음악 파이프라인 노드그래프 — 백곰 PipelineNodeGraph 구조·className·SVG 지오메트리 1:1 복제
-// (직접 import 금지, 시각 일치 목적). 음악은 라이브 job API 가 없어 정적(유휴=전부 pending).
+// (직접 import 금지, 시각 일치 목적). #36: activeJobs 로 실제 진행을 노드에 반영(없으면 전부 pending).
 type NodeState = "done" | "active" | "pending" | "error"
 
 interface PipelineNode {
@@ -38,13 +40,43 @@ const LAST_X = cx(NODES.length - 1)
 const PX = LAST_X + 95
 const PLATFORM_Y = [28] // 음악은 유튜브 단일 → 중앙
 
-export function MusicPipeline() {
+// 진행 중(또는 미확인 실패) 작업 → 노드 상태 배열. running 우선, 없으면 queued/failed.
+function deriveStates(jobs: MusicJob[]): { states: NodeState[]; errorAt: number; errorMsg?: string } {
   const states: NodeState[] = NODES.map(() => "pending")
+  const job =
+    jobs.find((j) => j.status === "running") ||
+    jobs.find((j) => j.status === "queued") ||
+    jobs.find((j) => j.status === "failed")
+  if (!job) return { states, errorAt: -1 }
+  const idx = STEP_NODE_INDEX[job.step ?? ""] ?? 0
+  for (let i = 0; i < NODES.length; i++) {
+    if (i < idx) states[i] = "done"
+    else if (i === idx) states[i] = job.status === "failed" ? "error" : "active"
+    else states[i] = "pending"
+  }
+  return {
+    states,
+    errorAt: job.status === "failed" ? idx : -1,
+    errorMsg: job.error_message ?? undefined,
+  }
+}
+
+export function MusicPipeline({ activeJobs = [] }: { activeJobs?: MusicJob[] }) {
+  const { states, errorAt, errorMsg } = deriveStates(activeJobs)
+  const running = activeJobs.some((j) => j.status === "running" || j.status === "queued")
 
   return (
     <div className="rounded-xl border border-border bg-card px-3 py-2">
       <div className="mb-1 flex items-center justify-between gap-3">
         <h2 className="text-sm font-semibold text-foreground">음악 파이프라인</h2>
+        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <span
+            className={`h-1.5 w-1.5 rounded-full ${
+              errorAt >= 0 ? "bg-red-500" : running ? "bg-primary animate-pulse" : "bg-muted-foreground/40"
+            }`}
+          />
+          {errorAt >= 0 ? "실패" : running ? "진행 중" : "유휴"}
+        </span>
       </div>
 
       <div className="w-full overflow-x-auto">
@@ -90,8 +122,12 @@ export function MusicPipeline() {
             const st = states[i]
             const x = cx(i) - NODE_W / 2
             const y = CY - NODE_H / 2
+            const isActive = st === "active"
+            const isError = st === "error"
             return (
-              <g key={n.id} className={TEXT[st]}>
+              <g key={n.id} className={`${TEXT[st]} ${isActive ? "animate-pulse" : ""}`}>
+                {/* 실패 노드 호버 시 네이티브 툴팁(에러 메시지) */}
+                {isError && errorMsg ? <title>{errorMsg}</title> : null}
                 <rect
                   x={x}
                   y={y}
@@ -99,11 +135,17 @@ export function MusicPipeline() {
                   height={NODE_H}
                   rx={8}
                   className="fill-current"
-                  fillOpacity={0.06}
+                  fillOpacity={isActive || isError ? 0.16 : st === "done" ? 0.1 : 0.06}
                   stroke="currentColor"
-                  strokeWidth={1.4}
+                  strokeWidth={isActive || isError ? 1.8 : 1.4}
                 />
-                <text x={cx(i)} y={CY + 3.5} textAnchor="middle" fontSize={10} className="fill-muted-foreground">
+                <text
+                  x={cx(i)}
+                  y={CY + 3.5}
+                  textAnchor="middle"
+                  fontSize={10}
+                  className={st === "pending" ? "fill-muted-foreground" : "fill-current"}
+                >
                   {n.label}
                 </text>
               </g>

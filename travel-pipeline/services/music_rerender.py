@@ -36,6 +36,12 @@ def start(mix_id: str) -> dict:
             "step": "준비", "video_url": None, "error": None, "created_at": time.time(),
         }
         _active[mix_id] = job_id
+    # #36 운영 가시성 — DB 작업 추적(인메모리와 같은 job_id). best-effort.
+    try:
+        from services import music_jobs
+        music_jobs.start_job("rerender", job_id=job_id, mix_id=mix_id)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("[music-rerender] job 추적 시작 실패(무시): %s", e)
     return {"ok": True, "job_id": job_id}
 
 
@@ -66,9 +72,16 @@ def run(job_id: str) -> None:
         return
     mix_id = job["mix_id"]
 
+    from services import music_jobs
+
+    # 재렌더 단계는 모두 영상 렌더 범주 → 표준 단계 'video' 로 표시.
     def _step(s: str) -> None:
         job["step"] = s
         logger.info("[music-rerender] job=%s step=%s", job_id, s)
+        try:
+            music_jobs.update_job_step(job_id, "video")
+        except Exception:  # noqa: BLE001
+            pass
 
     tmpdir: Path | None = None
     try:
@@ -97,10 +110,18 @@ def run(job_id: str) -> None:
         job["video_url"] = vres.get("video_url")
         job["status"] = "done"
         _step("완료")
+        try:
+            music_jobs.complete_job(job_id, mix_id=mix_id)
+        except Exception:  # noqa: BLE001
+            pass
         logger.info("[music-rerender] 완료 job=%s url=%s", job_id, job["video_url"])
     except Exception as e:  # noqa: BLE001
         job["status"] = "error"
         job["error"] = str(e)[:300]
+        try:
+            music_jobs.fail_job(job_id, str(e))
+        except Exception:  # noqa: BLE001
+            pass
         logger.warning("[music-rerender] 실패 job=%s: %s", job_id, e)
     finally:
         if tmpdir is not None:
