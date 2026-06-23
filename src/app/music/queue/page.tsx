@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 import { MusicQueueCard, TestCard, type QueueItem } from "@/components/music/MusicQueueCard"
 import { MusicJobCard } from "@/components/music/MusicJobCard"
 import type { MusicJob } from "@/lib/music-jobs"
+import { estimateProductionTime, fmtMinutes } from "@/lib/music"
 
 // 카테고리(음악 헌법 상황·장르 → 대표 5종) + 전체. 클라이언트 사이드 필터.
 const CATEGORIES = [
@@ -226,6 +227,15 @@ export default function MusicQueueGridPage() {
             >
               {manualLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Music2 className="h-3.5 w-3.5" />} 수동 영상 생성
             </button>
+            {/* #41 예상(수동은 1곡 고정 — #42에서 곡수 선택 예정) */}
+            {(() => {
+              const e = estimateProductionTime(1)
+              return (
+                <span className="text-[10px] text-muted-foreground">
+                  📹 영상 {fmtMinutes(e.videoMinutes)} · ⏱️ 제작 {fmtMinutes(e.totalMinutes)} · 1곡
+                </span>
+              )
+            })()}
             {/* 보조 — 빠른 테스트 10초(합성 음원, 폐기) */}
             <button
               type="button"

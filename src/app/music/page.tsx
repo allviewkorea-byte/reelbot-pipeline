@@ -5,7 +5,7 @@ import Link from "next/link"
 import { toast } from "sonner"
 import { Users, Eye, BarChart3, Video, ClipboardList, Play, Square, Loader2, Settings, Palette } from "lucide-react"
 import { PLATFORM_BADGE, PLATFORM_LABELS, TRACK_BADGE, TRACK_LABELS } from "@/lib/channels"
-import { MUSIC_CHANNEL_ID, MUSIC_CHANNEL_NAME, fmtCount, type MusicMetrics } from "@/lib/music"
+import { MUSIC_CHANNEL_ID, MUSIC_CHANNEL_NAME, fmtCount, estimateProductionTime, fmtMinutes, type MusicMetrics } from "@/lib/music"
 import { MusicPipeline } from "@/components/music/MusicPipeline"
 import { MusicMarquee } from "@/components/music/MusicMarquee"
 import { MusicTrendPanel } from "@/components/music/MusicTrendPanel"
@@ -244,17 +244,15 @@ export default function MusicDashboardPage() {
   )
 }
 
-// #40 곡수 입력창(1~100) — 숫자 입력 + [적용] + 예상(크레딧/비용/길이/렌더) 즉시 표시.
-// 곡수↔길이 연동(#40): 영상 길이 = 곡 총 길이(약 곡당 4분). 정확한 예상시간은 #41 예정.
+// #41 곡수 입력창(1~100) — 숫자 입력 + [적용] + 예상 영상 길이·제작 시간·크레딧(접기/펼치기).
+// estimateProductionTime(클라이언트 계산, API 호출 없음)으로 곡수↔길이(#40) 반영.
 function TrackCountInput({ current, busy, onApply }: { current: number; busy: boolean; onApply: (n: number) => void }) {
   // current 변경 시 부모가 key={current} 로 재마운트 → 입력값 재초기화(setState-in-effect 회피).
   const [val, setVal] = useState(String(current))
+  const [open, setOpen] = useState(false)
   const n = Number(val)
   const valid = Number.isInteger(n) && n >= 1 && n <= 100
-  const credits = valid ? n * 12 : 0
-  const cost = (credits * 0.005).toFixed(2)
-  const songMin = valid ? (n * 4).toFixed(0) : "0" // #40 곡당 ~4분(대략). 정확값은 #41.
-  const renderMin = valid ? n : 0
+  const est = valid ? estimateProductionTime(n) : null
 
   return (
     <div className="flex flex-col gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium">
@@ -278,12 +276,28 @@ function TrackCountInput({ current, busy, onApply }: { current: number; busy: bo
           적용
         </button>
       </div>
-      {!valid ? (
+      {!est ? (
         <span className="text-[10px] text-red-400">1~100 사이 숫자를 입력하세요</span>
       ) : (
-        <span className="text-[10px] text-muted-foreground">
-          예상: {credits} 크레딧 (~${cost}) · 영상 약 {songMin}분 · 렌더 약 {renderMin}분
-        </span>
+        <div className="flex flex-col gap-0.5 text-[10px] text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span>📹 영상 {fmtMinutes(est.videoMinutes)}</span>
+            <span>⏱️ 제작 {fmtMinutes(est.totalMinutes)}</span>
+            <span>💰 {est.credits} 크레딧 (~${est.costUsd.toFixed(2)})</span>
+            <button type="button" onClick={() => setOpen((o) => !o)} className="text-primary hover:underline">
+              {open ? "접기" : "세부"}
+            </button>
+          </div>
+          {open && (
+            <div className="flex flex-col gap-px pl-3 text-muted-foreground/80">
+              <span>└ Suno 생성 {fmtMinutes(est.sunoMinutes)}</span>
+              <span>└ 믹스 {fmtMinutes(est.mixMinutes)}</span>
+              <span>└ 렌더 {fmtMinutes(est.renderMinutes)}</span>
+              <span>└ 업로드 {fmtMinutes(est.uploadMinutes)}</span>
+              {n >= 3 && <span className="text-amber-500">※ 3곡 이상은 분할 렌더(#43) 전까지 타임아웃 가능</span>}
+            </div>
+          )}
+        </div>
       )}
     </div>
   )
