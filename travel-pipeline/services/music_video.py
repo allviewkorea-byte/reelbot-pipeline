@@ -433,6 +433,7 @@ def _render_remotion(
     mood: str,
     duration: float,
     viz_spec: dict | None = None,
+    design_config: dict | None = None,
 ) -> str:
     """Remotion(둥근 바 + 인트로 + 텍스트) 렌더 → mp4. 실패 시 예외(호출부가 ffmpeg 폴백)."""
     props = {
@@ -446,6 +447,7 @@ def _render_remotion(
         "mood": mood,
         "durationSec": round(duration, 3),
         "vizSpec": viz_spec or None,
+        "designConfig": design_config or None,  # #35-A None 이면 MusicViz 가 현재값 폴백
     }
     cmd = [
         "node", str(_REMOTION_DIR / "render.mjs"),
@@ -663,10 +665,18 @@ def make_video(
             mood_hint = " ".join(
                 str(theme.get(k, "")) for k in ("mood", "genre", "situation")
             ).strip()
+            # #35-A 디자인 설정(PLAY LIST·Where). 미저장이면 None → MusicViz 가 현재값 폴백(회귀 0).
+            design_config = None
+            try:
+                from services import music_channel
+                design_config = music_channel.get_design_config()
+            except Exception as e:  # noqa: BLE001 - 조회 실패해도 렌더는 진행(현재값)
+                logger.warning("[video] design_config 조회 실패(현재값 진행): %s", e)
             try:
                 _render_remotion(
                     str(bg), str(audio), str(out),
                     tracks=tracks, mood=mood_hint, duration=duration, viz_spec=viz_spec,
+                    design_config=design_config,
                 )
                 rendered = True
                 logger.info("[video] Remotion 렌더 완료 slug=%s", slug)

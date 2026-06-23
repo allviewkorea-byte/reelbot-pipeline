@@ -8,6 +8,7 @@ channel_status 테이블을 쓰되 channel_id 로 분리(같은 컬럼 재사용
 from __future__ import annotations
 
 import logging
+import re
 
 import httpx
 
@@ -91,3 +92,127 @@ def get_channel_config() -> dict:
     except Exception as e:  # noqa: BLE001 - 컬럼 미존재/오류 시 기본값
         logger.warning("[music-channel] channel_config 조회 실패(기본값 사용): %s", _http_err(e))
         return base
+
+
+# #35-A 디자인 설정(PLAY LIST·Where 폰트·크기·두께·색·투명도·테두리) — channel_status.design_config jsonb.
+# 프리셋 폰트 10종(프론트/Remotion 공통). UI 드롭다운·렌더 매핑이 같은 이름을 쓴다.
+PRESET_FONTS = (
+    "Montserrat", "Poppins", "Bebas Neue", "Oswald", "Anton",
+    "Archivo", "Inter", "DM Sans", "Playfair Display", "Cormorant Garamond",
+)
+
+# UI 초기값(GET 기본). 비어 있을 때의 '렌더'는 MusicViz 가 현재 하드코딩값으로 폴백하므로,
+# 이 기본값은 사용자가 디자인 본부를 처음 열었을 때 보이는 값일 뿐(저장 전엔 렌더 무영향).
+DEFAULT_DESIGN_CONFIG = {
+    "play_list": {
+        "font_family": "Playfair Display", "font_size": 324, "font_weight": 700,
+        "color": "#FFFFFF", "opacity": 1.0,
+        "border": {"enabled": False, "width": 2, "color": "#000000"},
+    },
+    "where_label": {
+        "font_family": "Inter", "font_size": 24, "font_weight": 600,
+        "color": "#FFFFFF", "opacity": 0.9,
+        "border": {"enabled": False, "width": 1, "color": "#000000"},
+    },
+}
+_HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def _hex(v, dflt: str) -> str:
+    return v if isinstance(v, str) and _HEX_RE.match(v.strip()) else dflt
+
+
+def _num(v, lo: float, hi: float, dflt):
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        return dflt
+    if n != n:  # NaN
+        return dflt
+    n = max(lo, min(hi, n))
+    return int(round(n)) if isinstance(dflt, int) else round(n, 3)
+
+
+def _norm_target(raw, dflt: dict) -> dict:
+    out = dict(dflt)
+    out["border"] = dict(dflt["border"])
+    if isinstance(raw, dict):
+        if raw.get("font_family") in PRESET_FONTS:
+            out["font_family"] = raw["font_family"]
+        out["font_size"] = _num(raw.get("font_size"), 8, 600, dflt["font_size"])
+        out["font_weight"] = _num(raw.get("font_weight"), 100, 900, dflt["font_weight"])
+        out["color"] = _hex(raw.get("color"), dflt["color"])
+        out["opacity"] = _num(raw.get("opacity"), 0.0, 1.0, dflt["opacity"])
+        b = raw.get("border") if isinstance(raw.get("border"), dict) else {}
+        out["border"] = {
+            "enabled": bool(b.get("enabled", False)),
+            "width": _num(b.get("width"), 0, 40, dflt["border"]["width"]),
+            "color": _hex(b.get("color"), dflt["border"]["color"]),
+        }
+    return out
+
+
+def normalize_design_config(raw) -> dict:
+    """제출/조회 데이터를 스키마(2 대상 × 6 필드)로 정규화. 알 수 없는 키 무시, 값 클램프."""
+    raw = raw if isinstance(raw, dict) else {}
+    return {
+        "play_list": _norm_target(raw.get("play_list"), DEFAULT_DESIGN_CONFIG["play_list"]),
+        "where_label": _norm_target(raw.get("where_label"), DEFAULT_DESIGN_CONFIG["where_label"]),
+    }
+
+
+def default_design_config() -> dict:
+    return normalize_design_config(DEFAULT_DESIGN_CONFIG)
+
+
+def get_design_config() -> dict | None:
+    """저장된 디자인 설정(정규화) 반환. 미저장/빈 객체/오류 시 None.
+
+    렌더(make_video)는 None 이면 MusicViz 가 현재 하드코딩값으로 폴백 → 회귀 0.
+    UI(GET)는 None 이면 default_design_config() 를 보여준다.
+    """
+    url, key = _supabase_cfg()
+    if not (url and key):
+        return None
+    try:
+        with httpx.Client(timeout=15.0) as c:
+            r = c.get(
+                f"{url}/rest/v1/{_TABLE}",
+                headers={"apikey": key, "Authorization": f"Bearer {key}"},
+                params={"channel_id": f"eq.{MUSIC_CHANNEL_ID}", "select": "design_config", "limit": "1"},
+            )
+            r.raise_for_status()
+            rows = r.json()
+        cfg = (rows[0].get("design_config") if rows else None)
+        if isinstance(cfg, dict) and (cfg.get("play_list") or cfg.get("where_label")):
+            return normalize_design_config(cfg)
+        return None
+    except Exception as e:  # noqa: BLE001 - 컬럼 미존재/오류 시 None(현재값 폴백)
+        logger.warning("[music-channel] design_config 조회 실패(현재값 폴백): %s", _http_err(e))
+        return None
+
+
+def set_design_config(cfg: dict) -> dict:
+    """디자인 설정 저장(channel_status upsert, channel_id=rooftop_music). {ok, error}."""
+    url, key = _supabase_cfg()
+    if not (url and key):
+        return {"ok": False, "error": "supabase 미설정"}
+    record = {
+        "channel_id": MUSIC_CHANNEL_ID,
+        "design_config": normalize_design_config(cfg),
+    }
+    try:
+        with httpx.Client(timeout=15.0) as c:
+            r = c.post(
+                f"{url}/rest/v1/{_TABLE}?on_conflict=channel_id",
+                headers={
+                    "apikey": key, "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                    "Prefer": "resolution=merge-duplicates",
+                },
+                json=[record],
+            )
+            r.raise_for_status()
+        return {"ok": True, "error": None}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": _http_err(e)}

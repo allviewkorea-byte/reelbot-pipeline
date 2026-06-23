@@ -65,6 +65,9 @@ export default function MusicSettingsPage() {
           <h1 className="text-xl font-semibold text-foreground">채널 설정</h1>
           <p className="text-sm text-muted-foreground">공개 업로드 본문·SEO 에 쓰이는 운영 정보입니다. 빈 칸은 본문에 출력되지 않아요.</p>
         </div>
+        <Link href="/music/design" className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground">
+          디자인 본부
+        </Link>
       </header>
 
       {loading ? (

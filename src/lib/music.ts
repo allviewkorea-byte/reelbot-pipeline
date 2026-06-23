@@ -60,3 +60,40 @@ export function normalizeMusicConfig(raw: unknown): MusicChannelConfig {
     ai_disclosure: str("ai_disclosure").trim() || DEFAULT_AI_DISCLOSURE,
   }
 }
+
+// #35-A 디자인 시스템 본부 — PLAY LIST·Where 폰트/크기/두께/색/투명도/테두리.
+// 프리셋 폰트 10종(Remotion·프론트 미리보기 공통). 이름은 Google Fonts 패밀리명과 일치.
+export const DESIGN_PRESET_FONTS = [
+  "Montserrat", "Poppins", "Bebas Neue", "Oswald", "Anton",
+  "Archivo", "Inter", "DM Sans", "Playfair Display", "Cormorant Garamond",
+] as const
+
+export interface TextBorder {
+  enabled: boolean
+  width: number
+  color: string
+}
+export interface TextStyleConfig {
+  font_family: string
+  font_size: number
+  font_weight: number
+  color: string
+  opacity: number
+  border: TextBorder
+}
+export interface MusicDesignConfig {
+  play_list: TextStyleConfig
+  where_label: TextStyleConfig
+}
+
+// UI 초기 기본값(백엔드 default_design_config 와 동일). 저장 전엔 렌더 무영향(MusicViz 가 현재값 폴백).
+export const DEFAULT_DESIGN_CONFIG: MusicDesignConfig = {
+  play_list: {
+    font_family: "Playfair Display", font_size: 324, font_weight: 700,
+    color: "#FFFFFF", opacity: 1.0, border: { enabled: false, width: 2, color: "#000000" },
+  },
+  where_label: {
+    font_family: "Inter", font_size: 24, font_weight: 600,
+    color: "#FFFFFF", opacity: 0.9, border: { enabled: false, width: 1, color: "#000000" },
+  },
+}

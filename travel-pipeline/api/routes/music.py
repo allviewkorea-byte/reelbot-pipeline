@@ -299,6 +299,51 @@ def jobs_retry(job_id: str, background: BackgroundTasks):
     raise HTTPException(status_code=400, detail="이 작업은 재시도를 지원하지 않습니다(cron 은 자동 재시도).")
 
 
+@router.get("/design-config")
+def design_config_get():
+    """디자인 설정(PLAY LIST·Where 폰트/크기/두께/색/투명도/테두리) 조회(#35-A).
+
+    저장값 없으면 기본값 반환(UI 초기 표시용). 렌더는 별도로 None 일 때 현재값 폴백.
+    """
+    from services import music_channel
+    cfg = music_channel.get_design_config() or music_channel.default_design_config()
+    return {"design_config": cfg, "presets": list(music_channel.PRESET_FONTS)}
+
+
+class _DesignBorder(BaseModel):
+    enabled: bool | None = None
+    width: float | None = None
+    color: str | None = None
+
+
+class _DesignTarget(BaseModel):
+    font_family: str | None = None
+    font_size: float | None = None
+    font_weight: float | None = None
+    color: str | None = None
+    opacity: float | None = None
+    border: _DesignBorder | None = None
+
+
+class DesignConfigBody(BaseModel):
+    play_list: _DesignTarget | None = None
+    where_label: _DesignTarget | None = None
+
+
+@router.post("/design-config")
+def design_config_set(body: DesignConfigBody):
+    """디자인 설정 저장(#35-A) — 검증·정규화 후 channel_status.design_config 에 upsert.
+
+    다음 영상부터 자동 적용. 기존 영상은 /music/queue 재렌더로 반영.
+    """
+    from services import music_channel
+    res = music_channel.set_design_config(body.model_dump(exclude_none=True))
+    if not res.get("ok"):
+        raise HTTPException(status_code=502, detail=res.get("error") or "저장 실패")
+    cfg = music_channel.get_design_config() or music_channel.default_design_config()
+    return {"ok": True, "design_config": cfg}
+
+
 @router.get("/trends")
 def trends_latest():
     """최신 트렌드 인사이트(대시보드/가이드 표시용). 없으면 trend=None."""

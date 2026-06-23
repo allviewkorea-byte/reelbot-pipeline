@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
-import { Users, Eye, BarChart3, Video, ClipboardList, Play, Square, Loader2, Settings } from "lucide-react"
+import { Users, Eye, BarChart3, Video, ClipboardList, Play, Square, Loader2, Settings, Palette } from "lucide-react"
 import { PLATFORM_BADGE, PLATFORM_LABELS, TRACK_BADGE, TRACK_LABELS } from "@/lib/channels"
 import { MUSIC_CHANNEL_ID, MUSIC_CHANNEL_NAME, fmtCount, type MusicMetrics } from "@/lib/music"
 import { MusicPipeline } from "@/components/music/MusicPipeline"
@@ -176,6 +176,15 @@ export default function MusicDashboardPage() {
           >
             <Settings className="h-4 w-4" />
             채널 설정
+          </Link>
+          {/* 디자인 본부(#35-A) — PLAY LIST·Where 폰트/테두리 */}
+          <Link
+            href="/music/design"
+            title="디자인 본부 — PLAY LIST·Where 폰트·크기·색·테두리"
+            className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+          >
+            <Palette className="h-4 w-4" />
+            디자인 본부
           </Link>
           {/* 검토 대기 (백곰 캐릭터 시트 자리 — 보라 강조) */}
           <Link
