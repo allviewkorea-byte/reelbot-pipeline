@@ -107,25 +107,38 @@ def generate_localizations(
     out: dict[str, dict] = {src: {"title": base_title, "description": base_desc}}
     if not _is_available():
         return out
+    # #37-B: 풍부화 본문(8섹션)은 길어, 10개 언어를 한 번에 번역하면 출력 JSON 이 잘려
+    # 파싱 실패 → src 만 남는 버그가 있었다. 언어별 1콜로 분리해 각 콜이 토큰 한도에
+    # 충분히 들어가게 하고, 한 언어 실패가 나머지를 막지 않도록 격리한다.
+    targets = [lng for lng in ALL_LANGS if lng != src]
+    for t in targets:
+        d = _translate_one_meta(base_title, base_desc, src, t)
+        if d:
+            out[t] = d
+    return out
+
+
+def _translate_one_meta(base_title: str, base_desc: str, src: str, target: str) -> dict | None:
+    """제목·설명을 target 언어 1개로 번역(1콜). 실패 시 None(원본 유지). 𝐏𝐥𝐚𝐲𝐥𝐢𝐬𝐭·이모지·
+    영문 장르 토큰은 그대로 보존(번역 금지)하도록 지시한다."""
     try:
         from services import music_lyrics
-        targets = [lng for lng in ALL_LANGS if lng != src]
-        names = ", ".join(f"{t}={LANG_NAMES.get(t, t)}" for t in targets)
+        tname = LANG_NAMES.get(target, target)
         system = (
-            "Translate this YouTube music video TITLE and DESCRIPTION into these languages: "
-            f"{names}. Keep it natural and YouTube-friendly. Titles <=100 chars. "
-            'Return STRICT JSON only: {"<lang>": {"title": "...", "description": "..."}, ...}. No markdown.'
+            f"Translate this YouTube music video TITLE and DESCRIPTION from "
+            f"{LANG_NAMES.get(src, src)} into {tname}. Natural and YouTube-friendly. "
+            "Keep the special bold word 𝐏𝐥𝐚𝐲𝐥𝐢𝐬𝐭, all emojis, URLs, @handles, hashtags, "
+            "and English genre tokens (city pop, lofi, jazz, pop, acoustic) UNCHANGED. "
+            "Title <=100 chars. "
+            'Return STRICT JSON only: {"title": "...", "description": "..."}. No markdown.'
         )
         user = f"TITLE:\n{base_title}\n\nDESCRIPTION:\n{base_desc}"
-        data = music_lyrics._extract_json(music_lyrics._call(system, user, max_tokens=3500))
-        if isinstance(data, dict):
-            for t in targets:
-                d = data.get(t)
-                if isinstance(d, dict) and d.get("title") and d.get("description"):
-                    out[t] = {"title": str(d["title"])[:100], "description": str(d["description"])}
-    except Exception as e:  # noqa: BLE001
-        logger.warning("[music-translate] localizations 실패: %s", e)
-    return out
+        data = music_lyrics._extract_json(music_lyrics._call(system, user, max_tokens=3000))
+        if isinstance(data, dict) and data.get("title") and data.get("description"):
+            return {"title": str(data["title"])[:100], "description": str(data["description"])}
+    except Exception as e:  # noqa: BLE001 - 언어별 격리
+        logger.warning("[music-translate] %s 번역 실패: %s", target, e)
+    return None
 
 
 def generate_hashtags(theme: dict, viz_spec: dict | None) -> list[str]:

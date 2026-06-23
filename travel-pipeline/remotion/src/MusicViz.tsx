@@ -173,17 +173,17 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
         }}
       />
 
-      {/* #34 WHERE 라벨 — 상단 중앙, 크게(약 48px)·semibold·흰색 90%. 채널 정체성으로 확실히 인식. */}
+      {/* #37-B WHERE 라벨 — 상단 중앙, 원래 크기(약 0.012w)로 복귀·semibold·흰색 90%. 'Where :' 표기. */}
       {locationEn && (
         <div
           style={{
             position: "absolute", top: height * 0.04, width: "100%", textAlign: "center",
-            fontFamily: "sans-serif", fontSize: width * 0.025, fontWeight: 600,
+            fontFamily: "sans-serif", fontSize: width * 0.012, fontWeight: 600,
             letterSpacing: "0.05em", color: "#FFFFFF", opacity: 0.9,
             textShadow: "0 2px 12px rgba(0,0,0,0.8)",
           }}
         >
-          WHERE : {locationEn}
+          Where : {locationEn}
         </div>
       )}
 
