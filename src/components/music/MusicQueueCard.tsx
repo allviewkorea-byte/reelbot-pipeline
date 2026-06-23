@@ -22,6 +22,7 @@ export interface QueueItem {
   thumbnail_url?: string | null
   viz_spec?: VizSpec | null
   status?: string
+  show_playlist?: boolean // #39 영상별 PLAY LIST 표시(미지정=표시)
 }
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -136,8 +137,33 @@ export function MusicQueueCard({ item, onChanged }: { item: QueueItem; onChanged
   const [publishing, setPublishing] = useState(false)
   const [published, setPublished] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
+  // #39 영상별 PLAY LIST 표시 토글(미지정=표시). 변경 시 즉시 DB 저장 → [재렌더]로 반영.
+  const [showPlaylist, setShowPlaylist] = useState(item.show_playlist ?? true)
+  const [savingPl, setSavingPl] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const viz = item.viz_spec || undefined
+
+  const togglePlaylist = useCallback(async () => {
+    const next = !showPlaylist
+    setSavingPl(true)
+    setShowPlaylist(next) // 낙관적 반영
+    try {
+      const res = await fetch(`/api/music/queue/${encodeURIComponent(item.mix_id)}/show-playlist`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ show_playlist: next }),
+      })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok || !d?.ok) throw new Error(d?.detail || "저장 실패")
+      setNeedsRerender(true) // 영상에 반영하려면 재렌더 필요
+      toast.success(`PLAY LIST 표시 ${next ? "ON" : "OFF"} — [재렌더]로 영상에 반영하세요.`)
+    } catch (e) {
+      setShowPlaylist(!next) // 롤백
+      toast.error(e instanceof Error ? e.message : "저장 실패")
+    } finally {
+      setSavingPl(false)
+    }
+  }, [showPlaylist, item.mix_id])
 
   const copyPrompt = async () => {
     try {
@@ -323,6 +349,25 @@ export function MusicQueueCard({ item, onChanged }: { item: QueueItem; onChanged
             <span className="flex flex-col items-center gap-1 py-2 text-[11px]"><Upload className="h-4 w-4" /> 깨끗한 이미지 업로드</span>
           )}
         </div>
+
+        {/* #39 영상별 PLAY LIST 표시 토글 — 싱글곡 OFF, 플레이리스트 ON. 변경 후 [재렌더]로 반영. */}
+        <button
+          type="button"
+          onClick={togglePlaylist}
+          disabled={savingPl}
+          role="switch"
+          aria-checked={showPlaylist}
+          title="이 영상에 'PLAY LIST' 텍스트를 표시할지 — 변경 후 [재렌더]로 영상에 반영"
+          className="flex items-center justify-between gap-2 rounded-md border border-border px-2.5 py-2 text-xs font-medium transition-colors hover:border-primary/40 disabled:opacity-60"
+        >
+          <span className="text-muted-foreground">PLAY LIST 표시</span>
+          <span className="flex items-center gap-1.5">
+            <span className={showPlaylist ? "text-emerald-400" : "text-muted-foreground"}>{showPlaylist ? "ON" : "OFF"}</span>
+            <span className={`relative h-4 w-7 shrink-0 rounded-full transition-colors ${showPlaylist ? "bg-emerald-600" : "bg-secondary"}`}>
+              <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${showPlaylist ? "left-3.5" : "left-0.5"}`} />
+            </span>
+          </span>
+        </button>
 
         {/* #33 A/C: 재렌더(올린 이미지로 실제 영상 갱신) + 이미지 제거 */}
         {hasThumb && (

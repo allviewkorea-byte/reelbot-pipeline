@@ -24,7 +24,7 @@ _TABLE = "music_uploads"
 _KST = timezone(timedelta(hours=9))
 _SELECT = (
     "slug,mix_id,title_kr,genre,mood,mp4_url,gpt_prompt,thumbnail_r2_key,viz_spec,"
-    "localizations,status,youtube_video_id,youtube_url,created_at"
+    "localizations,show_playlist,status,youtube_video_id,youtube_url,created_at"
 )
 
 
@@ -232,6 +232,24 @@ def set_thumbnail(mix_id: str, thumbnail_r2_key: str) -> dict:
                 f"{url}/rest/v1/{_TABLE}?mix_id=eq.{mix_id}",
                 headers=_headers(key, patch=True),
                 json={"thumbnail_r2_key": thumbnail_r2_key},
+            )
+            r.raise_for_status()
+        return {"stored": True, "error": None}
+    except Exception as e:  # noqa: BLE001
+        return {"stored": False, "error": _http_err(e)}
+
+
+def set_show_playlist(mix_id: str, show: bool) -> dict:
+    """영상별 PLAY LIST 표시 토글 저장(#39, PATCH). {stored, error}."""
+    url, key = _supabase_cfg()
+    if not (url and key):
+        return {"stored": False, "error": "supabase 미설정"}
+    try:
+        with httpx.Client(timeout=30.0) as c:
+            r = c.patch(
+                f"{url}/rest/v1/{_TABLE}?mix_id=eq.{mix_id}",
+                headers=_headers(key, patch=True),
+                json={"show_playlist": bool(show)},
             )
             r.raise_for_status()
         return {"stored": True, "error": None}

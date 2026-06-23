@@ -434,6 +434,7 @@ def _render_remotion(
     duration: float,
     viz_spec: dict | None = None,
     design_config: dict | None = None,
+    show_playlist: bool = True,
 ) -> str:
     """Remotion(둥근 바 + 인트로 + 텍스트) 렌더 → mp4. 실패 시 예외(호출부가 ffmpeg 폴백)."""
     props = {
@@ -448,6 +449,7 @@ def _render_remotion(
         "durationSec": round(duration, 3),
         "vizSpec": viz_spec or None,
         "designConfig": design_config or None,  # #35-A None 이면 MusicViz 가 현재값 폴백
+        "showPlaylist": bool(show_playlist),  # #39 영상별 PLAY LIST 표시(기본 True)
     }
     cmd = [
         "node", str(_REMOTION_DIR / "render.mjs"),
@@ -606,6 +608,7 @@ def make_video(
     background_path: str | None = None,
     viz_spec: dict | None = None,
     persist: bool = True,
+    show_playlist: bool = True,
 ) -> dict:
     """주제 + 믹스 → 배경 → 합성(Remotion/ffmpeg) → mp4 → R2. 영상 메타 반환.
 
@@ -676,7 +679,7 @@ def make_video(
                 _render_remotion(
                     str(bg), str(audio), str(out),
                     tracks=tracks, mood=mood_hint, duration=duration, viz_spec=viz_spec,
-                    design_config=design_config,
+                    design_config=design_config, show_playlist=show_playlist,
                 )
                 rendered = True
                 logger.info("[video] Remotion 렌더 완료 slug=%s", slug)

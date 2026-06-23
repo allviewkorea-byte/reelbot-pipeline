@@ -88,6 +88,7 @@ export type MusicVizProps = {
   durationSec: number;
   vizSpec: VizSpec | null;
   designConfig?: DesignConfig;
+  showPlaylist?: boolean; // #39 영상별 PLAY LIST 표시(기본 true; false 면 인트로·도킹 모두 안 그림)
 };
 
 const AUDIO = "audio.mp3";
@@ -106,7 +107,7 @@ const TYPE_END = 6.1; // 6.1~ 본 영상
 const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp" } as const;
 const easeInOut = Easing.bezier(0.65, 0, 0.35, 1);
 
-export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, vizSpec, designConfig }) => {
+export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, vizSpec, designConfig, showPlaylist }) => {
   const frame = useCurrentFrame();
   const { width, height, fps } = useVideoConfig();
   const audioData = useAudioData(staticFile(AUDIO));
@@ -296,8 +297,8 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
         </div>
       )}
 
-      {/* 2b) PLAY LIST — 거대 → 좌하단 이동·축소·페이드(easeInOutCubic). #35-A 디자인 설정 적용. */}
-      {plOpacity > 0.001 && (
+      {/* 2b) PLAY LIST — 거대 → 좌하단 이동·축소·페이드. #39 영상별 표시(showPlaylist=false 면 숨김, 기본 표시). */}
+      {showPlaylist !== false && plOpacity > 0.001 && (
         <div
           style={{
             position: "absolute",
