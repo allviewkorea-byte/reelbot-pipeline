@@ -10,6 +10,7 @@ import { MusicPipeline } from "@/components/music/MusicPipeline"
 import { MusicMarquee } from "@/components/music/MusicMarquee"
 import { MusicTrendPanel } from "@/components/music/MusicTrendPanel"
 import { MusicQueuePreview } from "@/components/music/MusicQueuePreview"
+import type { MusicJob } from "@/lib/music-jobs"
 
 interface ChannelStatus {
   isActive: boolean
@@ -26,6 +27,7 @@ export default function MusicDashboardPage() {
   const [stats, setStats] = useState<MusicMetrics | null>(null)
   const [queueCount, setQueueCount] = useState(0)
   const [busy, setBusy] = useState(false)
+  const [activeJobs, setActiveJobs] = useState<MusicJob[]>([])
 
   const loadStatus = useCallback(() => {
     fetch(`/api/channel-status?channelId=${MUSIC_CHANNEL_ID}`)
@@ -41,6 +43,20 @@ export default function MusicDashboardPage() {
     fetch("/api/music/metrics").then((r) => r.json()).then(setStats).catch(() => setStats(null))
     fetch("/api/music/queue").then((r) => r.json()).then((d) => setQueueCount(Array.isArray(d?.queue) ? d.queue.length : 0)).catch(() => {})
   }, [loadStatus])
+
+  // #36 운영 가시성 — 진행 중 작업 폴링(4초) → 파이프라인 실시간 시각화.
+  useEffect(() => {
+    let alive = true
+    const tick = () => {
+      fetch("/api/music/jobs/active")
+        .then((r) => r.json())
+        .then((d) => { if (alive) setActiveJobs(Array.isArray(d?.jobs) ? d.jobs : []) })
+        .catch(() => {})
+    }
+    tick()
+    const id = setInterval(tick, 4000)
+    return () => { alive = false; clearInterval(id) }
+  }, [])
 
   const patch = useCallback(
     async (body: Partial<{ isActive: boolean; mode: string; syntheticMedia: boolean; dailyCap: number; trackCount: number }>) => {
@@ -201,8 +217,8 @@ export default function MusicDashboardPage() {
         </div>
       </div>
 
-      {/* 파이프라인 */}
-      <MusicPipeline />
+      {/* 파이프라인 — 진행 중 작업 실시간 반영(#36) */}
+      <MusicPipeline activeJobs={activeJobs} />
 
       {/* 최근 업로드 마퀴 */}
       <MusicMarquee />

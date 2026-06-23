@@ -5,7 +5,9 @@ import Link from "next/link"
 import { toast } from "sonner"
 import { ArrowLeft, Loader2, Music, Music2, Clapperboard } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { MusicQueueCard, TestCard, ManualProgressCard, type QueueItem } from "@/components/music/MusicQueueCard"
+import { MusicQueueCard, TestCard, type QueueItem } from "@/components/music/MusicQueueCard"
+import { MusicJobCard } from "@/components/music/MusicJobCard"
+import type { MusicJob } from "@/lib/music-jobs"
 
 // 카테고리(음악 헌법 상황·장르 → 대표 5종) + 전체. 클라이언트 사이드 필터.
 const CATEGORIES = [
@@ -46,9 +48,11 @@ export default function MusicQueueGridPage() {
   const [testVideo, setTestVideo] = useState<{ url: string; engine?: string } | null>(null)
   const [showTestCard, setShowTestCard] = useState(false)
 
-  // 수동 영상 생성(#26) — 검토 큐 정식 적재
+  // 수동 영상 생성(#26) — 검토 큐 정식 적재. 진행 상태는 #36 진행 카드(DB)로 표시.
   const [manualLoading, setManualLoading] = useState(false)
-  const [manualStep, setManualStep] = useState("주제")
+
+  // #36 진행 중(+미확인 실패) 작업 — DB 기준, 페이지 이동에도 유지.
+  const [activeJobs, setActiveJobs] = useState<MusicJob[]>([])
 
   const load = useCallback(() => {
     fetch("/api/music/queue")
@@ -58,7 +62,21 @@ export default function MusicQueueGridPage() {
       .finally(() => setLoading(false))
   }, [])
 
+  const loadJobs = useCallback(() => {
+    fetch("/api/music/jobs/active")
+      .then((r) => r.json())
+      .then((d) => setActiveJobs(Array.isArray(d?.jobs) ? d.jobs : []))
+      .catch(() => {})
+  }, [])
+
   useEffect(() => { load() }, [load])
+
+  // 진행 중 작업 폴링(3초) — 진입 즉시 조회 + 주기 갱신.
+  useEffect(() => {
+    loadJobs()
+    const id = setInterval(loadJobs, 3000)
+    return () => clearInterval(id)
+  }, [loadJobs])
 
   const runTest = useCallback(async () => {
     setTestLoading(true)
@@ -83,7 +101,6 @@ export default function MusicQueueGridPage() {
 
   const runManual = useCallback(async () => {
     setManualLoading(true)
-    setManualStep("주제")
     try {
       const res = await fetch("/api/music/manual-render", {
         method: "POST",
@@ -93,20 +110,22 @@ export default function MusicQueueGridPage() {
       const data = await res.json()
       if (!res.ok || !data?.job_id) throw new Error(data?.detail || "수동 생성 시작 실패")
       const jobId = data.job_id as string
+      loadJobs() // #36 즉시 진행 카드 표시(DB row 는 시작 시 동기 생성됨)
       // 폴링 — 3초 간격, done/error 까지.
       await new Promise<void>((resolve) => {
         const tick = async () => {
           try {
             const sr = await fetch(`/api/music/manual-render/status/${jobId}`)
             const sd = await sr.json()
-            if (sd?.step) setManualStep(sd.step)
             if (sd?.status === "done") {
               toast.success("영상 생성 완료 — 검토 큐에 추가되었습니다.")
               load() // 큐 새로고침 → 새 pending 카드 등장(일반 카드)
+              loadJobs() // 완료된 작업은 진행 카드에서 사라짐
               resolve(); return
             }
             if (sd?.status === "error") {
               toast.error(sd?.error || "영상 생성 실패")
+              loadJobs() // 실패 카드로 전환
               resolve(); return
             }
           } catch { /* 일시 실패는 다음 틱에 재시도 */ }
@@ -119,7 +138,7 @@ export default function MusicQueueGridPage() {
     } finally {
       setManualLoading(false)
     }
-  }, [testMood, load])
+  }, [testMood, load, loadJobs])
 
   const filtered = useMemo(() => items.filter((it) => matchesCategory(it, filter)), [items, filter])
 
@@ -168,6 +187,18 @@ export default function MusicQueueGridPage() {
           <p className="text-sm text-muted-foreground">카드에서 바로 재생·썸네일·공개를 처리하세요.</p>
         </div>
       </header>
+
+      {/* #36 진행 중 작업 — 항상 상단 노출(페이지 이동·기기 전환에도 DB 기준 유지) */}
+      {activeJobs.length > 0 && (
+        <section className="flex flex-col gap-2">
+          <h2 className="text-sm font-semibold text-foreground">진행 중 작업 ({activeJobs.length})</h2>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {activeJobs.map((j) => (
+              <MusicJobCard key={j.job_id} job={j} onChanged={loadJobs} />
+            ))}
+          </div>
+        </section>
+      )}
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 md:flex-row">
         {/* 좌측 패널 — 모바일은 가로 스크롤, md+ 사이드바 */}
@@ -236,7 +267,6 @@ export default function MusicQueueGridPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
-              {manualLoading && <ManualProgressCard step={manualStep} />}
               {showTestCard && <TestCard loading={testLoading} video={testVideo} />}
               {filtered.map((it) => (
                 <MusicQueueCard key={it.mix_id} item={it} onChanged={load} />
