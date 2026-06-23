@@ -79,7 +79,16 @@ def _gen_vocal(
         except Exception as e:  # noqa: BLE001 - 1곡 실패가 전체를 막지 않게
             logger.warning("[produce] 곡 %d 보컬 생성 실패: %s", i, e)
             continue
-        for rec in res.get("tracks", []):
+        # suno 1회 호출 = 2클립(같은 가사/스타일 변주). 곡수 N = N곡이 되도록
+        # 첫 클립만 사용하고 둘째 클립은 폐기(반복감/루프 느낌 방지, #34-B).
+        # 호출 횟수·과금(1회=12크=2클립)은 그대로 — 사용만 1클립.
+        all_clips = res.get("tracks", [])
+        if len(all_clips) > 1:
+            logger.info(
+                "[produce] 곡 %d: suno 2클립 중 첫 클립만 사용, %d개 폐기",
+                i, len(all_clips) - 1,
+            )
+        for rec in all_clips[:1]:
             audio_id = rec.get("audio_id")
             if not audio_id:
                 continue
@@ -120,7 +129,14 @@ def _gen_instrumental(
         except Exception as e:  # noqa: BLE001 - 1곡 실패가 전체를 막지 않게
             logger.warning("[produce] 연주 %d 생성 실패: %s", i, e)
             continue
-        for rec in res.get("tracks", []):
+        # suno 1회 호출 = 2클립. 곡수 N = N곡이 되도록 첫 클립만 사용(#34-B).
+        all_clips = res.get("tracks", [])
+        if len(all_clips) > 1:
+            logger.info(
+                "[produce] 연주 %d: suno 2클립 중 첫 클립만 사용, %d개 폐기",
+                i, len(all_clips) - 1,
+            )
+        for rec in all_clips[:1]:
             if rec.get("audio_id"):
                 produced.append({**rec})
     return produced, {}
