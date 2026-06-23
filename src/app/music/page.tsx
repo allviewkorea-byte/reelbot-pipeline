@@ -166,7 +166,7 @@ export default function MusicDashboardPage() {
             </div>
             <span className="text-muted-foreground">개</span>
           </div>
-          {/* 곡수 입력창 1~50 (#34) — 영상 1개당 suno 생성 곡수(비용 직접 제어) */}
+          {/* 곡수 입력창 1~100 (#40) — 영상 1개당 suno 생성 곡수 = 영상 길이(비용·길이 직접 제어) */}
           <TrackCountInput key={trackCount} current={trackCount} busy={busy} onApply={(n) => patch({ trackCount: n })} />
           {/* 채널 설정(#37) — 슬로건·소셜·AI 명시 */}
           <Link
@@ -244,15 +244,16 @@ export default function MusicDashboardPage() {
   )
 }
 
-// #34 곡수 입력창(1~50) — 숫자 입력 + [적용] + 예상(크레딧/비용/길이/렌더) 즉시 표시.
+// #40 곡수 입력창(1~100) — 숫자 입력 + [적용] + 예상(크레딧/비용/길이/렌더) 즉시 표시.
+// 곡수↔길이 연동(#40): 영상 길이 = 곡 총 길이(약 곡당 4분). 정확한 예상시간은 #41 예정.
 function TrackCountInput({ current, busy, onApply }: { current: number; busy: boolean; onApply: (n: number) => void }) {
   // current 변경 시 부모가 key={current} 로 재마운트 → 입력값 재초기화(setState-in-effect 회피).
   const [val, setVal] = useState(String(current))
   const n = Number(val)
-  const valid = Number.isInteger(n) && n >= 1 && n <= 50
+  const valid = Number.isInteger(n) && n >= 1 && n <= 100
   const credits = valid ? n * 12 : 0
   const cost = (credits * 0.005).toFixed(2)
-  const songMin = valid ? (n * 3.5).toFixed(0) : "0"
+  const songMin = valid ? (n * 4).toFixed(0) : "0" // #40 곡당 ~4분(대략). 정확값은 #41.
   const renderMin = valid ? n : 0
 
   return (
@@ -262,7 +263,7 @@ function TrackCountInput({ current, busy, onApply }: { current: number; busy: bo
         <input
           type="number"
           min={1}
-          max={50}
+          max={100}
           value={val}
           onChange={(e) => setVal(e.target.value)}
           className="h-7 w-14 rounded-md border border-border bg-background px-1.5 text-center text-xs text-foreground"
@@ -278,7 +279,7 @@ function TrackCountInput({ current, busy, onApply }: { current: number; busy: bo
         </button>
       </div>
       {!valid ? (
-        <span className="text-[10px] text-red-400">1~50 사이 숫자를 입력하세요</span>
+        <span className="text-[10px] text-red-400">1~100 사이 숫자를 입력하세요</span>
       ) : (
         <span className="text-[10px] text-muted-foreground">
           예상: {credits} 크레딧 (~${cost}) · 영상 약 {songMin}분 · 렌더 약 {renderMin}분
