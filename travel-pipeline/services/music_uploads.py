@@ -24,7 +24,7 @@ _TABLE = "music_uploads"
 _KST = timezone(timedelta(hours=9))
 _SELECT = (
     "slug,mix_id,title_kr,genre,mood,mp4_url,gpt_prompt,thumbnail_r2_key,viz_spec,"
-    "status,youtube_video_id,youtube_url,created_at"
+    "localizations,status,youtube_video_id,youtube_url,created_at"
 )
 
 
@@ -237,6 +237,36 @@ def set_thumbnail(mix_id: str, thumbnail_r2_key: str) -> dict:
         return {"stored": True, "error": None}
     except Exception as e:  # noqa: BLE001
         return {"stored": False, "error": _http_err(e)}
+
+
+def set_localizations(mix_id: str, localizations: dict) -> dict:
+    """다국어 데이터(#32) jsonb 저장/수정(PATCH). {stored, error}.
+
+    localizations 구조: {meta:{lang:{title,description}}, lyrics:{lang:text}, hashtags:[...], source_lang}.
+    """
+    url, key = _supabase_cfg()
+    if not (url and key):
+        return {"stored": False, "error": "supabase 미설정"}
+    try:
+        with httpx.Client(timeout=30.0) as c:
+            r = c.patch(
+                f"{url}/rest/v1/{_TABLE}?mix_id=eq.{mix_id}",
+                headers=_headers(key, patch=True),
+                json={"localizations": localizations},
+            )
+            r.raise_for_status()
+        return {"stored": True, "error": None}
+    except Exception as e:  # noqa: BLE001
+        return {"stored": False, "error": _http_err(e)}
+
+
+def get_localizations(mix_id: str) -> dict | None:
+    """저장된 다국어 데이터 조회. 없으면 None."""
+    row = get_upload(mix_id)
+    if not row:
+        return None
+    loc = row.get("localizations")
+    return loc if isinstance(loc, dict) and loc else None
 
 
 def record_upload(slug: str, mix_id: str, youtube_video_id: str, youtube_url: str) -> dict:

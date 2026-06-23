@@ -22,6 +22,17 @@ logger = logging.getLogger(__name__)
 
 _HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
+# #32 금지어 — 시네마틱/네온 등 톤을 흐리는 표현은 프롬프트·결과에서 제거.
+_FORBIDDEN_WORDS = ["cinematic", "moody", "dramatic", "neon", "시네마틱", "네온", "드라마틱"]
+
+
+def _strip_forbidden(text: str) -> str:
+    """결과 문자열에서 금지어 제거(대소문자 무시)."""
+    out = text
+    for w in _FORBIDDEN_WORDS:
+        out = re.sub(re.escape(w), "", out, flags=re.IGNORECASE)
+    return re.sub(r"\s{2,}", " ", out).strip(" ,").strip()
+
 # #27 곡 분석 확장 — 허용 값(검증·#28 자동 플레이리스트 재사용).
 _SEASONS = {"spring", "summer", "autumn", "winter", "all_season"}
 _LOC_CATS = {"city", "cafe", "nature", "beach", "home", "road"}
@@ -52,7 +63,7 @@ _PALETTES: list[dict] = [
         "keys": ["이별", "헤어", "breakup", "발라드", "ballad", "슬픔", "sad", "그리움", "눈물"],
         "primary": "#4E6CFF", "secondary": "#9B6CFF", "text": "#E8EAF0",
         "subtitle": "rainy night sad ballad",
-        "keywords": ["rain-streaked window", "empty night street", "neon glow"],
+        "keywords": ["rain-streaked window", "empty night street", "soft city lights"],
         "emotion": "melancholic, tender", "lighting": "cool moonlight",
         "season": "winter", "location_en": "Rainy Street",
         "location_category": "city", "mood_category": "sad",
@@ -135,12 +146,13 @@ def _coerce(spec: dict, fallback: dict) -> dict:
     emo = str(spec.get("dominant_emotion", "")).strip()
     if emo:
         out["dominant_emotion"] = emo[:60]
-    light = str(spec.get("lighting", "")).strip()
+    light = _strip_forbidden(str(spec.get("lighting", "")).strip())
     if light:
         out["lighting"] = light[:60]
     kws = spec.get("scene_keywords")
     if isinstance(kws, list):
-        clean = [str(x).strip() for x in kws if str(x).strip()][:5]
+        clean = [_strip_forbidden(str(x).strip()) for x in kws if str(x).strip()]
+        clean = [c for c in clean if c][:5]
         if clean:
             out["scene_keywords"] = clean
     # #27 시즌·장소·분위기 — 허용 값만 채택, 아니면 fallback 유지.
@@ -176,7 +188,8 @@ def _gpt_spec(theme: dict, fallback: dict, *, model: str | None = None) -> dict:
         "'Blue Pool', 'New York', 'Cozy Cafe', 'Rainy Street'), "
         "location_category (one of: city, cafe, nature, beach, home, road), "
         "mood_category (one of: chill, energetic, sad, focus, happy). "
-        "Colors must match genre/mood. No markdown, no commentary."
+        "Colors must match genre/mood. Bright/clear daylight tone preferred. "
+        "Never use these words: cinematic, moody, dramatic, neon. No markdown, no commentary."
     )
     user = (
         f"genre: {theme.get('genre','')}\n"

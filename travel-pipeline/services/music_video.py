@@ -329,12 +329,16 @@ def build_thumbnail_prompt(theme: dict, viz_spec: dict | None = None) -> str:
 
     if viz_spec:
         # #31: 한국어 톤(맑고 청량하고 밝은 사실적 풍경) + 무드별 글로벌 도시 랜덤.
-        # gpt-image-1 은 한국어를 잘 이해함. 시네마틱/네온/드라마틱 표현 제외, 글자 0.
-        pool = _CITY_POOLS[_city_bucket(theme, viz_spec)]
+        # #32: 금지어(cinematic/moody/dramatic/neon) 미사용, 밝은 무드는 '맑은 한낮' 강제.
+        bucket = _city_bucket(theme, viz_spec)
+        pool = _CITY_POOLS[bucket]
         location_label = random.choice(pool["cities"])
+        bright = bucket in ("citypop", "cafe", "workout", "summer")
+        bright_force = "맑은 한낮의 환한 자연광, 화창한 날씨, " if bright else ""
         return (
             f"가로형 롱폼사이즈 플레이리스트 썸네일 배경 이미지. "
             f"{location_label}, {pool['scene']}, {pool['time']}. "
+            f"{bright_force}"
             f"맑은 날의 사실적인 풍경 사진, {pool['tone']}, {pool['light']}, "
             f"깊이감 있는 원근감, {pool['accent']}. "
             f"{_thumb_subject_kr()} "

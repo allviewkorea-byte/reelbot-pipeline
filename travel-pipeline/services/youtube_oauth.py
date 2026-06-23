@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube",
+    # #32 captions.insert(다국어 자막)에 필요. 추가 후 음악 채널 재인증 필요(force-ssl).
+    "https://www.googleapis.com/auth/youtube.force-ssl",
 ]
 _AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 _TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"

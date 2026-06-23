@@ -98,6 +98,69 @@ def upload_thumbnail(mix_id: str, body: ThumbnailBody):
     return {"ok": True, "thumbnail_r2_key": key, "thumbnail_url": r2_storage.music_thumbnail_url(slug, mix_id)}
 
 
+def _load_mix(slug: str, mix_id: str) -> dict:
+    """R2 믹스 JSON 복원 → {mix_id, mp3_url, tracks, total_sec, lyrics}."""
+    mix = {"mix_id": mix_id, "tracks": [], "mp3_url": r2_storage.music_mix_url(slug, mix_id, "mp3"),
+           "total_sec": 0.0, "lyrics": ""}
+    try:
+        tmp_json = Path(tempfile.gettempdir()) / f"{slug}_{mix_id}.json"
+        r2_storage.download_music_object(r2_storage.music_mix_key(slug, mix_id, "json"), str(tmp_json))
+        meta = json.loads(tmp_json.read_text(encoding="utf-8"))
+        mix["tracks"] = meta.get("tracks") or []
+        mix["total_sec"] = float(meta.get("total_duration") or 0.0)
+        mix["lyrics"] = "\n".join(
+            (t.get("lyrics") or "").strip() for t in mix["tracks"] if (t.get("lyrics") or "").strip()
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[music-dashboard] 믹스 JSON 로드 실패: %s", e)
+    return mix
+
+
+def _build_localizations(theme: dict, viz_spec: dict | None, mix: dict) -> dict:
+    """다국어 데이터 생성(번역 + 메타 + 해시태그). GPT 없으면 원본만(회귀 안전)."""
+    from services import music_translate
+    lyrics = mix.get("lyrics") or ""
+    src = music_translate.detect_source_lang(lyrics or theme.get("title_kr", "") or "ko-")
+    return {
+        "source_lang": src,
+        "meta": music_translate.generate_localizations(theme, viz_spec, lyrics),
+        "lyrics": music_translate.translate_lyrics(lyrics, src) if lyrics.strip() else {},
+        "hashtags": music_translate.generate_hashtags(theme, viz_spec),
+    }
+
+
+@router.post("/queue/{mix_id}/localize")
+def localize_generate(mix_id: str):
+    """다국어 데이터 생성(또는 캐시 반환) — 검수 UI [다국어 ▼] 진입 시 호출. {ok, localizations}."""
+    row = music_uploads.get_upload(mix_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="해당 mix_id 의 큐 항목이 없습니다.")
+    cached = row.get("localizations")
+    if isinstance(cached, dict) and cached.get("meta"):
+        return {"ok": True, "localizations": cached, "cached": True}
+    slug = row.get("slug") or ""
+    theme = music_theme.get_theme(slug) or {
+        "slug": slug, "title_kr": row.get("title_kr"), "genre": row.get("genre"), "mood": row.get("mood"),
+    }
+    mix = _load_mix(slug, mix_id)
+    loc = _build_localizations(theme, row.get("viz_spec"), mix)
+    music_uploads.set_localizations(mix_id, loc)
+    return {"ok": True, "localizations": loc, "cached": False}
+
+
+class LocalizationsBody(BaseModel):
+    localizations: dict
+
+
+@router.put("/queue/{mix_id}/localize")
+def localize_save(mix_id: str, body: LocalizationsBody):
+    """검수 UI 에서 수정한 다국어 데이터 저장. {ok}."""
+    res = music_uploads.set_localizations(mix_id, body.localizations)
+    if res.get("error"):
+        raise HTTPException(status_code=502, detail=res["error"])
+    return {"ok": True}
+
+
 @router.post("/queue/{mix_id}/publish")
 def publish(mix_id: str):
     """썸네일 게이트 → 유튜브 공개 업로드 → status=uploaded. 썸네일 없으면 400."""
@@ -176,8 +239,26 @@ def publish(mix_id: str):
         import shutil
         shutil.rmtree(tmpdir, ignore_errors=True)
 
+    # 5) #32 다국어 — 제목·설명 localizations + 자막(captions) 적용(best-effort, 실패해도 영상은 공개됨).
+    ml = {"localizations": {"ok": False}, "captions": {}}
+    try:
+        from services.youtube_upload import set_localizations, upload_captions
+        from services import music_subtitles
+        loc = music_uploads.get_localizations(mix_id) or _build_localizations(theme, row.get("viz_spec"), mix)
+        vid = result["video_id"]
+        meta = loc.get("meta") or {}
+        if meta:
+            ml["localizations"] = set_localizations(vid, meta, default_lang=loc.get("source_lang", "ko"))
+        lyrics_by_lang = loc.get("lyrics") or {}
+        if lyrics_by_lang and mix.get("tracks"):
+            total = mix.get("total_sec") or 0.0
+            srt = music_subtitles.build_srt_by_lang(mix["tracks"], total, lyrics_by_lang)
+            ml["captions"] = upload_captions(vid, srt)
+    except Exception as e:  # noqa: BLE001 - 다국어 실패는 영상 공개를 막지 않음
+        logger.warning("[music-dashboard] 다국어 적용 실패(영상은 공개됨): %s", e)
+
     # upload_music_video 내부 record_upload 가 status=uploaded 로 마킹.
-    return {"ok": True, "youtube_url": result["video_url"], "youtube_video_id": result["video_id"]}
+    return {"ok": True, "youtube_url": result["video_url"], "youtube_video_id": result["video_id"], "multilang": ml}
 
 
 # 가이드 페이지용 장르 팔레트(주제 헌법 §2 발췌, 읽기 전용).

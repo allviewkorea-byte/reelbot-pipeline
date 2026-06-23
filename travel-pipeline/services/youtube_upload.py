@@ -402,3 +402,75 @@ def publish_to_youtube(
         except Exception as e:  # noqa: BLE001
             logger.warning("[youtube-debug] 업로드 실패: %s\n%s", e, traceback.format_exc())
             raise
+
+
+# ── #32 다국어: 자막(captions) + 제목·설명(localizations) ────────────────
+def _music_youtube_client():
+    """음악 채널 YouTube 클라이언트(force-ssl 포함 스코프 필요)."""
+    from googleapiclient.discovery import build
+    from services.music_youtube_oauth import get_credentials as music_get_credentials
+    creds = music_get_credentials()
+    return build("youtube", "v3", credentials=creds, cache_discovery=False)
+
+
+def upload_captions(video_id: str, srt_by_lang: dict[str, str]) -> dict:
+    """언어별 SRT 를 자막 트랙으로 업로드(captions.insert). {uploaded:[lang...], failed:{lang:err}}.
+
+    force-ssl 스코프 필요(재인증). 실패는 언어별로 격리(한 언어 실패가 나머지 막지 않음).
+    """
+    import tempfile
+    from pathlib import Path
+    from googleapiclient.http import MediaFileUpload
+
+    uploaded: list[str] = []
+    failed: dict[str, str] = {}
+    if not srt_by_lang:
+        return {"uploaded": [], "failed": {}}
+    youtube = _music_youtube_client()
+    with tempfile.TemporaryDirectory(prefix="srt_") as tmp:
+        for lang, srt in srt_by_lang.items():
+            if not (srt or "").strip():
+                continue
+            try:
+                path = Path(tmp) / f"{lang}.srt"
+                path.write_text(srt, encoding="utf-8")
+                body = {"snippet": {"videoId": video_id, "language": lang, "name": lang, "isDraft": False}}
+                media = MediaFileUpload(str(path), mimetype="application/octet-stream", resumable=False)
+                youtube.captions().insert(part="snippet", body=body, media_body=media).execute()
+                uploaded.append(lang)
+            except Exception as e:  # noqa: BLE001 - 언어별 격리
+                failed[lang] = str(e)[:200]
+                logger.warning("[music-youtube] 자막 업로드 실패(%s): %s", lang, e)
+    logger.warning("[music-youtube] 자막 %d개 업로드(실패 %d)", len(uploaded), len(failed))
+    return {"uploaded": uploaded, "failed": failed}
+
+
+def set_localizations(video_id: str, localizations: dict[str, dict], default_lang: str = "ko") -> dict:
+    """제목·설명 다국어 적용(videos.update localizations). {ok, error}.
+
+    localizations: {lang: {title, description}}. 기존 snippet 보존 + defaultLanguage 설정.
+    """
+    if not localizations:
+        return {"ok": False, "error": "localizations 비어있음"}
+    try:
+        youtube = _music_youtube_client()
+        resp = youtube.videos().list(part="snippet", id=video_id).execute()
+        items = resp.get("items", [])
+        if not items:
+            return {"ok": False, "error": "영상을 찾을 수 없음"}
+        snippet = items[0]["snippet"]
+        snippet["defaultLanguage"] = default_lang
+        loc = {
+            lng: {"title": str(d.get("title", ""))[:100], "description": str(d.get("description", ""))}
+            for lng, d in localizations.items()
+            if isinstance(d, dict) and d.get("title")
+        }
+        youtube.videos().update(
+            part="snippet,localizations",
+            body={"id": video_id, "snippet": snippet, "localizations": loc},
+        ).execute()
+        logger.warning("[music-youtube] localizations %d개 언어 적용", len(loc))
+        return {"ok": True, "error": None}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[music-youtube] localizations 실패: %s", e)
+        return {"ok": False, "error": str(e)[:200]}
