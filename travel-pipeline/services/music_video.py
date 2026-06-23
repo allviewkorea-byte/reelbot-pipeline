@@ -41,7 +41,9 @@ _BG_NAME = "bg.png"
 
 # ── Remotion(#18) — 굵은 둥근 바 비주얼라이저. USE_REMOTION 토글, 실패 시 ffmpeg 폴백.
 _REMOTION_DIR = Path(__file__).resolve().parents[1] / "remotion"
-_REMOTION_TIMEOUT = int(os.getenv("REMOTION_TIMEOUT", "1200"))  # 초
+_REMOTION_TIMEOUT = int(os.getenv("REMOTION_TIMEOUT", "3600"))  # 초(#43 20분→60분, 분할 청크당 적용)
+_CHUNK_MAX_SEC = float(os.getenv("MUSIC_CHUNK_MAX_SEC", "900"))  # #43 청크 최대 길이(15분)
+_FPS = 30
 
 
 # ── ffmpeg 헬퍼(디커플링 복제) ───────────────────────────────────────────
@@ -435,8 +437,17 @@ def _render_remotion(
     viz_spec: dict | None = None,
     design_config: dict | None = None,
     show_playlist: bool = True,
+    frame_start: int | None = None,
+    frame_end: int | None = None,
+    muted: bool = False,
 ) -> str:
-    """Remotion(둥근 바 + 인트로 + 텍스트) 렌더 → mp4. 실패 시 예외(호출부가 ffmpeg 폴백)."""
+    """Remotion(둥근 바 + 인트로 + 텍스트) 렌더 → mp4. 실패 시 예외(호출부가 ffmpeg 폴백).
+
+    #43 분할: frame_start/frame_end 를 주면 renderMedia frameRange 로 그 구간만 렌더한다
+    (props.durationSec 는 전체 길이 그대로 → 인트로·곡제목·이퀄 절대 프레임 기준 유지).
+    muted=True 면 오디오 없이 렌더(분할 시 비디오만 → 나중에 풀 오디오 mux, 이음새 0).
+    인자 미지정 시 기존 단일 렌더와 100% 동일(회귀 0).
+    """
     props = {
         "tracks": [
             {
@@ -458,6 +469,10 @@ def _render_remotion(
         "--out", os.path.abspath(str(out_path)),
         "--props", json.dumps(props, ensure_ascii=False),
     ]
+    if frame_start is not None and frame_end is not None:
+        cmd += ["--frame-start", str(int(frame_start)), "--frame-end", str(int(frame_end))]
+    if muted:
+        cmd += ["--muted"]
     result = subprocess.run(
         cmd, cwd=str(_REMOTION_DIR), capture_output=True, text=True,
         timeout=_REMOTION_TIMEOUT,
@@ -465,6 +480,81 @@ def _render_remotion(
     if result.returncode != 0:
         raise RuntimeError(f"Remotion 렌더 오류:\n{result.stderr[-2500:]}")
     return str(out_path)
+
+
+# ── #43 분할 렌더 (긴 플레이리스트 타임아웃 회피) ───────────────────────────
+def _plan_chunks(
+    total_sec: float, *, fps: int = _FPS, chunk_max_sec: float = _CHUNK_MAX_SEC,
+    boundaries: list[float] | None = None,
+) -> list[dict]:
+    """영상 총 길이를 청크로 분할하는 계획. 총 길이 ≤ chunk_max_sec 이면 1청크(분할 안 함→회귀 0).
+
+    boundaries(곡 시작초, 오름차순) 가 있으면 목표 컷 지점을 ±윈도우 내 가장 가까운 곡 경계로
+    스냅한다(이음새를 크로스페이드 전환 위치로 → 더 자연스러움). 없으면 정확히 chunk_max 마다 컷.
+    반환: [{index, start_frame, end_frame, is_first}, ...] (프레임 연속, 겹침·빈틈 0).
+    """
+    total_frames = max(1, round(total_sec * fps))
+    if total_sec <= chunk_max_sec:
+        return [{"index": 0, "start_frame": 0, "end_frame": total_frames - 1, "is_first": True}]
+    chunk_frames = max(1, round(chunk_max_sec * fps))
+    window = max(1, round(min(120.0, chunk_max_sec * 0.25) * fps))  # ±2분(또는 청크 25%) 내 곡경계 스냅
+    bframes = sorted({round(float(b) * fps) for b in (boundaries or []) if 0 < round(float(b) * fps) < total_frames})
+    cuts: list[int] = []
+    start = 0
+    while total_frames - start > chunk_frames:
+        target = start + chunk_frames
+        cut = target
+        cand = [bf for bf in bframes if start < bf < total_frames and abs(bf - target) <= window]
+        if cand:
+            cut = min(cand, key=lambda bf: abs(bf - target))
+        cut = max(start + 1, min(cut, total_frames - 1))
+        cuts.append(cut)
+        start = cut
+    chunks: list[dict] = []
+    s = 0
+    for i, cut in enumerate([*cuts, total_frames]):
+        chunks.append({"index": i, "start_frame": s, "end_frame": cut - 1, "is_first": s == 0})
+        s = cut
+    return chunks
+
+
+def _render_chunks(
+    bg: str, audio: str, out: str, chunks: list[dict], *, work: Path,
+    tracks: list[dict], mood: str, duration: float, viz_spec: dict | None,
+    design_config: dict | None, show_playlist: bool,
+) -> str:
+    """청크별 muted 비디오 렌더(frameRange) → concat(-c copy) → 풀 믹스 오디오 mux.
+
+    오디오는 단일 연속 믹스를 한 번에 mux → 청크 경계 오디오 이음새 0. 비디오는 동일 코덱·해상도라
+    -c copy 무손실·고속 concat. 임시 청크 파일은 work 디렉터리에 만들어 make_video 의 finally 가 정리.
+    """
+    chunk_files: list[Path] = []
+    for ch in chunks:
+        cf = work / f"chunk_{ch['index']:03d}.mp4"
+        logger.info(
+            "[video] 청크 %d/%d 렌더(frames %d~%d)",
+            ch["index"] + 1, len(chunks), ch["start_frame"], ch["end_frame"],
+        )
+        _render_remotion(
+            str(bg), str(audio), str(cf),
+            tracks=tracks, mood=mood, duration=duration, viz_spec=viz_spec,
+            design_config=design_config, show_playlist=show_playlist,
+            frame_start=ch["start_frame"], frame_end=ch["end_frame"], muted=True,
+        )
+        chunk_files.append(cf)
+    # 1) 비디오 concat(-c copy). 절대경로 + -safe 0.
+    list_txt = work / "concat.txt"
+    list_txt.write_text("".join(f"file '{cf}'\n" for cf in chunk_files), encoding="utf-8")
+    video_only = work / "video_concat.mp4"
+    _run(["-f", "concat", "-safe", "0", "-i", str(list_txt), "-c", "copy", str(video_only)])
+    # 2) 풀 믹스 오디오 mux(비디오 copy, 오디오 aac). 단일 연속 오디오라 이음새 없음.
+    _run([
+        "-i", str(video_only), "-i", os.path.abspath(str(audio)),
+        "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+        "-shortest", os.path.abspath(str(out)),
+    ])
+    logger.info("[video] 분할 %d청크 concat+mux 완료 → %s", len(chunks), out)
+    return str(out)
 
 
 def _extract_first_frame(mp4_path: str, out_png: str) -> str:
@@ -676,11 +766,25 @@ def make_video(
             except Exception as e:  # noqa: BLE001 - 조회 실패해도 렌더는 진행(현재값)
                 logger.warning("[video] design_config 조회 실패(현재값 진행): %s", e)
             try:
-                _render_remotion(
-                    str(bg), str(audio), str(out),
-                    tracks=tracks, mood=mood_hint, duration=duration, viz_spec=viz_spec,
-                    design_config=design_config, show_playlist=show_playlist,
+                # #43 분할 계획 — ≤15분(약 3~4곡)이면 1청크(기존 단일 렌더, 회귀 0),
+                # 그 이상이면 곡 경계 스냅 청크로 나눠 렌더 → concat → 풀 오디오 mux.
+                boundaries = sorted(
+                    float(t.get("start_sec") or 0.0) for t in tracks if t.get("start_sec") is not None
                 )
+                chunks = _plan_chunks(duration, boundaries=boundaries or None)
+                if len(chunks) <= 1:
+                    _render_remotion(
+                        str(bg), str(audio), str(out),
+                        tracks=tracks, mood=mood_hint, duration=duration, viz_spec=viz_spec,
+                        design_config=design_config, show_playlist=show_playlist,
+                    )
+                else:
+                    logger.info("[video] 분할 렌더 %d청크 (총 %.1f분) slug=%s", len(chunks), duration / 60, slug)
+                    _render_chunks(
+                        str(bg), str(audio), str(out), chunks, work=work,
+                        tracks=tracks, mood=mood_hint, duration=duration, viz_spec=viz_spec,
+                        design_config=design_config, show_playlist=show_playlist,
+                    )
                 rendered = True
                 logger.info("[video] Remotion 렌더 완료 slug=%s", slug)
             except Exception as e:  # noqa: BLE001 - Remotion 불안정 대비 ffmpeg 폴백
