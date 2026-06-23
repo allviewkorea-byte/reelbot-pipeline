@@ -20,6 +20,8 @@ sunoapi.org 로 생성·R2 보관한 곡의 메타데이터를 Supabase `music_t
     duration numeric,
     r2_key text,
     status text,
+    used boolean not null default false,   -- #46: 영상에 사용됨(true=소진) / false=재활용 가능
+    genre text not null default '',         -- #46: 장르 id(예: citypop). 빈값=레거시(재활용 제외)
     created_at timestamptz default now()
   );
   grant all on table music_tracks to service_role, anon, authenticated;
@@ -118,3 +120,61 @@ def list_tracks(theme_slug: str, *, status: str | None = "SUCCESS") -> list[dict
     except Exception as e:  # noqa: BLE001
         logger.warning("[music-db] 곡 조회 실패(theme=%s): %s", theme_slug, _http_err(e))
         return []
+
+
+# ── Suno 재활용(#46) — 미사용 트랙 검색 + 사용 마킹 ────────────────────
+def find_unused_track(genre: str, *, exclude_ids: set[str] | None = None) -> dict | None:
+    """같은 genre 의 미사용(used=false, SUCCESS) 트랙 1개를 최신순으로 반환(없으면 None).
+
+    exclude_ids: 이번 제작 런에서 이미 쓰거나 막 생성한 audio_id 들 — 같은 런 내
+    중복(같은 곡 2번 사용)을 막기 위해 제외한다. genre 빈값(레거시)은 호출부에서 차단.
+    DB 미설정/오류 시 None(→ 호출부가 Suno 정상 호출 폴백).
+    """
+    url, key = _supabase_cfg()
+    if not (url and key) or not genre:
+        return None
+    try:
+        headers = {"apikey": key, "Authorization": f"Bearer {key}"}
+        params = {
+            "genre": f"eq.{genre}",
+            "used": "eq.false",
+            "status": "eq.SUCCESS",
+            "select": "id,theme_slug,task_id,audio_id,title,tags,duration,r2_key,status,used,genre,created_at",
+            "order": "created_at.desc",
+            "limit": "1",
+        }
+        ids = [i for i in (exclude_ids or set()) if i]
+        if ids:
+            params["id"] = f"not.in.({','.join(ids)})"
+        with httpx.Client(timeout=30.0) as c:
+            r = c.get(f"{url}/rest/v1/{_TABLE}", headers=headers, params=params)
+            r.raise_for_status()
+            rows = r.json()
+        return rows[0] if isinstance(rows, list) and rows else None
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[music-db] 미사용 트랙 검색 실패(genre=%s): %s", genre, _http_err(e))
+        return None
+
+
+def mark_track_used(audio_id: str) -> bool:
+    """트랙을 used=true 로 마킹. 성공 여부 반환(실패해도 호출부는 진행 — 로그만)."""
+    url, key = _supabase_cfg()
+    if not (url and key) or not audio_id:
+        return False
+    try:
+        headers = {
+            "apikey": key,
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        }
+        with httpx.Client(timeout=30.0) as c:
+            r = c.patch(
+                f"{url}/rest/v1/{_TABLE}?id=eq.{audio_id}",
+                headers=headers,
+                json={"used": True},
+            )
+            r.raise_for_status()
+        return True
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[music-db] used 마킹 실패(id=%s): %s", audio_id, _http_err(e))
+        return False
