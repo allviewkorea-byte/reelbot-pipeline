@@ -50,11 +50,14 @@ type TextStyleCfg = {
   font_weight?: number;
   color?: string;
   opacity?: number;
+  italic?: boolean; // #36 title/subtitle 만 사용
   border?: { enabled?: boolean; width?: number; color?: string };
 };
 export type DesignConfig = {
   play_list?: TextStyleCfg;
   where_label?: TextStyleCfg;
+  title?: TextStyleCfg; // #36 곡 제목(좌하단)
+  subtitle?: TextStyleCfg; // #36 부제(좌하단)
 } | null;
 
 // 테두리(외곽선) — border.enabled 일 때만 -webkit-text-stroke + paint-order(깔끔한 외곽).
@@ -133,6 +136,24 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
   const wlColor = wlCfg.color ?? "#FFFFFF";
   const wlOpacity = wlCfg.opacity ?? 0.9;
   const wlStroke = strokeStyle(wlCfg.border);
+
+  // ── #36 제목·부제(좌하단 블록): title/subtitle 키 없으면 현재값으로 폴백(기울임 포함 회귀 0) ──
+  const tCfg = designConfig?.title;
+  const sCfg = designConfig?.subtitle;
+  const tFontFamily = tCfg ? (PRESET_FONTS[tCfg.font_family ?? ""] ?? SCRIPT) : SCRIPT;
+  const tFontWeight = tCfg?.font_weight; // 미지정이면 undefined → 현재(미설정=400)
+  const tColor = tCfg?.color ?? textColor;
+  const tFontSize = tCfg?.font_size ?? width * 0.044;
+  const tFontStyle = tCfg ? (tCfg.italic ? "italic" : "normal") : undefined; // 현재 미설정
+  const tOpacityMul = tCfg?.opacity ?? 1;
+  const tStroke = strokeStyle(tCfg?.border);
+  const sFontFamily = sCfg ? (PRESET_FONTS[sCfg.font_family ?? ""] ?? SERIF) : SERIF;
+  const sFontWeight = sCfg?.font_weight;
+  const sColor = sCfg?.color ?? textColor;
+  const sFontSize = sCfg?.font_size ?? width * 0.02;
+  const sFontStyle = sCfg ? (sCfg.italic ? "italic" : "normal") : "italic"; // 현재 항상 italic
+  const sOpacity = sCfg?.opacity ?? 1;
+  const sStroke = strokeStyle(sCfg?.border);
 
   // ── 이퀄 막대 진폭(최근 프레임 평균으로 감쇠) ──────────────────────
   // 오디오 디코드가 안 되는 경우에도 막대가 보이도록 idle 사인으로 폴백(가시성 보장).
@@ -300,13 +321,14 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
         </div>
       )}
 
-      {/* 3) 좌하단 블록(타이핑 후 본 영상): 부제(위) + 곡 제목(아래) — 분리 */}
+      {/* 3) 좌하단 블록(타이핑 후 본 영상): 부제(위) + 곡 제목(아래). #36 디자인 설정 적용(미설정 시 현재값). */}
       {blSub && (
         <div
           style={{
             position: "absolute", left: blLeft, top: blSubTop,
-            fontFamily: SERIF, fontStyle: "italic", color: textColor,
-            fontSize: width * 0.02, textShadow: shadow, maxWidth: width * 0.6,
+            fontFamily: sFontFamily, fontStyle: sFontStyle, fontWeight: sFontWeight,
+            color: sColor, opacity: sOpacity,
+            fontSize: sFontSize, textShadow: shadow, maxWidth: width * 0.6, ...sStroke,
           }}
         >
           {blSub}
@@ -315,9 +337,9 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
       {blTitle && (
         <div
           style={{
-            position: "absolute", left: blLeft, top: blTitleTop, opacity: blTitleOpacity,
-            fontFamily: SCRIPT, color: textColor,
-            fontSize: width * 0.044, textShadow: shadow, maxWidth: width * 0.7,
+            position: "absolute", left: blLeft, top: blTitleTop, opacity: blTitleOpacity * tOpacityMul,
+            fontFamily: tFontFamily, fontStyle: tFontStyle, fontWeight: tFontWeight, color: tColor,
+            fontSize: tFontSize, textShadow: shadow, maxWidth: width * 0.7, ...tStroke,
           }}
         >
           {blTitle}
