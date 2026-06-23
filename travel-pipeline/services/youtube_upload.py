@@ -284,12 +284,16 @@ def upload_music_video(
     *,
     privacy: str = "private",
     thumbnail_path: str | None = None,
+    title: str | None = None,
+    description: str | None = None,
+    tags: list[str] | None = None,
 ) -> dict:
     """음악 영상(mp4)을 음악 채널(Revezen)에 업로드. Returns {video_id, video_url}.
 
     백곰 upload_video 와 분리: 음악 OAuth(music_youtube_oauth.get_credentials),
     카테고리 10(음악). privacy 기본 'private'(검토 큐), 대시보드 공개 시 'public'.
     thumbnail_path 가 있으면 썸네일도 첨부. mp4_path 는 R2 URL/로컬 경로 모두 가능.
+    title/description/tags 를 주면(#37 풍부화 메타) 그것을 쓰고, 없으면 build_music_metadata.
     업로드 성공 시 music_uploads 에 기록(실패해도 업로드는 성공).
     """
     from googleapiclient.discovery import build
@@ -298,7 +302,10 @@ def upload_music_video(
     from services.music_uploads import record_upload
     from services.music_youtube_oauth import get_credentials as music_get_credentials
 
-    title, description, tags = build_music_metadata(theme, mix)
+    d_title, d_desc, d_tags = build_music_metadata(theme, mix)
+    title = title or d_title
+    description = description or d_desc
+    tags = tags or d_tags
     privacy = (privacy or "private").strip().lower()
 
     with tempfile.TemporaryDirectory(prefix="ytmusic_") as tmp:
