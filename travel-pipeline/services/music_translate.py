@@ -86,10 +86,24 @@ def _base_meta(theme: dict, viz_spec: dict | None, lyrics: str) -> tuple[str, st
     return title[:100], "\n".join(lines).strip()
 
 
-def generate_localizations(theme: dict, viz_spec: dict | None, lyrics: str = "") -> dict[str, dict]:
-    """제목·설명 10개 언어 → {lang: {title, description}}. GPT 없으면 원본만."""
+def generate_localizations(
+    theme: dict,
+    viz_spec: dict | None,
+    lyrics: str = "",
+    *,
+    base_title: str | None = None,
+    base_description: str | None = None,
+) -> dict[str, dict]:
+    """제목·설명 10개 언어 → {lang: {title, description}}. GPT 없으면 원본만.
+
+    base_title/base_description 을 주면(#37 music_meta 의 풍부한 제목·본문) 그것을 원본으로
+    번역한다. 미지정 시 기존 _base_meta(간단 메타)로 폴백(회귀 안전).
+    """
     src = detect_source_lang(lyrics or theme.get("title_kr", "") or "ko-")
-    base_title, base_desc = _base_meta(theme, viz_spec, lyrics)
+    if base_title is not None and base_description is not None:
+        base_title, base_desc = base_title, base_description
+    else:
+        base_title, base_desc = _base_meta(theme, viz_spec, lyrics)
     out: dict[str, dict] = {src: {"title": base_title, "description": base_desc}}
     if not _is_available():
         return out

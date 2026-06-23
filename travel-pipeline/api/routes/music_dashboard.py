@@ -117,15 +117,35 @@ def _load_mix(slug: str, mix_id: str) -> dict:
 
 
 def _build_localizations(theme: dict, viz_spec: dict | None, mix: dict) -> dict:
-    """다국어 데이터 생성(번역 + 메타 + 해시태그). GPT 없으면 원본만(회귀 안전)."""
-    from services import music_translate
+    """다국어 데이터 생성(#37 풍부화 제목·본문 + 번역 + 해시태그). GPT 없으면 원본만(회귀 안전).
+
+    제목: 𝐏𝐥𝐚𝐲𝐥𝐢𝐬𝐭 시그니처 + 감정 카피. 본문: 8섹션(채널 설정 반영, 빈 값 생략).
+    해시태그(한국어+영어 30~50개)는 모든 언어 본문 끝에 공통으로 붙인다.
+    """
+    from services import music_channel, music_meta, music_translate
     lyrics = mix.get("lyrics") or ""
+    tracks = mix.get("tracks") or []
+    config = music_channel.get_channel_config()
     src = music_translate.detect_source_lang(lyrics or theme.get("title_kr", "") or "ko-")
+    base_title = music_meta.build_title(theme, viz_spec)
+    base_body = music_meta.build_description(theme, viz_spec, tracks, config)  # [1]~[7], 해시태그 제외
+    hashtags = music_meta.build_hashtags(theme, viz_spec)
+    hashtag_line = " ".join(hashtags)
+    meta_raw = music_translate.generate_localizations(
+        theme, viz_spec, lyrics, base_title=base_title, base_description=base_body,
+    )
+    meta = {
+        lng: {
+            "title": d.get("title", ""),
+            "description": (str(d.get("description", "")).rstrip() + "\n\n" + hashtag_line).strip(),
+        }
+        for lng, d in meta_raw.items()
+    }
     return {
         "source_lang": src,
-        "meta": music_translate.generate_localizations(theme, viz_spec, lyrics),
+        "meta": meta,
         "lyrics": music_translate.translate_lyrics(lyrics, src) if lyrics.strip() else {},
-        "hashtags": music_translate.generate_hashtags(theme, viz_spec),
+        "hashtags": hashtags,
     }
 
 
@@ -237,6 +257,12 @@ def publish(mix_id: str):
     from services.music_video import make_video
     from services.youtube_upload import upload_music_video
 
+    # 풍부화 메타(#37) — 캐시된 다국어(검수본) 우선, 없으면 즉석 생성. 원본 언어 제목·본문을
+    # 기본 스니펫으로 쓰고(𝐏𝐥𝐚𝐲𝐥𝐢𝐬𝐭 시그니처·8섹션·해시태그), 나머지 언어는 localizations 로.
+    loc = music_uploads.get_localizations(mix_id) or _build_localizations(theme, row.get("viz_spec"), mix)
+    src_lang = loc.get("source_lang", "ko")
+    base_meta = (loc.get("meta") or {}).get(src_lang) or (loc.get("meta") or {}).get("ko") or {}
+
     tmpdir = Path(tempfile.mkdtemp(prefix="pub_"))
     try:
         # 1) 썸네일 다운로드(게이트로 존재 보장 — 실패 시 진행 불가).
@@ -262,9 +288,11 @@ def publish(mix_id: str):
             except Exception as e:  # noqa: BLE001 - 실패 시 업로드 이미지로 폴백
                 logger.warning("[music-dashboard] 첫프레임 썸네일 다운로드 실패(업로드본 사용): %s", e)
 
-        # 4) 재생성 mp4 + 썸네일 set 으로 공개 업로드.
+        # 4) 재생성 mp4 + 썸네일 set + 풍부화 제목·본문(#37)으로 공개 업로드.
         result = upload_music_video(
             new_mp4_url, theme, mix, privacy="public", thumbnail_path=yt_thumb,
+            title=base_meta.get("title") or None,
+            description=base_meta.get("description") or None,
         )
     except HTTPException:
         raise
@@ -279,11 +307,10 @@ def publish(mix_id: str):
     try:
         from services.youtube_upload import set_localizations, upload_captions
         from services import music_subtitles
-        loc = music_uploads.get_localizations(mix_id) or _build_localizations(theme, row.get("viz_spec"), mix)
         vid = result["video_id"]
         meta = loc.get("meta") or {}
         if meta:
-            ml["localizations"] = set_localizations(vid, meta, default_lang=loc.get("source_lang", "ko"))
+            ml["localizations"] = set_localizations(vid, meta, default_lang=src_lang)
         lyrics_by_lang = loc.get("lyrics") or {}
         if lyrics_by_lang and mix.get("tracks"):
             total = mix.get("total_sec") or 0.0

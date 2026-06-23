@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
-import { Users, Eye, BarChart3, Video, ClipboardList, Play, Square, Loader2 } from "lucide-react"
+import { Users, Eye, BarChart3, Video, ClipboardList, Play, Square, Loader2, Settings } from "lucide-react"
 import { PLATFORM_BADGE, PLATFORM_LABELS, TRACK_BADGE, TRACK_LABELS } from "@/lib/channels"
 import { MUSIC_CHANNEL_ID, MUSIC_CHANNEL_NAME, fmtCount, type MusicMetrics } from "@/lib/music"
 import { MusicPipeline } from "@/components/music/MusicPipeline"
@@ -168,6 +168,15 @@ export default function MusicDashboardPage() {
           </div>
           {/* 곡수 입력창 1~50 (#34) — 영상 1개당 suno 생성 곡수(비용 직접 제어) */}
           <TrackCountInput key={trackCount} current={trackCount} busy={busy} onApply={(n) => patch({ trackCount: n })} />
+          {/* 채널 설정(#37) — 슬로건·소셜·AI 명시 */}
+          <Link
+            href="/music/settings"
+            title="채널 설정(슬로건·소셜·AI 명시) — 공개 업로드 본문에 반영"
+            className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+          >
+            <Settings className="h-4 w-4" />
+            채널 설정
+          </Link>
           {/* 검토 대기 (백곰 캐릭터 시트 자리 — 보라 강조) */}
           <Link
             href="/music/queue"

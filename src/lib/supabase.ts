@@ -11,6 +11,7 @@ import {
 import { DEFAULT_DAILY_CAP, clampDailyCap, type ContentPlan } from "./content-plan"
 import type { TrendRankingRow, ChannelVideosRow } from "./trend-concepts"
 import type { ChannelMode } from "./channel-status"
+import { DEFAULT_MUSIC_CONFIG, normalizeMusicConfig, type MusicChannelConfig } from "./music"
 
 export const CHARACTER_BUCKET = "character-seeds"
 export const CONTENT_PLANS_TABLE = "content_plans"
@@ -239,6 +240,45 @@ export async function setChannelStatus(
     })
     const extra = error.details ? ` | ${error.details}` : ""
     throw new Error(`채널 상태 저장 실패: ${error.message}${extra}`)
+  }
+}
+
+// ── 음악 채널 설정 (channel_status.channel_config jsonb, #37) ─────────
+// 슬로건·소셜·AI 명시 등 운영 정보. 컬럼 미존재/에러/미설정 → 기본값(빈 칸 + 기본 AI 명시).
+export async function getMusicChannelConfig(channelId: string): Promise<MusicChannelConfig> {
+  try {
+    const supabase = getSupabaseAdmin()
+    const { data, error } = await supabase
+      .from(CHANNEL_STATUS_TABLE)
+      .select("channel_config")
+      .eq("channel_id", channelId)
+      .maybeSingle()
+    if (error) return { ...DEFAULT_MUSIC_CONFIG }
+    return normalizeMusicConfig(data?.channel_config)
+  } catch {
+    return { ...DEFAULT_MUSIC_CONFIG }
+  }
+}
+
+export async function setMusicChannelConfig(
+  channelId: string,
+  config: MusicChannelConfig,
+): Promise<void> {
+  const supabase = getSupabaseAdmin()
+  const row = {
+    channel_id: channelId,
+    channel_config: normalizeMusicConfig(config),
+    updated_at: new Date().toISOString(),
+  }
+  const { error } = await supabase
+    .from(CHANNEL_STATUS_TABLE)
+    .upsert(row, { onConflict: "channel_id" })
+  if (error) {
+    console.error("[music-config] upsert 실패:", {
+      message: error.message, details: error.details, hint: error.hint, code: error.code,
+    })
+    const extra = error.details ? ` | ${error.details}` : ""
+    throw new Error(`채널 설정 저장 실패: ${error.message}${extra}`)
   }
 }
 
