@@ -17,7 +17,7 @@ import logging
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
 from adapters import r2_storage
@@ -127,6 +127,41 @@ def _build_localizations(theme: dict, viz_spec: dict | None, mix: dict) -> dict:
         "lyrics": music_translate.translate_lyrics(lyrics, src) if lyrics.strip() else {},
         "hashtags": music_translate.generate_hashtags(theme, viz_spec),
     }
+
+
+@router.delete("/queue/{mix_id}/thumbnail")
+def remove_thumbnail(mix_id: str):
+    """업로드한 이미지 제거(#33 C) — thumbnail_r2_key 해제. 다시 업로드 후 [재렌더] 가능."""
+    res = music_uploads.clear_thumbnail(mix_id)
+    if res.get("error"):
+        raise HTTPException(status_code=502, detail=res["error"])
+    return {"ok": True}
+
+
+@router.post("/queue/{mix_id}/rerender")
+def rerender_start(mix_id: str, background: BackgroundTasks):
+    """수동 재렌더 시작(#33 A) — 올린 이미지로 풀 렌더 → mp4 갱신(비동기). 동시 1개/영상."""
+    row = music_uploads.get_upload(mix_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="해당 mix_id 의 큐 항목이 없습니다.")
+    if not row.get("thumbnail_r2_key"):
+        raise HTTPException(status_code=400, detail="이미지를 먼저 업로드하세요.")
+    from services import music_rerender
+    started = music_rerender.start(mix_id)
+    if not started.get("ok"):
+        raise HTTPException(status_code=409, detail=started.get("error") or "이미 진행 중")
+    background.add_task(music_rerender.run, started["job_id"])
+    return {"ok": True, "job_id": started["job_id"]}
+
+
+@router.get("/queue/rerender/status/{job_id}")
+def rerender_status(job_id: str):
+    """재렌더 진행 상태 폴링 — {status, step, video_url, error}. 없으면 404."""
+    from services import music_rerender
+    st = music_rerender.get_status(job_id)
+    if st is None:
+        raise HTTPException(status_code=404, detail="해당 job 을 찾을 수 없습니다(재시작 시 소실).")
+    return st
 
 
 @router.post("/queue/{mix_id}/localize")

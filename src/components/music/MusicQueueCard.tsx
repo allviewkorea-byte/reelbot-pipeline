@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react"
 import { toast } from "sonner"
-import { Loader2, Music, Copy, Check, Upload, Globe, Trash2, MonitorPlay, Languages, ChevronDown, ChevronUp } from "lucide-react"
+import { Loader2, Music, Copy, Check, Upload, Globe, Trash2, MonitorPlay, Languages, ChevronDown, ChevronUp, RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export interface VizSpec {
@@ -94,7 +94,9 @@ export function ManualProgressCard({ step }: { step: string }) {
 export function MusicQueueCard({ item, onChanged }: { item: QueueItem; onChanged: (keep?: string) => void }) {
   const [copied, setCopied] = useState(false)
   const [thumbUrl, setThumbUrl] = useState<string | null>(item.thumbnail_url ?? null)
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [needsRerender, setNeedsRerender] = useState(false)
+  const [rerendering, setRerendering] = useState(false)
+  const [rerenderStep, setRerenderStep] = useState("준비")
   const [uploading, setUploading] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [published, setPublished] = useState<string | null>(null)
@@ -116,8 +118,6 @@ export function MusicQueueCard({ item, onChanged }: { item: QueueItem; onChanged
     async (file: File | undefined | null) => {
       if (!file) return
       if (!file.type.startsWith("image/")) { toast.error("이미지 파일만 업로드할 수 있습니다."); return }
-      // #32 A-5: 즉시 미리보기 — 영상 위에 선택한 이미지를 오버레이로 바로 표시(업로드 전).
-      setPreviewUrl(URL.createObjectURL(file))
       setUploading(true)
       try {
         const dataUrl = await fileToDataUrl(file)
@@ -129,7 +129,9 @@ export function MusicQueueCard({ item, onChanged }: { item: QueueItem; onChanged
         const data = await res.json()
         if (!res.ok) throw new Error(data?.detail || "업로드 실패")
         setThumbUrl(`${data.thumbnail_url}?v=${Date.now()}`)
-        toast.success("썸네일 업로드 완료")
+        // #33 A: 오버레이 미리보기 제거 → '재렌더 대기'. [재렌더] 눌러야 실제 영상에 반영.
+        setNeedsRerender(true)
+        toast.success("이미지 업로드됨 — [재렌더]를 눌러 영상에 반영하세요.")
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "썸네일 업로드 실패")
       } finally {
@@ -169,6 +171,52 @@ export function MusicQueueCard({ item, onChanged }: { item: QueueItem; onChanged
     }
   }
 
+  const rerender = async () => {
+    setRerendering(true)
+    setRerenderStep("준비")
+    try {
+      const res = await fetch(`/api/music/queue/${encodeURIComponent(item.mix_id)}/rerender`, { method: "POST" })
+      const data = await res.json()
+      if (!res.ok || !data?.job_id) throw new Error(data?.detail || "재렌더 시작 실패")
+      const jobId = data.job_id as string
+      await new Promise<void>((resolve) => {
+        const tick = async () => {
+          try {
+            const sr = await fetch(`/api/music/queue/rerender/status/${jobId}`)
+            const sd = await sr.json()
+            if (sd?.step) setRerenderStep(sd.step)
+            if (sd?.status === "done") {
+              toast.success("재렌더 완료 — 영상이 갱신되었습니다.")
+              setNeedsRerender(false)
+              onChanged(item.mix_id) // 큐 새로고침 → 새 mp4_url 반영
+              resolve(); return
+            }
+            if (sd?.status === "error") { toast.error(sd?.error || "재렌더 실패"); resolve(); return }
+          } catch { /* 다음 틱 재시도 */ }
+          setTimeout(tick, 4000)
+        }
+        tick()
+      })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "재렌더 실패")
+    } finally {
+      setRerendering(false)
+    }
+  }
+
+  const removeImage = async () => {
+    try {
+      const res = await fetch(`/api/music/queue/${encodeURIComponent(item.mix_id)}/thumbnail`, { method: "DELETE" })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.detail || "이미지 제거 실패")
+      setThumbUrl(null)
+      setNeedsRerender(false)
+      toast.success("이미지 제거됨 — 다시 업로드할 수 있습니다.")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "이미지 제거 실패")
+    }
+  }
+
   const hasThumb = Boolean(thumbUrl)
 
   return (
@@ -180,13 +228,16 @@ export function MusicQueueCard({ item, onChanged }: { item: QueueItem; onChanged
         ) : (
           <div className="flex h-full items-center justify-center text-muted-foreground"><Music className="h-7 w-7" /></div>
         )}
-        {/* #32 A-5: 업로드한 이미지 즉시 미리보기(영상 위 반투명 오버레이) — 실제 합성은 게시 시 */}
-        {previewUrl && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={previewUrl} alt="썸네일 미리보기" className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-70" />
+        {/* #33 A: 재렌더 진행 오버레이(실제 영상으로 갱신 중) */}
+        {rerendering && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/70 text-white">
+            <Loader2 className="h-7 w-7 animate-spin" />
+            <span className="text-xs">재렌더 중… {rerenderStep} (3~5분)</span>
+          </div>
         )}
-        <span className={cn("absolute left-2 top-2 rounded-full px-2 py-0.5 text-[11px] font-medium", hasThumb ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-300")}>
-          {hasThumb ? "썸네일 ✓" : "썸네일 없음"}
+        <span className={cn("absolute left-2 top-2 rounded-full px-2 py-0.5 text-[11px] font-medium",
+          needsRerender ? "bg-sky-500/20 text-sky-300" : hasThumb ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-300")}>
+          {needsRerender ? "재렌더 대기" : hasThumb ? "썸네일 ✓" : "썸네일 없음"}
         </span>
       </div>
 
@@ -237,6 +288,34 @@ export function MusicQueueCard({ item, onChanged }: { item: QueueItem; onChanged
           )}
         </div>
 
+        {/* #33 A/C: 재렌더(올린 이미지로 실제 영상 갱신) + 이미지 제거 */}
+        {hasThumb && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={rerender}
+              disabled={rerendering}
+              className={cn(
+                "inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-medium disabled:opacity-60",
+                needsRerender ? "bg-sky-600 text-white hover:opacity-90" : "border border-border text-muted-foreground hover:border-primary/40",
+              )}
+              title="올린 이미지로 실제 영상을 다시 렌더(유튜브에 올라갈 형태 그대로)"
+            >
+              {rerendering ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              {needsRerender ? "재렌더 (대기 중)" : "재렌더"}
+            </button>
+            <button
+              type="button"
+              onClick={removeImage}
+              disabled={rerendering}
+              className="inline-flex h-9 items-center justify-center rounded-md border border-red-500/30 px-2.5 text-red-400 hover:bg-red-500/15"
+              title="이미지 제거(다시 업로드 가능)"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+
         {/* #32 다국어 검수 — 펼쳐서 언어별 제목·설명·가사 확인/수정 */}
         <MultilangPanel mixId={item.mix_id} />
 
@@ -275,10 +354,10 @@ export function MusicQueueCard({ item, onChanged }: { item: QueueItem; onChanged
 // #32 다국어 검수 패널 — [다국어 ▼] 펼침 → 언어 탭(KR EN JA ZH ES PT AR HI TH TL VI) →
 // 선택 언어 제목·설명·가사 표시·수정 → 저장. 게시 시 저장된 데이터로 업로드.
 const ML_TABS: { key: string; label: string }[] = [
-  { key: "ko", label: "KR" }, { key: "en", label: "EN" }, { key: "ja", label: "JA" },
-  { key: "zh", label: "ZH" }, { key: "es", label: "ES" }, { key: "pt", label: "PT" },
-  { key: "ar", label: "AR" }, { key: "hi", label: "HI" }, { key: "th", label: "TH" },
-  { key: "tl", label: "TL" }, { key: "vi", label: "VI" },
+  { key: "ko", label: "한국어" }, { key: "en", label: "영어" }, { key: "ja", label: "일본어" },
+  { key: "zh", label: "중국어" }, { key: "es", label: "스페인어" }, { key: "pt", label: "포르투갈어" },
+  { key: "ar", label: "아랍어" }, { key: "hi", label: "힌디어" }, { key: "th", label: "태국어" },
+  { key: "tl", label: "필리핀어" }, { key: "vi", label: "베트남어" },
 ]
 
 interface Localizations {

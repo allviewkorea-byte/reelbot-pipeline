@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type TouchEvent as ReactTouchEvent } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
 import { ArrowLeft, Loader2, Music, Music2, Clapperboard } from "lucide-react"
@@ -123,8 +123,42 @@ export default function MusicQueueGridPage() {
 
   const filtered = useMemo(() => items.filter((it) => matchesCategory(it, filter)), [items, filter])
 
+  // #33 E: 모바일 pull-to-refresh — 스크롤 최상단에서 아래로 끌면 큐 새로고침(직접 구현, 데스크탑 무영향).
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const pullStart = useRef<number | null>(null)
+  const [pull, setPull] = useState(0)
+  const [refreshing, setRefreshing] = useState(false)
+  const onTouchStart = (e: ReactTouchEvent) => {
+    pullStart.current = (scrollRef.current?.scrollTop ?? 0) <= 0 ? e.touches[0].clientY : null
+  }
+  const onTouchMove = (e: ReactTouchEvent) => {
+    if (pullStart.current == null) return
+    const d = e.touches[0].clientY - pullStart.current
+    if (d > 0) setPull(Math.min(80, d))
+  }
+  const onTouchEnd = () => {
+    if (pull > 60 && !refreshing) {
+      setRefreshing(true)
+      load()
+      setTimeout(() => setRefreshing(false), 800)
+    }
+    pullStart.current = null
+    setPull(0)
+  }
+
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 overflow-auto p-4 md:p-6">
+    <div
+      ref={scrollRef}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+      className="flex h-full min-h-0 flex-col gap-4 overflow-auto p-4 md:p-6"
+    >
+      {(pull > 0 || refreshing) && (
+        <div className="flex items-center justify-center text-xs text-muted-foreground" style={{ height: refreshing ? 28 : pull * 0.4 }}>
+          {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : pull > 60 ? "놓으면 새로고침" : "당겨서 새로고침"}
+        </div>
+      )}
       <header className="flex items-center gap-3 pl-10 md:pl-0">
         <Link href="/music" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-white/5 hover:text-foreground">
           <ArrowLeft className="h-4 w-4" /> 대시보드

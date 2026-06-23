@@ -71,7 +71,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
   // #27: 모든 텍스트 순백 고정(vizSpec.text_color 무시). 이퀄·배경 색감만 mood 별 유지.
   const textColor = "#FFFFFF";
   const subtitleEn = (vizSpec?.subtitle_en || "").trim();
-  const locationEn = (vizSpec?.location_en || "").trim();
+  const locationEn = (vizSpec?.location_en || "").trim() || "City View"; // #33: 항상 WHERE 표시(폴백)
   const firstTitle = (tracks[0]?.title || "").trim();
 
   // ── 이퀄 막대 진폭(최근 프레임 평균으로 감쇠) ──────────────────────
