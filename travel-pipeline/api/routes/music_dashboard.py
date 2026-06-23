@@ -158,6 +158,19 @@ def remove_thumbnail(mix_id: str):
     return {"ok": True}
 
 
+class ShowPlaylistBody(BaseModel):
+    show_playlist: bool
+
+
+@router.post("/queue/{mix_id}/show-playlist")
+def set_show_playlist(mix_id: str, body: ShowPlaylistBody):
+    """영상별 PLAY LIST 표시 토글 저장(#39). 변경 후 [재렌더] 로 영상에 반영."""
+    res = music_uploads.set_show_playlist(mix_id, body.show_playlist)
+    if res.get("error"):
+        raise HTTPException(status_code=502, detail=res["error"])
+    return {"ok": True, "show_playlist": body.show_playlist}
+
+
 @router.post("/queue/{mix_id}/rerender")
 def rerender_start(mix_id: str, background: BackgroundTasks):
     """수동 재렌더 시작(#33 A) — 올린 이미지로 풀 렌더 → mp4 갱신(비동기). 동시 1개/영상."""
@@ -277,7 +290,12 @@ def publish(mix_id: str):
             raise HTTPException(status_code=502, detail=f"썸네일 다운로드 실패: {e}") from e
 
         # 2) 깨끗한 이미지를 배경으로 영상 재생성 → 새 mp4(R2). Remotion 이 인트로·텍스트·이퀄 합성.
-        vres = make_video(theme, mix, background_path=str(thumb))
+        # #39 영상별 PLAY LIST 표시(미지정/없음 → True).
+        _sp = row.get("show_playlist")
+        vres = make_video(
+            theme, mix, background_path=str(thumb),
+            show_playlist=(True if _sp is None else bool(_sp)),
+        )
         new_mp4_url = vres["video_url"]
 
         # 3) 유튜브 썸네일 = 영상 첫 프레임(#20, Remotion 텍스트 포함) — 있으면 다운로드해 사용,

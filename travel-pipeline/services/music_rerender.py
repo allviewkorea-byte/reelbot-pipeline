@@ -106,7 +106,12 @@ def run(job_id: str) -> None:
         r2_storage.download_music_object(row["thumbnail_r2_key"], str(thumb))
 
         _step("렌더")
-        vres = music_video.make_video(theme, mix, background_path=str(thumb), persist=True)
+        # #39 영상별 PLAY LIST 표시(미지정/없음 → True). 싱글곡 OFF, 플레이리스트 ON.
+        sp = row.get("show_playlist")
+        show_playlist = True if sp is None else bool(sp)
+        vres = music_video.make_video(
+            theme, mix, background_path=str(thumb), persist=True, show_playlist=show_playlist,
+        )
         job["video_url"] = vres.get("video_url")
         job["status"] = "done"
         _step("완료")
