@@ -15,3 +15,12 @@ export async function POST(
     timeoutMs: TIMEOUT.HEAVY, // R2 업로드 여유
   })
 }
+
+// #33 C 이미지 제거 → FastAPI DELETE /music/queue/{mixId}/thumbnail.
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ mixId: string }> },
+) {
+  const { mixId } = await params
+  return proxyJson(`/music/queue/${encodeURIComponent(mixId)}/thumbnail`, { method: "DELETE" })
+}

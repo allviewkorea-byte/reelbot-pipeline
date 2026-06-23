@@ -624,10 +624,16 @@ def make_video(
     use_remotion = remotion_enabled()
 
     # #20 곡 분석(viz_spec) — Remotion 경로에서만(회귀 안전). 캐시 우선.
+    # #33 B: 캐시가 오래돼 location_en(WHERE 라벨) 등 신규 키가 없으면 fallback 으로 backfill.
     if use_remotion and viz_spec is None:
         try:
             from services import music_uploads, music_viz_analyzer
             viz_spec = music_uploads.get_viz_spec(video_id) or music_viz_analyzer.analyze_song(theme, mix)
+            if isinstance(viz_spec, dict) and not viz_spec.get("location_en"):
+                fb = music_viz_analyzer._fallback_spec(theme)
+                for k, v in fb.items():
+                    viz_spec.setdefault(k, v)
+                logger.info("[video] viz_spec location_en backfill=%s", viz_spec.get("location_en"))
         except Exception as e:  # noqa: BLE001 - 분석 실패해도 렌더는 진행(텍스트 기본색)
             logger.warning("[video] 곡 분석 실패(기본값 진행): %s", e)
             viz_spec = None
@@ -712,6 +718,26 @@ def make_video(
                 )
             except Exception as e:  # noqa: BLE001
                 logger.warning("[video] 검토 큐 기록 실패(영상은 생성됨): %s", e)
+
+            # #33 D-10 다국어 자동 번역 — 생성 시점에 미리 채워 검수 카드가 '번역 없음' 안 뜨게.
+            # 이미 있으면 스킵(재렌더 시 중복 번역·비용 방지). best-effort(실패해도 영상은 유효).
+            try:
+                from services import music_translate, music_uploads as _mu
+                if not _mu.get_localizations(video_id):
+                    _lyrics = "\n".join(
+                        (t.get("lyrics") or "").strip() for t in tracks if (t.get("lyrics") or "").strip()
+                    )
+                    src = music_translate.detect_source_lang(_lyrics or title_kr or "ko-")
+                    loc = {
+                        "source_lang": src,
+                        "meta": music_translate.generate_localizations(theme, viz_spec, _lyrics),
+                        "lyrics": music_translate.translate_lyrics(_lyrics, src) if _lyrics.strip() else {},
+                        "hashtags": music_translate.generate_hashtags(theme, viz_spec),
+                    }
+                    _mu.set_localizations(video_id, loc)
+                    logger.info("[video] 다국어 자동 번역 저장 video_id=%s langs=%d", video_id, len(loc["meta"]))
+            except Exception as e:  # noqa: BLE001 - 번역 실패해도 영상은 생성됨
+                logger.warning("[video] 다국어 자동 번역 실패(검수 UI 에서 생성 가능): %s", e)
 
         return {
             "video_id": video_id,
