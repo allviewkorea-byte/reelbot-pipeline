@@ -15,7 +15,7 @@ import random
 import re
 
 from adapters import r2_storage
-from services import music_lyrics, music_master, music_mix, music_suno
+from services import music_genres, music_lyrics, music_master, music_mix, music_store, music_suno
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +48,70 @@ def _vocal_style(base: str, gender: str) -> str:
     return f"{base}, {gender} vocals, {_VOCAL_CLARITY}"
 
 
+# ── Suno 재활용(#46) ───────────────────────────────────────────────────
+# 모델: Suno 1회 호출=2클립이지만 믹스엔 1클립만 쓴다(#34-B). 나머지 1클립은
+# used=false 로 DB(music_tracks)에 쌓여 "재활용 풀"이 된다. 다음 같은 장르 제작 때
+# 풀에서 1곡을 꺼내 쓰면 Suno 호출(과금)을 통째로 건너뛴다 → 크레딧 절반 절약.
+# 안전: 재활용 검색·마킹은 전부 best-effort(실패/없음 → Suno 정상 호출 폴백).
+# 범위: 연주(instrumental)만 재활용한다. 보컬은 곡마다 가사·자막 정합이 필요해
+#       이번엔 항상 새로 생성(보컬 트랙도 genre/used 는 기록 → 향후 재활용 여지).
+
+
+def _recycle_track(genre_id: str | None, seen: set[str], log) -> dict | None:
+    """장르 풀에서 미사용 트랙 1개를 꺼내 used=true 마킹 후 rec 으로 반환(없으면 None).
+
+    rec 은 신규 생성 클립과 같은 형태({audio_id, r2_key, duration, title, tags}). r2_key 는
+    원본(다른 theme_slug) 경로 — master_track 이 r2_key 우선으로 소스를 읽으므로 그대로 동작.
+    """
+    if not genre_id:
+        return None
+    # 어떤 실패든(검색·마킹·예외) None 반환 → 호출부가 Suno 정상 호출(폴백). 절대 막지 않음.
+    try:
+        row = music_store.find_unused_track(genre_id, exclude_ids=seen)
+        if not row:
+            return None
+        audio_id = row.get("audio_id") or row.get("id")
+        r2_key = row.get("r2_key")
+        if not audio_id or not r2_key:
+            return None
+        seen.add(audio_id)
+        if not music_store.mark_track_used(audio_id):
+            # 마킹 실패해도 진행(다음에 중복 사용될 수 있으나 렌더 실패보단 낫다).
+            logger.warning("[produce] 재활용 used 마킹 실패(id=%s) — 진행", audio_id)
+        log(f"재활용 — Suno 호출 생략 (audio_id={audio_id})")
+        return {
+            "audio_id": audio_id,
+            "r2_key": r2_key,
+            "duration": row.get("duration"),
+            "title": row.get("title") or "",
+            "tags": row.get("tags") or "",
+        }
+    except Exception as e:  # noqa: BLE001 - 재활용 실패는 절대 제작을 막지 않는다
+        logger.warning("[produce] 재활용 시도 실패(genre=%s) — Suno 폴백: %s", genre_id, e)
+        return None
+
+
+def _consume_generated(all_clips: list[dict], seen: set[str]) -> list[dict]:
+    """신규 생성 클립 처리: 첫 클립만 사용(나머지는 재활용 풀로 적립), 사용분 used=true 마킹.
+
+    이번 런에서 본 audio_id 는 전부 seen 에 넣어(막 적립한 둘째 클립 포함) 같은 런 내
+    중복 사용을 막는다(둘째 클립은 DB 에선 used=false 로 남아 다음 런에서 재활용 가능).
+    """
+    for c in all_clips:
+        aid = c.get("audio_id")
+        if aid:
+            seen.add(aid)
+    used = all_clips[:1]
+    for c in used:
+        aid = c.get("audio_id")
+        if aid and not music_store.mark_track_used(aid):
+            logger.warning("[produce] 사용분 used 마킹 실패(id=%s) — 진행", aid)
+    return used
+
+
 def _gen_vocal(
-    theme_slug: str, songs: list[dict], base_style: str, genre_theme: str, log
+    theme_slug: str, songs: list[dict], base_style: str, genre_theme: str, log,
+    *, genre_id: str | None = None, seen: set[str] | None = None,
 ) -> tuple[list[dict], dict[str, str]]:
     """보컬 경로: 곡별 가사로 보컬곡 생성(부분 실패 허용) + 가사 원문 R2 보존.
 
@@ -63,6 +125,7 @@ def _gen_vocal(
     if len(valid) < len(songs):
         logger.warning("[produce] 가사 빈 곡 %d개 건너뜀", len(songs) - len(valid))
     genders = _assign_genders(len(valid))
+    seen = seen if seen is not None else set()
     for i, (s, gender) in enumerate(zip(valid, genders), 1):
         lyric = s["lyrics"].strip()
         theme = {
@@ -72,6 +135,7 @@ def _gen_vocal(
             "title": s.get("title") or f"{genre_theme} {i}",
             "lyrics": lyric,
             "vocalGender": gender,
+            "genre_id": genre_id,  # #46: 트랙에 장르 기록(used=false로 적립)
         }
         try:
             log(f"보컬 생성 {i}/{len(valid)} [{gender}]: {s.get('title')}")
@@ -79,16 +143,10 @@ def _gen_vocal(
         except Exception as e:  # noqa: BLE001 - 1곡 실패가 전체를 막지 않게
             logger.warning("[produce] 곡 %d 보컬 생성 실패: %s", i, e)
             continue
-        # suno 1회 호출 = 2클립(같은 가사/스타일 변주). 곡수 N = N곡이 되도록
-        # 첫 클립만 사용하고 둘째 클립은 폐기(반복감/루프 느낌 방지, #34-B).
-        # 호출 횟수·과금(1회=12크=2클립)은 그대로 — 사용만 1클립.
-        all_clips = res.get("tracks", [])
-        if len(all_clips) > 1:
-            logger.info(
-                "[produce] 곡 %d: suno 2클립 중 첫 클립만 사용, %d개 폐기",
-                i, len(all_clips) - 1,
-            )
-        for rec in all_clips[:1]:
+        # suno 1회 호출 = 2클립(같은 가사/스타일 변주). 곡수 N = N곡이 되도록 첫 클립만
+        # 사용하고 둘째 클립은 used=false 로 적립(#34-B / #46). 보컬은 재활용하지 않음.
+        all_clips = _consume_generated(res.get("tracks", []), seen)
+        for rec in all_clips:
             audio_id = rec.get("audio_id")
             if not audio_id:
                 continue
@@ -109,19 +167,29 @@ def _gen_vocal(
 
 
 def _gen_instrumental(
-    theme_slug: str, n: int, style: str, genre_theme: str, log
+    theme_slug: str, n: int, style: str, genre_theme: str, log,
+    *, genre_id: str | None = None, seen: set[str] | None = None,
 ) -> tuple[list[dict], dict[str, str]]:
     """연주 경로: 가사 없이 style 만으로 연주곡 N회 생성(instrumental=True, 부분 실패 허용).
 
     가사 없음 → lyrics_by_id 는 빈 dict(믹스 JSON 에 가사 미포함).
+    #46: 곡마다 먼저 장르 재활용 풀을 확인 — 미사용 트랙이 있으면 Suno 호출 없이 재활용.
     """
     produced: list[dict] = []
+    seen = seen if seen is not None else set()
     for i in range(1, n + 1):
+        # ① 재활용 우선 — 같은 장르 미사용 트랙이 있으면 Suno 건너뜀(크레딧 0).
+        recycled = _recycle_track(genre_id, seen, log)
+        if recycled is not None:
+            produced.append({**recycled})
+            continue
+        # ② 없으면 Suno 정상 호출(폴백).
         theme = {
             "theme_slug": theme_slug,
             "instrumental": True,
             "style": style,
             "title": f"{genre_theme} {i}",
+            "genre_id": genre_id,  # #46: 둘째 클립이 used=false 로 적립 → 다음에 재활용
         }
         try:
             log(f"연주 생성 {i}/{n}")
@@ -129,14 +197,8 @@ def _gen_instrumental(
         except Exception as e:  # noqa: BLE001 - 1곡 실패가 전체를 막지 않게
             logger.warning("[produce] 연주 %d 생성 실패: %s", i, e)
             continue
-        # suno 1회 호출 = 2클립. 곡수 N = N곡이 되도록 첫 클립만 사용(#34-B).
-        all_clips = res.get("tracks", [])
-        if len(all_clips) > 1:
-            logger.info(
-                "[produce] 연주 %d: suno 2클립 중 첫 클립만 사용, %d개 폐기",
-                i, len(all_clips) - 1,
-            )
-        for rec in all_clips[:1]:
+        # suno 1회 호출 = 2클립. 첫 클립만 사용(used=true), 둘째는 적립(used=false, #46).
+        for rec in _consume_generated(res.get("tracks", []), seen):
             if rec.get("audio_id"):
                 produced.append({**rec})
     return produced, {}
@@ -159,6 +221,7 @@ def produce(
     do_mix: bool = True,
     seed: int | None = None,
     model: str | None = None,
+    genre_id: str | None = None,
     progress=None,
 ) -> dict:
     """주제 → N곡 생성 → 마스터 → 믹스. 완성 오디오 메타 반환.
@@ -167,6 +230,8 @@ def produce(
       - "instrumental": 가사 스킵, style_prompt(없으면 base_style)로 연주곡 N회 생성.
       - "vocal"(기본): 헌법 3-스테이지 가사 → 보컬곡. lyric_tone 이 있으면 작성에 반영.
     lyrics(선택, vocal): 이미 만든/검수한 가사 리스트를 주면 가사 생성을 건너뛴다.
+    genre_id(#46): 14장르 id. 있으면 (1) 고정 Suno 태그·instrumental 적용(태그 매핑),
+      (2) 같은 장르 미사용 트랙 재활용. 없거나 태그 없는 장르 → 기존 LLM 스타일 폴백.
     Returns: {theme_slug, track_type, songs:[...], produced:[record...], mastered, mix}
     """
 
@@ -175,14 +240,25 @@ def produce(
         if progress:
             progress(msg)
 
-    is_instrumental = (track_type or "vocal").strip().lower() == "instrumental"
+    # 장르 고정 태그 매핑(#46-D) — 있으면 style/instrumental 을 장르 설정으로 덮어쓴다.
+    cfg = music_genres.suno_config(genre_id)
+    if cfg:
+        is_instrumental = cfg["instrumental"]
+        base_style = cfg["style"]
+        style_prompt = cfg["style"]
+        _log(f"장르 고정 태그 적용: {genre_id} ({'연주' if is_instrumental else '보컬'})")
+    else:
+        is_instrumental = (track_type or "vocal").strip().lower() == "instrumental"
+
+    seen: set[str] = set()  # #46: 이번 런에서 사용/적립한 audio_id(같은 런 중복 재활용 방지)
 
     if is_instrumental:
-        # ① 가사 스킵. style_prompt 우선(주제), 없으면 base_style.
+        # ① 가사 스킵. style_prompt 우선(주제/고정태그), 없으면 base_style.
         songs: list[dict] = []
         _log(f"연주 경로 — 가사 스킵, {n}곡 생성")
         produced, lyrics_by_id = _gen_instrumental(
-            theme_slug, n, style_prompt or base_style, genre_theme, _log
+            theme_slug, n, style_prompt or base_style, genre_theme, _log,
+            genre_id=genre_id, seen=seen,
         )
     else:
         # ① 가사(헌법 3-스테이지) — 주어지면 재사용(검수본), lyric_tone 반영.
@@ -190,9 +266,16 @@ def produce(
             genre_theme, n, sub_theme_pool=sub_theme_pool, language=language,
             model=model, tone=lyric_tone,
         )
+        # 고정 태그 보컬 장르: 곡별 style 을 고정 태그로 통일(일관성). 없으면 기존대로.
+        if cfg:
+            for s in songs:
+                s["style"] = cfg["style"]
         _log(f"가사 {len(songs)}곡 확보")
         # ② 곡별 보컬 생성.
-        produced, lyrics_by_id = _gen_vocal(theme_slug, songs, base_style, genre_theme, _log)
+        produced, lyrics_by_id = _gen_vocal(
+            theme_slug, songs, base_style, genre_theme, _log,
+            genre_id=genre_id, seen=seen,
+        )
 
     if not produced:
         raise RuntimeError("생성 결과가 없습니다(전 곡 실패).")
@@ -258,6 +341,9 @@ def run_theme(
         raise ValueError("theme 에 slug 가 없습니다.")
     count = n or int(theme.get("track_count") or 3)
 
+    # #46: 주제의 genre id 우선, 없으면 텍스트로 14장르 분류(best-effort). None → LLM 폴백.
+    genre_id = theme.get("genre_id") or music_genres.classify_theme(theme)
+
     result = produce(
         slug,
         n=count,
@@ -271,6 +357,7 @@ def run_theme(
         do_master=do_master,
         do_mix=do_mix,
         model=lyrics_model,
+        genre_id=genre_id,
         progress=progress,
     )
     out = {"theme": theme, "mix": result.get("mix"), "result": result}

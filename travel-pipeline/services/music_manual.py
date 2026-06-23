@@ -134,11 +134,13 @@ def run(job_id: str) -> None:
 
         _step("음원")
         # 실제 제작: 가사(GPT) → suno 보컬 N곡 → 마스터 → 믹스. 일반 cron 과 동일(#42 곡수 N).
+        # #46: 수동 무드 키 = 14장르 id → 고정 태그·instrumental·재활용 적용.
         result = music_produce.produce(
             slug, n=tc,
             genre_theme=theme["genre"], base_style=theme["style_prompt"],
             style_prompt=theme["style_prompt"], track_type="vocal",
             lyric_tone=theme["lyric_tone"], minutes=3.5,
+            genre_id=job["mood"],
             progress=_produce_progress,
         )
         mix = result.get("mix")

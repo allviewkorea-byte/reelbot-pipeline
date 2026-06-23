@@ -19,21 +19,51 @@
 from __future__ import annotations
 
 # ── 14장르 마스터 목록 (확정) ──────────────────────────────────────────
+# suno_tags/instrumental/bpm_range(#46-C): 장르별 고정 Suno 스타일. 값 출처는
+# docs/revezen_genre_prompt_pool.md. id/label_kr/label_en 은 #45 그대로(무수정).
 GENRES: list[dict] = [
-    {"id": "citypop", "label_kr": "시티팝", "label_en": "City Pop"},
-    {"id": "sunset_drive", "label_kr": "선셋 드라이브", "label_en": "Sunset Drive"},
-    {"id": "morning_drive", "label_kr": "모닝 드라이브", "label_en": "Morning Drive"},
-    {"id": "cafe", "label_kr": "카페", "label_en": "Café"},
-    {"id": "jazz", "label_kr": "재즈", "label_en": "Jazz"},
-    {"id": "ballad", "label_kr": "발라드", "label_en": "Ballad"},
-    {"id": "breakup", "label_kr": "이별", "label_en": "Breakup"},
-    {"id": "workout", "label_kr": "운동/동기부여", "label_en": "Workout"},
-    {"id": "sleep_study", "label_kr": "수면/공부", "label_en": "Study & Sleep"},
-    {"id": "lofi", "label_kr": "로파이", "label_en": "Lo-fi"},
-    {"id": "kpop", "label_kr": "K-pop", "label_en": "K-pop"},
-    {"id": "pop", "label_kr": "팝송", "label_en": "Pop"},
-    {"id": "rnb_soul", "label_kr": "R&B/소울", "label_en": "R&B Soul"},
-    {"id": "hiphop", "label_kr": "힙합", "label_en": "Hip-hop"},
+    {"id": "citypop", "label_kr": "시티팝", "label_en": "City Pop",
+     "suno_tags": "city pop, 80s japanese funk, warm analog synth, slap bass, groovy, nostalgic summer",
+     "instrumental": True, "bpm_range": "95-110"},
+    {"id": "sunset_drive", "label_kr": "선셋 드라이브", "label_en": "Sunset Drive",
+     "suno_tags": "synthwave, sunset drive, retro wave, warm pads, electric guitar, dreamy, nostalgic cruise",
+     "instrumental": True, "bpm_range": "85-100"},
+    {"id": "morning_drive", "label_kr": "모닝 드라이브", "label_en": "Morning Drive",
+     "suno_tags": "upbeat pop, morning drive, acoustic guitar, bright synth, feel good, sunny day, fresh start",
+     "instrumental": True, "bpm_range": "105-120"},
+    {"id": "cafe", "label_kr": "카페", "label_en": "Café",
+     "suno_tags": "cafe acoustic, bossa nova, gentle guitar, warm atmosphere, coffee shop ambience, relaxing afternoon",
+     "instrumental": True, "bpm_range": "80-95"},
+    {"id": "jazz", "label_kr": "재즈", "label_en": "Jazz",
+     "suno_tags": "smooth jazz, saxophone solo, walking bass, brushed drums, piano trio, late night club, sophisticated",
+     "instrumental": True, "bpm_range": "90-120"},
+    {"id": "ballad", "label_kr": "발라드", "label_en": "Ballad",
+     "suno_tags": "korean ballad, emotional piano, strings orchestra, heartfelt, warm vocal, cinematic, touching",
+     "instrumental": False, "bpm_range": "65-85"},
+    {"id": "breakup", "label_kr": "이별", "label_en": "Breakup",
+     "suno_tags": "sad ballad, minor key, emotional piano, rain ambience, melancholic strings, lonely night, heartbreak",
+     "instrumental": False, "bpm_range": "60-75"},
+    {"id": "workout", "label_kr": "운동/동기부여", "label_en": "Workout",
+     "suno_tags": "workout EDM, high energy, powerful bass drops, motivational, fast tempo, gym anthem, uplifting",
+     "instrumental": True, "bpm_range": "130-150"},
+    {"id": "sleep_study", "label_kr": "수면/공부", "label_en": "Study & Sleep",
+     "suno_tags": "ambient study, soft piano, gentle rain, minimal texture, calming, deep focus, peaceful night",
+     "instrumental": True, "bpm_range": "55-70"},
+    {"id": "lofi", "label_kr": "로파이", "label_en": "Lo-fi",
+     "suno_tags": "lofi hip hop, vinyl crackle, jazzy piano, mellow beats, chill vibe, rainy window, warm room",
+     "instrumental": True, "bpm_range": "70-85"},
+    {"id": "kpop", "label_kr": "K-pop", "label_en": "K-pop",
+     "suno_tags": "kpop, catchy hook, synth pop, dance beat, korean style, bright energy, addictive melody",
+     "instrumental": False, "bpm_range": "110-130"},
+    {"id": "pop", "label_kr": "팝송", "label_en": "Pop",
+     "suno_tags": "american pop, catchy melody, modern production, radio hit, upbeat vocal, feel good anthem",
+     "instrumental": False, "bpm_range": "100-125"},
+    {"id": "rnb_soul", "label_kr": "R&B/소울", "label_en": "R&B Soul",
+     "suno_tags": "neo soul, rnb groove, silky vocals, rhodes piano, slow jam, intimate night, smooth bass, 90s vibe",
+     "instrumental": True, "bpm_range": "75-95"},
+    {"id": "hiphop", "label_kr": "힙합", "label_en": "Hip-hop",
+     "suno_tags": "hip hop, hard hitting beats, 808 bass, trap hi-hats, urban flow, street energy, confident swagger",
+     "instrumental": False, "bpm_range": "85-140"},
 ]
 
 GENRE_IDS: list[str] = [g["id"] for g in GENRES]
@@ -187,3 +217,23 @@ def preset(genre_id: str | None) -> dict:
     """장르 id → 프리셋(미지정/미지원은 기본값). 옛 무드 키 alias 도 해석."""
     gid = normalize_mood_key(genre_id)
     return PRESETS.get(gid, PRESETS[DEFAULT_GENRE])
+
+
+# ── 장르별 Suno 고정 스타일(#46-C) ─────────────────────────────────────
+def suno_config(genre_id: str | None) -> dict | None:
+    """장르 id → {suno_tags, instrumental, bpm_range, style}. 없으면 None(=LLM 폴백).
+
+    style: Suno style 에 바로 넣을 문자열(태그 + 'NN-NN BPM'). BPM 은 Suno 가 별도
+    파라미터로 받지 않으므로(생성 body 는 style/title/instrumental 등) 태그 문자열에 싣는다.
+    """
+    g = _BY_ID.get(normalize_mood_key(genre_id))
+    if not g or not g.get("suno_tags"):
+        return None
+    tags = g["suno_tags"]
+    bpm = g.get("bpm_range") or ""
+    return {
+        "suno_tags": tags,
+        "instrumental": bool(g.get("instrumental", True)),
+        "bpm_range": bpm,
+        "style": f"{tags}, {bpm} BPM" if bpm else tags,
+    }

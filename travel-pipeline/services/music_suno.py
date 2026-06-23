@@ -219,8 +219,11 @@ def _download_mp3(url: str, dest: str) -> str:
     return dest
 
 
-def store_tracks(theme_slug: str, task_id: str, tracks: list[dict]) -> list[dict]:
+def store_tracks(theme_slug: str, task_id: str, tracks: list[dict], *, genre: str = "") -> list[dict]:
     """완료된 곡들을 R2 영구 저장 + DB 기록(멱등). 저장된 record 리스트 반환.
+
+    genre(#46): 재활용 매칭용 장르 id. 신규 트랙은 used=false 로 저장되어, 1회 호출당
+    2클립 중 미사용 클립이 자동으로 재활용 풀에 쌓인다(다음 같은 장르 제작 때 Suno 절약).
 
     폴링·콜백 양쪽에서 호출 가능 — r2_storage.music_exists 로 중복 업로드를 막고,
     DB 는 id(=audio_id) upsert 로 1행만 남긴다. R2 저장 완료 전에는 DB 를 건드리지
@@ -266,6 +269,12 @@ def store_tracks(theme_slug: str, task_id: str, tracks: list[dict]) -> list[dict
             "r2_key": r2_key,
             "status": "SUCCESS",
         }
+        # #46: genre 가 있을 때만 genre/used 를 쓴다. 콜백(보조 경로)은 genre="" 로 호출되는데,
+        # 멱등 upsert 가 폴링이 기록한 genre·used 를 ""·false 로 덮어쓰지 않도록 키 자체를 생략한다
+        # (신규 행은 DB default: used=false, genre=''). 사용 마킹은 mark_track_used(PATCH)가 별도 수행.
+        if genre:
+            record["genre"] = genre
+            record["used"] = False
         music_store.upsert_track(record)
         records.append(record)
     return records
@@ -279,11 +288,11 @@ def generate_and_store(
 ) -> dict:
     """생성 → 폴링(SUCCESS) → R2 저장 + DB 기록을 한 번에. 검증/운영 진입점.
 
-    theme: {theme_slug, instrumental, model, style, title, negativeTags?, ...}
+    theme: {theme_slug, instrumental, model, style, title, negativeTags?, genre_id?, ...}
     Returns: {task_id, tracks:[record...]}
     """
     theme_slug = theme.get("theme_slug") or "untitled"
     task_id = submit_generation(theme)
     tracks = poll_task(task_id, timeout=timeout, interval=interval)
-    records = store_tracks(theme_slug, task_id, tracks)
+    records = store_tracks(theme_slug, task_id, tracks, genre=theme.get("genre_id") or "")
     return {"task_id": task_id, "tracks": records}
