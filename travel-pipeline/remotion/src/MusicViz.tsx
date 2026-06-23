@@ -48,7 +48,7 @@ const BG = "bg.png";
 
 const BARS = 48;
 const NUM_SAMPLES = 256; // visualizeAudio 는 2의 거듭제곱 필요.
-const SMOOTH_FRAMES = 4; // 최근 N프레임 평균 → 부드러운 감쇠(차분).
+const SMOOTH_FRAMES = 2; // #34 활발한 반응 — 평균 윈도우 4→2(빠른 감쇠). 진폭·tilt·캡 불변.
 
 // 인트로 타임라인(초) — A 옵션 확정.
 const STATIC_END = 3.5; // 0~3.5 정지(거대 PLAY LIST + 부제 + 곡제목)
@@ -173,14 +173,14 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
         }}
       />
 
-      {/* #27 WHERE 라벨 — 상단 중앙, 작은 산세리프, 흰색 70%. 영상 내내 유지(채널 정체성). */}
+      {/* #34 WHERE 라벨 — 상단 중앙, 크게(약 48px)·semibold·흰색 90%. 채널 정체성으로 확실히 인식. */}
       {locationEn && (
         <div
           style={{
-            position: "absolute", top: height * 0.035, width: "100%", textAlign: "center",
-            fontFamily: "sans-serif", fontSize: width * 0.012, fontWeight: 600,
-            letterSpacing: width * 0.004, color: "#FFFFFF", opacity: 0.7,
-            textShadow: "0 2px 10px rgba(0,0,0,0.7)",
+            position: "absolute", top: height * 0.04, width: "100%", textAlign: "center",
+            fontFamily: "sans-serif", fontSize: width * 0.025, fontWeight: 600,
+            letterSpacing: "0.05em", color: "#FFFFFF", opacity: 0.9,
+            textShadow: "0 2px 12px rgba(0,0,0,0.8)",
           }}
         >
           WHERE : {locationEn}
