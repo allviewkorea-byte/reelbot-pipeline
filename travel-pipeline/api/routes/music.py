@@ -185,6 +185,7 @@ def trends_analyze(background: BackgroundTasks, authorization: str | None = Head
 
 class TestRenderBody(BaseModel):
     mood: str | None = None  # citypop/cafe/ballad/workout/sleep (없으면 기본 citypop)
+    track_count: int | None = None  # #42 수동 생성 곡수 1~100(미지정→1). test_render 는 무시.
 
 
 @router.post("/test-render")
@@ -206,14 +207,17 @@ def test_render(body: TestRenderBody | None = None):
 
 @router.post("/manual-render")
 def manual_render(background: BackgroundTasks, body: TestRenderBody | None = None):
-    """수동 영상 생성(#26) — 진짜 음원 1곡 → 풀 렌더 → 검토 큐 적재(비동기). 유튜브 X.
+    """수동 영상 생성(#26) — 진짜 음원 N곡 → 풀 렌더 → 검토 큐 적재(비동기). 유튜브 X.
 
     수 분~수십 분 걸려 BackgroundTasks 로 시작하고 job_id 즉시 반환. 동시 1개 제한.
     완료 시 music_uploads 에 status=pending 으로 저장(검토 큐 일반 카드). 상태는
-    GET /manual-render/status/{job_id} 폴링.
+    GET /manual-render/status/{job_id} 폴링. track_count(#42): 곡수 1~100(미지정→1).
     """
     from services import music_manual
-    started = music_manual.start(mood=body.mood if body else None)
+    started = music_manual.start(
+        mood=body.mood if body else None,
+        track_count=body.track_count if body else None,
+    )
     if not started.get("ok"):
         raise HTTPException(status_code=409, detail=started.get("error") or "이미 진행 중")
     background.add_task(music_manual.run, started["job_id"])

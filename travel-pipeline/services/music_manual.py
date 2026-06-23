@@ -65,7 +65,18 @@ def available_moods() -> list[str]:
     return list(_THEMES.keys())
 
 
-def _build_theme(mood: str) -> dict:
+# #42 수동 생성 곡수 1~100(범위 밖 클램프). 미지정 → 1(기존 동작 = 회귀 0).
+_TRACK_MIN, _TRACK_MAX = 1, 100
+
+
+def _clamp_track_count(n) -> int:
+    try:
+        return max(_TRACK_MIN, min(_TRACK_MAX, int(n)))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _build_theme(mood: str, track_count: int = 1) -> dict:
     preset = _THEMES.get(mood, _THEMES[_DEFAULT_MOOD])
     return {
         "slug": f"manual_{uuid.uuid4().hex[:12]}",
@@ -76,28 +87,32 @@ def _build_theme(mood: str) -> dict:
         "type": "vocal",
         "style_prompt": preset["style_prompt"],
         "lyric_tone": preset["lyric_tone"],
-        "track_count": 1,
+        "track_count": _clamp_track_count(track_count),
     }
 
 
-def start(mood: str | None = None) -> dict:
-    """수동 영상 생성 1개 시작(동시 1개 제한). {ok, job_id} 또는 {ok:False, error, busy_job}."""
+def start(mood: str | None = None, track_count: int | None = None) -> dict:
+    """수동 영상 생성 1개 시작(동시 1개 제한). {ok, job_id} 또는 {ok:False, error, busy_job}.
+
+    track_count(#42): 영상에 넣을 곡수 1~100(미지정→1). 곡수 = Suno 호출 수 = 영상 길이(#40).
+    """
     global _active_job
     key = (mood or _DEFAULT_MOOD).strip().lower()
+    tc = _clamp_track_count(track_count if track_count is not None else 1)
     with _LOCK:
         if _active_job and _JOBS.get(_active_job, {}).get("status") == "running":
             return {"ok": False, "error": "이미 영상 생성이 진행 중입니다. 완료 후 다시 시도하세요.", "busy_job": _active_job}
         job_id = uuid.uuid4().hex
         _JOBS[job_id] = {
             "job_id": job_id, "status": "running", "step": "주제",
-            "mood": key, "video_url": None, "mix_id": None, "error": None,
+            "mood": key, "track_count": tc, "video_url": None, "mix_id": None, "error": None,
             "created_at": time.time(),
         }
         _active_job = job_id
     # #36 운영 가시성 — DB 작업 추적(인메모리와 같은 job_id). best-effort.
     try:
         from services import music_jobs
-        music_jobs.start_job("manual_render", job_id=job_id, metadata={"mood": key})
+        music_jobs.start_job("manual_render", job_id=job_id, metadata={"mood": key, "track_count": tc})
     except Exception as e:  # noqa: BLE001
         logger.debug("[music-manual] job 추적 시작 실패(무시): %s", e)
     return {"ok": True, "job_id": job_id}
@@ -143,13 +158,14 @@ def run(job_id: str) -> None:
     try:
         from services import music_produce, music_video, music_viz_analyzer
 
-        theme = _build_theme(job["mood"])
+        tc = _clamp_track_count(job.get("track_count", 1))
+        theme = _build_theme(job["mood"], tc)
         slug = theme["slug"]
 
         _step("음원")
-        # 실제 제작: 가사(GPT) → suno 보컬 1곡 → 마스터 → 믹스(3~4분). 일반 cron 과 동일.
+        # 실제 제작: 가사(GPT) → suno 보컬 N곡 → 마스터 → 믹스. 일반 cron 과 동일(#42 곡수 N).
         result = music_produce.produce(
-            slug, n=1,
+            slug, n=tc,
             genre_theme=theme["genre"], base_style=theme["style_prompt"],
             style_prompt=theme["style_prompt"], track_type="vocal",
             lyric_tone=theme["lyric_tone"], minutes=3.5,

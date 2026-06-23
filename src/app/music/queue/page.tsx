@@ -51,6 +51,7 @@ export default function MusicQueueGridPage() {
 
   // 수동 영상 생성(#26) — 검토 큐 정식 적재. 진행 상태는 #36 진행 카드(DB)로 표시.
   const [manualLoading, setManualLoading] = useState(false)
+  const [manualCount, setManualCount] = useState("1") // #42 수동 생성 곡수(1~100, 기본 1)
 
   // #36 진행 중(+미확인 실패) 작업 — DB 기준, 페이지 이동에도 유지.
   const [activeJobs, setActiveJobs] = useState<MusicJob[]>([])
@@ -103,10 +104,11 @@ export default function MusicQueueGridPage() {
   const runManual = useCallback(async () => {
     setManualLoading(true)
     try {
+      const tc = Math.max(1, Math.min(100, Math.floor(Number(manualCount)) || 1)) // #42 곡수 1~100 클램프
       const res = await fetch("/api/music/manual-render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mood: testMood }),
+        body: JSON.stringify({ mood: testMood, track_count: tc }),
       })
       const data = await res.json()
       if (!res.ok || !data?.job_id) throw new Error(data?.detail || "수동 생성 시작 실패")
@@ -139,7 +141,7 @@ export default function MusicQueueGridPage() {
     } finally {
       setManualLoading(false)
     }
-  }, [testMood, load, loadJobs])
+  }, [testMood, manualCount, load, loadJobs])
 
   const filtered = useMemo(() => items.filter((it) => matchesCategory(it, filter)), [items, filter])
 
@@ -217,23 +219,40 @@ export default function MusicQueueGridPage() {
             >
               {TEST_MOODS.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
             </select>
+            {/* #42 곡수 입력(1~100) */}
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              곡수
+              <input
+                type="number"
+                min={1}
+                max={100}
+                value={manualCount}
+                disabled={manualLoading}
+                onChange={(e) => setManualCount(e.target.value)}
+                className="h-7 w-14 rounded-md border border-border bg-background px-1.5 text-center text-xs text-foreground"
+              />
+              곡
+            </label>
             {/* 메인 액션 — 수동 영상 생성(검토 큐에 정식 적재) */}
             <button
               type="button"
               onClick={runManual}
               disabled={manualLoading}
               className="inline-flex items-center justify-center gap-1.5 rounded-md bg-primary px-2.5 py-2 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-60"
-              title="진짜 음원 1곡을 생성해 검토 큐에 추가(수 분~수십 분, 유튜브 X)"
+              title="선택한 곡수만큼 진짜 음원을 생성해 검토 큐에 추가(수 분~수십 분, 유튜브 X)"
             >
               {manualLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Music2 className="h-3.5 w-3.5" />} 수동 영상 생성
             </button>
-            {/* #41 예상(수동은 1곡 고정 — #42에서 곡수 선택 예정) */}
+            {/* #42 예상(선택 곡수 기반, #41 estimateProductionTime 연동) */}
             {(() => {
-              const e = estimateProductionTime(1)
+              const tc = Math.max(1, Math.min(100, Math.floor(Number(manualCount)) || 1))
+              const e = estimateProductionTime(tc)
               return (
-                <span className="text-[10px] text-muted-foreground">
-                  📹 영상 {fmtMinutes(e.videoMinutes)} · ⏱️ 제작 {fmtMinutes(e.totalMinutes)} · 1곡
-                </span>
+                <div className="flex flex-col gap-0.5 text-[10px] text-muted-foreground">
+                  <span>📹 영상 {fmtMinutes(e.videoMinutes)} · ⏱️ 제작 {fmtMinutes(e.totalMinutes)} · {tc}곡</span>
+                  <span>💰 {e.credits} 크레딧 (~${e.costUsd.toFixed(2)})</span>
+                  {tc >= 3 && <span className="text-amber-500">※ 3곡 이상은 분할 렌더(#43) 전까지 타임아웃 가능</span>}
+                </div>
               )
             })()}
             {/* 보조 — 빠른 테스트 10초(합성 음원, 폐기) */}
