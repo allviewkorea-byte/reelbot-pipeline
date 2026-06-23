@@ -178,7 +178,7 @@ const DEFAULT_TRACK_COUNT = 1
 function clampTrackCount(v: unknown): number {
   const n = Math.round(Number(v))
   if (!Number.isFinite(n)) return DEFAULT_TRACK_COUNT
-  return Math.max(1, Math.min(50, n)) // #34 곡수 1~50
+  return Math.max(1, Math.min(100, n)) // #40 곡수 1~100
 }
 
 export interface ChannelStatusState {

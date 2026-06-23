@@ -22,6 +22,60 @@ export interface MusicMetrics {
   error?: boolean
 }
 
+// #41 예상 제작 시간 — 곡수 → 영상 길이 + 제작 단계별 시간(클라이언트 계산, API 호출 없음).
+// 상수는 0단계 실측/코드 근거: 곡당 평균 길이 ~4분(music_mix 가정 180s 보다 보수적·#40 UI 4분),
+// 크로스페이드 2s(music_mix CROSSFADE_SEC), suno 곡당 순차 ~2분(POLL 상한 900s),
+// 믹스 곡수 선형(페어와이즈 N-1), 렌더 영상1초당 ~3초(실측 114s→349s), 업로드 ~3분.
+export const EST_SONG_SEC = 240 // 곡당 평균 길이(초) ≈ 4분
+export const EST_CROSSFADE_SEC = 2
+export const EST_SUNO_MIN_PER_SONG = 2 // suno 곡당 생성 ~2분(순차)
+export const EST_MIX_BASE_MIN = 1
+export const EST_MIX_MIN_PER_SONG = 0.1
+export const EST_RENDER_RATIO = 3 // 영상 1초당 렌더 ~3초
+export const EST_UPLOAD_MIN = 3
+export const CREDITS_PER_SONG = 12 // suno 1호출=12크레딧(=2클립, 1곡 사용)
+export const CREDIT_USD = 0.005
+
+export interface ProductionEstimate {
+  videoMinutes: number
+  sunoMinutes: number
+  mixMinutes: number
+  renderMinutes: number
+  uploadMinutes: number
+  totalMinutes: number
+  credits: number
+  costUsd: number
+}
+
+export function estimateProductionTime(trackCount: number): ProductionEstimate {
+  const n = Math.max(1, Math.floor(trackCount) || 1)
+  const videoSec = Math.max(EST_SONG_SEC, n * EST_SONG_SEC - (n - 1) * EST_CROSSFADE_SEC)
+  const sunoMinutes = n * EST_SUNO_MIN_PER_SONG
+  const mixMinutes = EST_MIX_BASE_MIN + n * EST_MIX_MIN_PER_SONG
+  const renderMinutes = (videoSec * EST_RENDER_RATIO) / 60
+  const uploadMinutes = EST_UPLOAD_MIN
+  return {
+    videoMinutes: videoSec / 60,
+    sunoMinutes,
+    mixMinutes,
+    renderMinutes,
+    uploadMinutes,
+    totalMinutes: sunoMinutes + mixMinutes + renderMinutes + uploadMinutes,
+    credits: n * CREDITS_PER_SONG,
+    costUsd: n * CREDITS_PER_SONG * CREDIT_USD,
+  }
+}
+
+// 분 → "약 N시간 M분" / "약 N분".
+export function fmtMinutes(m: number): string {
+  const total = Math.max(0, Math.round(m))
+  if (total < 60) return `약 ${total}분`
+  const h = Math.floor(total / 60)
+  const mm = total % 60
+  return mm ? `약 ${h}시간 ${mm}분` : `약 ${h}시간`
+}
+
+
 // #37 채널 설정(슬로건·소셜·AI 명시) — channel_status.channel_config jsonb 에 보관.
 export interface MusicChannelConfig {
   slogan_en: string

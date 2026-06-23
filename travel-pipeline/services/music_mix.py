@@ -179,8 +179,9 @@ def build_mix(
     if not rows:
         raise ValueError(f"테마 '{theme_slug}' 에 믹스할 곡이 없습니다.")
 
-    target_sec = max(1.0, minutes * 60.0)
-    selected = _select_for_target(rows, target_sec, seed=seed)
+    # #40 곡 전부 사용 — 영상 길이 = 곡 총 길이(자르지 않음). minutes 상한 제거(target_sec=inf).
+    # 1~2곡은 기존에도 minutes(10분) 미달이라 전곡 사용했으므로 동작 동일(회귀 0). 3곡↑부터 길어짐.
+    selected = _select_for_target(rows, float("inf"), seed=seed)
     mix_id = mix_id or f"mix_{time.strftime('%Y%m%d_%H%M%S')}"
 
     work = Path(tempfile.mkdtemp(prefix="mix_"))
