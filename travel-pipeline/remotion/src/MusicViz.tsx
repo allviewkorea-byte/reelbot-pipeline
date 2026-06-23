@@ -11,6 +11,15 @@ import {
 import { useAudioData, visualizeAudio } from "@remotion/media-utils";
 import { loadFont as loadPlayfair } from "@remotion/google-fonts/PlayfairDisplay";
 import { loadFont as loadDancing } from "@remotion/google-fonts/DancingScript";
+import { loadFont as loadMontserrat } from "@remotion/google-fonts/Montserrat";
+import { loadFont as loadPoppins } from "@remotion/google-fonts/Poppins";
+import { loadFont as loadBebas } from "@remotion/google-fonts/BebasNeue";
+import { loadFont as loadOswald } from "@remotion/google-fonts/Oswald";
+import { loadFont as loadAnton } from "@remotion/google-fonts/Anton";
+import { loadFont as loadArchivo } from "@remotion/google-fonts/Archivo";
+import { loadFont as loadInter } from "@remotion/google-fonts/Inter";
+import { loadFont as loadDMSans } from "@remotion/google-fonts/DMSans";
+import { loadFont as loadCormorant } from "@remotion/google-fonts/CormorantGaramond";
 import { moodColors } from "./colors";
 import { currentTrack, Track } from "./tracks";
 
@@ -19,6 +28,40 @@ const playfair = loadPlayfair();
 const dancing = loadDancing();
 const SERIF = playfair.fontFamily;
 const SCRIPT = dancing.fontFamily;
+
+// #35-A 디자인 본부 프리셋 폰트 10종 — UI 드롭다운 이름 → 실제 fontFamily 매핑.
+const PRESET_FONTS: Record<string, string> = {
+  Montserrat: loadMontserrat().fontFamily,
+  Poppins: loadPoppins().fontFamily,
+  "Bebas Neue": loadBebas().fontFamily,
+  Oswald: loadOswald().fontFamily,
+  Anton: loadAnton().fontFamily,
+  Archivo: loadArchivo().fontFamily,
+  Inter: loadInter().fontFamily,
+  "DM Sans": loadDMSans().fontFamily,
+  "Playfair Display": playfair.fontFamily,
+  "Cormorant Garamond": loadCormorant().fontFamily,
+};
+
+// #35-A 디자인 설정(채널 설정 본부에서 저장). 비어 있으면 현재 하드코딩값으로 폴백(회귀 0).
+type TextStyleCfg = {
+  font_family?: string;
+  font_size?: number;
+  font_weight?: number;
+  color?: string;
+  opacity?: number;
+  border?: { enabled?: boolean; width?: number; color?: string };
+};
+export type DesignConfig = {
+  play_list?: TextStyleCfg;
+  where_label?: TextStyleCfg;
+} | null;
+
+// 테두리(외곽선) — border.enabled 일 때만 -webkit-text-stroke + paint-order(깔끔한 외곽).
+function strokeStyle(b?: { enabled?: boolean; width?: number; color?: string }): React.CSSProperties {
+  if (!b?.enabled) return {};
+  return { WebkitTextStroke: `${b.width ?? 1}px ${b.color ?? "#000000"}`, paintOrder: "stroke fill" };
+}
 
 // 곡 분석 결과(#20·#27). null 이면 mood 기반 색상으로 폴백.
 export type VizSpec = {
@@ -41,6 +84,7 @@ export type MusicVizProps = {
   mood: string;
   durationSec: number;
   vizSpec: VizSpec | null;
+  designConfig?: DesignConfig;
 };
 
 const AUDIO = "audio.mp3";
@@ -59,7 +103,7 @@ const TYPE_END = 6.1; // 6.1~ 본 영상
 const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp" } as const;
 const easeInOut = Easing.bezier(0.65, 0, 0.35, 1);
 
-export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, vizSpec }) => {
+export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, vizSpec, designConfig }) => {
   const frame = useCurrentFrame();
   const { width, height, fps } = useVideoConfig();
   const audioData = useAudioData(staticFile(AUDIO));
@@ -73,6 +117,22 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
   const subtitleEn = (vizSpec?.subtitle_en || "").trim();
   const locationEn = (vizSpec?.location_en || "").trim() || "City View"; // #33: 항상 WHERE 표시(폴백)
   const firstTitle = (tracks[0]?.title || "").trim();
+
+  // ── #35-A 디자인 설정: 미지정 필드는 현재 하드코딩값으로 폴백(designConfig 비면 100% 동일) ──
+  const plCfg = designConfig?.play_list ?? {};
+  const wlCfg = designConfig?.where_label ?? {};
+  const plFontFamily = PRESET_FONTS[plCfg.font_family ?? ""] ?? SERIF;
+  const plFontWeight = plCfg.font_weight ?? 700;
+  const plColor = plCfg.color ?? textColor;
+  const plOpacityMul = plCfg.opacity ?? 1;
+  const plFontSize = plCfg.font_size ?? height * 0.3;
+  const plStroke = strokeStyle(plCfg.border);
+  const wlFontFamily = PRESET_FONTS[wlCfg.font_family ?? ""] ?? "sans-serif";
+  const wlFontSize = wlCfg.font_size ?? width * 0.012;
+  const wlFontWeight = wlCfg.font_weight ?? 600;
+  const wlColor = wlCfg.color ?? "#FFFFFF";
+  const wlOpacity = wlCfg.opacity ?? 0.9;
+  const wlStroke = strokeStyle(wlCfg.border);
 
   // ── 이퀄 막대 진폭(최근 프레임 평균으로 감쇠) ──────────────────────
   // 오디오 디코드가 안 되는 경우에도 막대가 보이도록 idle 사인으로 폴백(가시성 보장).
@@ -112,7 +172,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
   const eqTranslateY = (1 - eqIn) * (maxBarH + baseBottom + 60);
 
   // ── PLAY LIST: 0~3.5 중앙상단 거대 → 3.5~4.7 좌하단 이동·축소·페이드 ──
-  const LARGE = height * 0.3; // 폰트 높이 ~30% (가로 거의 꽉)
+  const LARGE = plFontSize; // 폰트 높이 ~30%(기본) — #35-A 설정 시 그 px. 인트로 도킹 비율은 불변.
   const plProgress = interpolate(frame, [STATIC_END * fps, FADE_END * fps], [0, 1], {
     ...clamp,
     easing: easeInOut,
@@ -173,14 +233,14 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
         }}
       />
 
-      {/* #37-B WHERE 라벨 — 상단 중앙, 원래 크기(약 0.012w)로 복귀·semibold·흰색 90%. 'Where :' 표기. */}
+      {/* #37-B WHERE 라벨(상단 중앙, 'Where :' 표기) — #35-A 디자인 설정 적용(미설정 시 현재값). */}
       {locationEn && (
         <div
           style={{
             position: "absolute", top: height * 0.04, width: "100%", textAlign: "center",
-            fontFamily: "sans-serif", fontSize: width * 0.012, fontWeight: 600,
-            letterSpacing: "0.05em", color: "#FFFFFF", opacity: 0.9,
-            textShadow: "0 2px 12px rgba(0,0,0,0.8)",
+            fontFamily: wlFontFamily, fontSize: wlFontSize, fontWeight: wlFontWeight,
+            letterSpacing: "0.05em", color: wlColor, opacity: wlOpacity,
+            textShadow: "0 2px 12px rgba(0,0,0,0.8)", ...wlStroke,
           }}
         >
           Where : {locationEn}
@@ -215,7 +275,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
         </div>
       )}
 
-      {/* 2b) PLAY LIST — 거대 → 좌하단 이동·축소·페이드(easeInOutCubic) */}
+      {/* 2b) PLAY LIST — 거대 → 좌하단 이동·축소·페이드(easeInOutCubic). #35-A 디자인 설정 적용. */}
       {plOpacity > 0.001 && (
         <div
           style={{
@@ -224,15 +284,16 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
             top: plY,
             transform: `translate(-50%, -50%) scale(${plScale})`,
             transformOrigin: "center",
-            fontFamily: SERIF,
-            fontWeight: 700,
-            color: textColor,
+            fontFamily: plFontFamily,
+            fontWeight: plFontWeight,
+            color: plColor,
             fontSize: LARGE,
             lineHeight: 1,
             letterSpacing: width * 0.012,
             whiteSpace: "nowrap",
             textShadow: shadow,
-            opacity: plOpacity,
+            opacity: plOpacity * plOpacityMul,
+            ...plStroke,
           }}
         >
           PLAY LIST

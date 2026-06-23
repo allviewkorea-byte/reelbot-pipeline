@@ -186,6 +186,9 @@ export default function MusicQueueGridPage() {
           <h1 className="text-xl font-semibold text-foreground">검토 대기 ({items.length})</h1>
           <p className="text-sm text-muted-foreground">카드에서 바로 재생·썸네일·공개를 처리하세요.</p>
         </div>
+        <Link href="/music/design" className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground">
+          디자인 본부
+        </Link>
       </header>
 
       {/* #36 진행 중 작업 — 항상 상단 노출(페이지 이동·기기 전환에도 DB 기준 유지) */}
