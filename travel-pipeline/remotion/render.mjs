@@ -22,6 +22,10 @@ const { values } = parseArgs({
     bg: { type: "string" },
     out: { type: "string" },
     props: { type: "string" },
+    // #43 분할 렌더 — 주어지면 그 프레임 구간만 렌더(frameRange). 미지정 시 전체(기존 동작).
+    "frame-start": { type: "string" },
+    "frame-end": { type: "string" },
+    muted: { type: "boolean" }, // #43 분할 시 비디오만 렌더(오디오는 나중에 풀 mux)
   },
 });
 
@@ -56,6 +60,11 @@ try {
     inputProps: props,
     browserExecutable,
   });
+  // #43 분할 렌더 — frame-start/end 가 있으면 그 구간만(frameRange). 미지정 시 전체(기존).
+  const frameRange =
+    values["frame-start"] !== undefined && values["frame-end"] !== undefined
+      ? [Number(values["frame-start"]), Number(values["frame-end"])]
+      : undefined;
   await renderMedia({
     composition,
     serveUrl,
@@ -69,6 +78,8 @@ try {
     imageFormat: "jpeg",
     jpegQuality: 100,
     crf: 16,
+    ...(frameRange ? { frameRange } : {}), // #43 분할 구간(미지정 시 전체)
+    ...(values.muted ? { muted: true } : {}), // #43 분할 시 비디오만
   });
   const secs = ((Date.now() - t0) / 1000).toFixed(1);
   console.log(`REMOTION_OK ${values.out} (${secs}s)`);
