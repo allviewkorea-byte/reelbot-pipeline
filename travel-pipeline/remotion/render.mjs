@@ -64,6 +64,11 @@ try {
     inputProps: props,
     browserExecutable,
     chromiumOptions: { gl: "swiftshader" }, // 헤드리스/서버 소프트웨어 렌더링.
+    // #38 프레임 품질 상향(1080p 출력 유지) — 중간 프레임 JPEG 80→100(거의 무손실),
+    // h264 crf 18→16(압축 손실↓). png 대신 jpeg100 으로 절충(렌더 시간 부담 최소).
+    imageFormat: "jpeg",
+    jpegQuality: 100,
+    crf: 16,
   });
   const secs = ((Date.now() - t0) / 1000).toFixed(1);
   console.log(`REMOTION_OK ${values.out} (${secs}s)`);

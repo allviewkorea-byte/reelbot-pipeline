@@ -33,9 +33,11 @@ function fileToDataUrl(file: File): Promise<string> {
   })
 }
 
-// #37-B 클라이언트 압축 — 최대 1920px·JPEG 품질 0.85 로 줄여 413(Request Entity Too Large) 회피.
-// canvas 미지원/실패 시 원본 dataURL 로 폴백(업로드는 시도). 비율 유지.
-async function compressImage(file: File, maxPx = 1920, quality = 0.85): Promise<string> {
+// #38 클라이언트 압축 — 최대 2560px·JPEG 품질 0.95(1080p 출력엔 충분, 선명도↑).
+// 413 방지: 결과 dataURL 이 Vercel 서버리스 본문 한도(4.5MB) 안에 들도록 품질을 단계적
+// 하향(아주 디테일한 대용량 이미지만 해당). canvas 미지원/실패 시 원본 dataURL 폴백.
+const _UPLOAD_MAX_DATAURL = 4_000_000 // ≈4MB(Vercel 4.5MB 본문 한도 내, JSON 오버헤드 여유)
+async function compressImage(file: File, maxPx = 2560, quality = 0.95): Promise<string> {
   try {
     const dataUrl = await fileToDataUrl(file)
     const img = await new Promise<HTMLImageElement>((resolve, reject) => {
@@ -53,7 +55,14 @@ async function compressImage(file: File, maxPx = 1920, quality = 0.85): Promise<
     const ctx = canvas.getContext("2d")
     if (!ctx) return dataUrl
     ctx.drawImage(img, 0, 0, w, h)
-    return canvas.toDataURL("image/jpeg", quality)
+    // 품질 0.95 부터 시작해, 본문 한도를 넘으면 0.07 씩 낮춰 한도 안으로(최저 0.5).
+    let q = quality
+    let out = canvas.toDataURL("image/jpeg", q)
+    while (out.length > _UPLOAD_MAX_DATAURL && q > 0.5) {
+      q = Math.round((q - 0.07) * 100) / 100
+      out = canvas.toDataURL("image/jpeg", q)
+    }
+    return out
   } catch {
     return fileToDataUrl(file)
   }
@@ -146,7 +155,7 @@ export function MusicQueueCard({ item, onChanged }: { item: QueueItem; onChanged
       if (!file.type.startsWith("image/")) { toast.error("이미지 파일만 업로드할 수 있습니다."); return }
       setUploading(true)
       try {
-        const dataUrl = await compressImage(file) // #37-B: 1920px·JPEG 0.85 압축(413 회피)
+        const dataUrl = await compressImage(file) // #38: 2560px·JPEG 0.95(선명도↑) + 413 자동 방지
         const res = await fetch(`/api/music/queue/${encodeURIComponent(item.mix_id)}/thumbnail`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
