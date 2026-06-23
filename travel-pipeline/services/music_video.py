@@ -336,7 +336,8 @@ def build_thumbnail_prompt(theme: dict, viz_spec: dict | None = None) -> str:
         bright = bucket in ("citypop", "cafe", "workout", "summer")
         bright_force = "맑은 한낮의 환한 자연광, 화창한 날씨, " if bright else ""
         return (
-            f"가로형 롱폼사이즈 플레이리스트 썸네일 배경 이미지. "
+            f"가로형 롱폼사이즈 (1920x1080, 16:9 비율), 파일 사이즈 4MB 이하의 "
+            f"플레이리스트 썸네일 배경 이미지. "
             f"{location_label}, {pool['scene']}, {pool['time']}. "
             f"{bright_force}"
             f"맑은 날의 사실적인 풍경 사진, {pool['tone']}, {pool['light']}, "

@@ -190,9 +190,13 @@ def localize_generate(mix_id: str):
     row = music_uploads.get_upload(mix_id)
     if not row:
         raise HTTPException(status_code=404, detail="해당 mix_id 의 큐 항목이 없습니다.")
+    # 캐시는 '실제 다국어(2개 언어 이상)'일 때만 재사용. #37-B 이전에 번역 실패로 원본 언어
+    # 1개만 저장된 캐시는 무시하고 재생성한다(GPT 가용 시).
     cached = row.get("localizations")
-    if isinstance(cached, dict) and cached.get("meta"):
-        return {"ok": True, "localizations": cached, "cached": True}
+    if isinstance(cached, dict) and isinstance(cached.get("meta"), dict):
+        from services import music_lyrics
+        if len(cached["meta"]) >= 2 or not music_lyrics.is_available():
+            return {"ok": True, "localizations": cached, "cached": True}
     slug = row.get("slug") or ""
     theme = music_theme.get_theme(slug) or {
         "slug": slug, "title_kr": row.get("title_kr"), "genre": row.get("genre"), "mood": row.get("mood"),

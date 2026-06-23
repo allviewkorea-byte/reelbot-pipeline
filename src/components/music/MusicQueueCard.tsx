@@ -33,6 +33,32 @@ function fileToDataUrl(file: File): Promise<string> {
   })
 }
 
+// #37-B 클라이언트 압축 — 최대 1920px·JPEG 품질 0.85 로 줄여 413(Request Entity Too Large) 회피.
+// canvas 미지원/실패 시 원본 dataURL 로 폴백(업로드는 시도). 비율 유지.
+async function compressImage(file: File, maxPx = 1920, quality = 0.85): Promise<string> {
+  try {
+    const dataUrl = await fileToDataUrl(file)
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image()
+      el.onload = () => resolve(el)
+      el.onerror = reject
+      el.src = dataUrl
+    })
+    const scale = Math.min(1, maxPx / Math.max(img.width, img.height))
+    const w = Math.round(img.width * scale)
+    const h = Math.round(img.height * scale)
+    const canvas = document.createElement("canvas")
+    canvas.width = w
+    canvas.height = h
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return dataUrl
+    ctx.drawImage(img, 0, 0, w, h)
+    return canvas.toDataURL("image/jpeg", quality)
+  } catch {
+    return fileToDataUrl(file)
+  }
+}
+
 // 카드 분리감 강화(#28) — 보더 + 미세 그림자 + ring 으로 각 카드를 독립 단위로.
 const cardClass = "flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-md ring-1 ring-black/5"
 
@@ -120,13 +146,14 @@ export function MusicQueueCard({ item, onChanged }: { item: QueueItem; onChanged
       if (!file.type.startsWith("image/")) { toast.error("이미지 파일만 업로드할 수 있습니다."); return }
       setUploading(true)
       try {
-        const dataUrl = await fileToDataUrl(file)
+        const dataUrl = await compressImage(file) // #37-B: 1920px·JPEG 0.85 압축(413 회피)
         const res = await fetch(`/api/music/queue/${encodeURIComponent(item.mix_id)}/thumbnail`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ image_base64: dataUrl, slug: item.slug }),
         })
-        const data = await res.json()
+        const data = await res.json().catch(() => ({}))
+        if (res.status === 413) throw new Error("이미지가 너무 큽니다. 더 작은 이미지를 사용하거나 잠시 후 다시 시도하세요.")
         if (!res.ok) throw new Error(data?.detail || "업로드 실패")
         setThumbUrl(`${data.thumbnail_url}?v=${Date.now()}`)
         // #33 A: 오버레이 미리보기 제거 → '재렌더 대기'. [재렌더] 눌러야 실제 영상에 반영.
