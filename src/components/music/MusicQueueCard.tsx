@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react"
 import { toast } from "sonner"
-import { Loader2, Music, Copy, Check, Upload, Globe, Trash2, MonitorPlay } from "lucide-react"
+import { Loader2, Music, Copy, Check, Upload, Globe, Trash2, MonitorPlay, Languages, ChevronDown, ChevronUp } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export interface VizSpec {
@@ -94,6 +94,7 @@ export function ManualProgressCard({ step }: { step: string }) {
 export function MusicQueueCard({ item, onChanged }: { item: QueueItem; onChanged: (keep?: string) => void }) {
   const [copied, setCopied] = useState(false)
   const [thumbUrl, setThumbUrl] = useState<string | null>(item.thumbnail_url ?? null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [published, setPublished] = useState<string | null>(null)
@@ -115,6 +116,8 @@ export function MusicQueueCard({ item, onChanged }: { item: QueueItem; onChanged
     async (file: File | undefined | null) => {
       if (!file) return
       if (!file.type.startsWith("image/")) { toast.error("이미지 파일만 업로드할 수 있습니다."); return }
+      // #32 A-5: 즉시 미리보기 — 영상 위에 선택한 이미지를 오버레이로 바로 표시(업로드 전).
+      setPreviewUrl(URL.createObjectURL(file))
       setUploading(true)
       try {
         const dataUrl = await fileToDataUrl(file)
@@ -177,6 +180,11 @@ export function MusicQueueCard({ item, onChanged }: { item: QueueItem; onChanged
         ) : (
           <div className="flex h-full items-center justify-center text-muted-foreground"><Music className="h-7 w-7" /></div>
         )}
+        {/* #32 A-5: 업로드한 이미지 즉시 미리보기(영상 위 반투명 오버레이) — 실제 합성은 게시 시 */}
+        {previewUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={previewUrl} alt="썸네일 미리보기" className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-70" />
+        )}
         <span className={cn("absolute left-2 top-2 rounded-full px-2 py-0.5 text-[11px] font-medium", hasThumb ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-300")}>
           {hasThumb ? "썸네일 ✓" : "썸네일 없음"}
         </span>
@@ -229,6 +237,9 @@ export function MusicQueueCard({ item, onChanged }: { item: QueueItem; onChanged
           )}
         </div>
 
+        {/* #32 다국어 검수 — 펼쳐서 언어별 제목·설명·가사 확인/수정 */}
+        <MultilangPanel mixId={item.mix_id} />
+
         {/* 공개 + 삭제 */}
         <div className="mt-auto flex items-center gap-2">
           {published ? (
@@ -257,6 +268,165 @@ export function MusicQueueCard({ item, onChanged }: { item: QueueItem; onChanged
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+// #32 다국어 검수 패널 — [다국어 ▼] 펼침 → 언어 탭(KR EN JA ZH ES PT AR HI TH TL VI) →
+// 선택 언어 제목·설명·가사 표시·수정 → 저장. 게시 시 저장된 데이터로 업로드.
+const ML_TABS: { key: string; label: string }[] = [
+  { key: "ko", label: "KR" }, { key: "en", label: "EN" }, { key: "ja", label: "JA" },
+  { key: "zh", label: "ZH" }, { key: "es", label: "ES" }, { key: "pt", label: "PT" },
+  { key: "ar", label: "AR" }, { key: "hi", label: "HI" }, { key: "th", label: "TH" },
+  { key: "tl", label: "TL" }, { key: "vi", label: "VI" },
+]
+
+interface Localizations {
+  source_lang?: string
+  meta?: Record<string, { title?: string; description?: string }>
+  lyrics?: Record<string, string>
+  hashtags?: string[]
+}
+
+function MultilangPanel({ mixId }: { mixId: string }) {
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [ml, setMl] = useState<Localizations | null>(null)
+  const [lang, setLang] = useState("ko")
+
+  const ensure = useCallback(async () => {
+    if (ml) return
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/music/queue/${encodeURIComponent(mixId)}/localize`, { method: "POST" })
+      const data = await res.json()
+      if (!res.ok || !data?.localizations) throw new Error(data?.detail || "다국어 생성 실패")
+      setMl(data.localizations)
+      setLang(data.localizations.source_lang || "ko")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "다국어 생성 실패")
+    } finally {
+      setLoading(false)
+    }
+  }, [ml, mixId])
+
+  const toggle = () => {
+    const next = !open
+    setOpen(next)
+    if (next) ensure()
+  }
+
+  const updateMeta = (field: "title" | "description", v: string) => {
+    setMl((cur) => {
+      if (!cur) return cur
+      const meta = { ...(cur.meta || {}) }
+      meta[lang] = { ...(meta[lang] || {}), [field]: v }
+      return { ...cur, meta }
+    })
+  }
+  const updateLyrics = (v: string) => {
+    setMl((cur) => (cur ? { ...cur, lyrics: { ...(cur.lyrics || {}), [lang]: v } } : cur))
+  }
+
+  const save = async () => {
+    if (!ml) return
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/music/queue/${encodeURIComponent(mixId)}/localize`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ localizations: ml }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.detail || "저장 실패")
+      toast.success("다국어 수정사항 저장됨")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "저장 실패")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const meta = ml?.meta?.[lang] || {}
+  const lyrics = ml?.lyrics?.[lang] ?? ""
+
+  return (
+    <div className="rounded-md border border-border bg-secondary/20">
+      <button
+        type="button"
+        onClick={toggle}
+        className="flex w-full items-center justify-between gap-2 px-2.5 py-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+      >
+        <span className="flex items-center gap-1.5"><Languages className="h-3.5 w-3.5" /> 다국어 (10개 언어)</span>
+        {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+      </button>
+
+      {open && (
+        <div className="border-t border-border p-2.5">
+          {loading ? (
+            <div className="flex items-center gap-2 py-3 text-xs text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> 10개 언어 번역 중…</div>
+          ) : !ml ? (
+            <p className="py-2 text-xs text-muted-foreground">다국어 데이터를 불러오지 못했습니다.</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {/* 언어 탭 */}
+              <div className="flex flex-wrap gap-1">
+                {ML_TABS.map((t) => (
+                  <button
+                    key={t.key}
+                    type="button"
+                    onClick={() => setLang(t.key)}
+                    className={cn(
+                      "rounded px-1.5 py-0.5 text-[11px] font-medium transition-colors",
+                      lang === t.key ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+              {/* 제목 */}
+              <label className="text-[10px] font-medium uppercase text-muted-foreground">제목</label>
+              <input
+                value={meta.title ?? ""}
+                onChange={(e) => updateMeta("title", e.target.value)}
+                className="rounded border border-border bg-background px-2 py-1 text-xs text-foreground"
+                placeholder="(번역 없음)"
+              />
+              {/* 설명 */}
+              <label className="text-[10px] font-medium uppercase text-muted-foreground">설명</label>
+              <textarea
+                value={meta.description ?? ""}
+                onChange={(e) => updateMeta("description", e.target.value)}
+                rows={3}
+                className="resize-y rounded border border-border bg-background px-2 py-1 text-xs text-foreground"
+                placeholder="(번역 없음)"
+              />
+              {/* 가사 */}
+              <label className="text-[10px] font-medium uppercase text-muted-foreground">가사</label>
+              <textarea
+                value={lyrics}
+                onChange={(e) => updateLyrics(e.target.value)}
+                rows={4}
+                className="resize-y rounded border border-border bg-background px-2 py-1 text-xs text-foreground"
+                placeholder="(가사 없음)"
+              />
+              {(ml.hashtags?.length ?? 0) > 0 && (
+                <p className="truncate text-[10px] text-muted-foreground">{ml.hashtags!.join(" ")}</p>
+              )}
+              <button
+                type="button"
+                onClick={save}
+                disabled={saving}
+                className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium hover:border-primary/40 disabled:opacity-60"
+              >
+                {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} 수정사항 저장
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
