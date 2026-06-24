@@ -58,13 +58,20 @@ def _translate_map(text: str, source: str, targets: list[str]) -> dict[str, str]
 
 
 def translate_lyrics(lyrics_text: str, source_lang: str | None = None) -> dict[str, str]:
-    """가사 → 원본 + 9개 번역 = 10개 언어. {lang: 가사}."""
+    """가사 → 원본 + 9개 번역 = 10개 언어. {lang: 가사}.
+
+    #작업지시서 2026-06: 9개 언어를 단일 GPT 콜로 번역하면 출력 JSON 이 길어 뒤쪽 언어
+    (일본어 등)가 잘려 누락됐다 → **언어별 1콜**로 분리(generate_localizations 패턴).
+    각 콜이 짧아 truncation 원천 제거, 한 언어 실패가 다른 언어에 영향 없음(부분 성공).
+    """
     src = (source_lang or detect_source_lang(lyrics_text)).strip()
     result = {src: lyrics_text}
-    if not _is_available():
+    if not _is_available() or not lyrics_text.strip():
         return result
-    targets = [lng for lng in ALL_LANGS if lng != src]
-    result.update(_translate_map(lyrics_text, src, targets))
+    for lng in [t for t in ALL_LANGS if t != src]:
+        one = _translate_map(lyrics_text, src, [lng])  # 언어 1개씩 → JSON 잘림 없음
+        if one.get(lng, "").strip():
+            result[lng] = one[lng]
     return result
 
 

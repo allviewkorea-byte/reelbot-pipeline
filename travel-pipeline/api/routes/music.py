@@ -244,7 +244,8 @@ def genre_prompt(genre: str = ""):
     from services import music_genres, music_image_prompts
     g = (genre or "").strip()
     gid = g.lower() if g.lower() in music_image_prompts.IMAGE_PROMPTS else music_genres.classify(g)
-    return {"prompt": music_image_prompts.get_image_prompt(gid), "genre_id": gid}
+    # 복사용 — 프리픽스 제외(대표 ChatGPT 에 스킬 고정).
+    return {"prompt": music_image_prompts.get_image_prompt(gid, include_prefix=False), "genre_id": gid}
 
 
 class LibraryCreateBody(BaseModel):
