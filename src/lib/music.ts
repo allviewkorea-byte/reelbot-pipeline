@@ -142,7 +142,20 @@ export interface MusicDesignConfig {
   where_label: TextStyleConfig
   title: TextStyleConfig    // #36 곡 제목(좌하단)
   subtitle: TextStyleConfig // #36 부제(좌하단)
+  // 인라인 편집 텍스트(빈값=기본값 폴백). playlist_text/where_text=영상 반영, preview_*=미리보기 전용.
+  playlist_text?: string
+  where_text?: string
+  preview_title?: string
+  preview_subtitle?: string
 }
+
+// 미리보기 기본 텍스트(빈 값일 때 표시). playlist/where 는 Remotion 도 같은 기본값으로 폴백.
+export const DESIGN_TEXT_DEFAULTS = {
+  playlist_text: "PLAY LIST",
+  where_text: "Where",
+  preview_title: "시티팝 드라이브",
+  preview_subtitle: "morning light on endless urban roads",
+} as const
 
 // UI 초기 기본값(백엔드 default_design_config 와 동일). 저장 전엔 렌더 무영향(MusicViz 가 현재값 폴백).
 export const DEFAULT_DESIGN_CONFIG: MusicDesignConfig = {

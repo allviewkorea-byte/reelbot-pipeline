@@ -176,13 +176,31 @@ def normalize_design_config(raw, *, include_all: bool = False) -> dict:
     핵심 대상(play_list/where_label)은 항상 포함(#35-A). 옵션 대상(title/subtitle, #36)은
     include_all 이거나 raw 에 실제로 있을 때만 포함 → 기존(#35-A) 저장 row 의 렌더 회귀 0
     (title/subtitle 키 없으면 MusicViz 가 현재 하드코딩값으로 폴백).
+
+    텍스트 커스텀(인라인 편집): playlist_text/where_text(영상 반영) + preview_title/
+    preview_subtitle(미리보기 전용). 빈 문자열 = 기본값 폴백. 기존 스타일 필드는 무변경.
     """
     raw = raw if isinstance(raw, dict) else {}
     out = {name: _norm_target(raw.get(name), DEFAULT_DESIGN_CONFIG[name]) for name in _CORE_TARGETS}
     for name in _OPT_TARGETS:
         if include_all or isinstance(raw.get(name), dict):
             out[name] = _norm_target(raw.get(name), DEFAULT_DESIGN_CONFIG[name])
+    for key, maxlen in _TEXT_FIELDS.items():
+        out[key] = _text(raw.get(key), maxlen)
     return out
+
+
+# 인라인 편집 텍스트 필드 → 최대 길이(빈 문자열이면 렌더가 기본값 폴백).
+_TEXT_FIELDS = {
+    "playlist_text": 40,
+    "where_text": 24,
+    "preview_title": 60,
+    "preview_subtitle": 100,
+}
+
+
+def _text(v, maxlen: int) -> str:
+    return v.strip()[:maxlen] if isinstance(v, str) else ""
 
 
 def default_design_config() -> dict:

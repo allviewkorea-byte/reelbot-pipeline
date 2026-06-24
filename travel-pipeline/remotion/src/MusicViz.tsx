@@ -60,6 +60,8 @@ export type DesignConfig = {
   where_label?: TextStyleCfg;
   title?: TextStyleCfg; // #36 곡 제목(좌하단)
   subtitle?: TextStyleCfg; // #36 부제(좌하단)
+  playlist_text?: string; // 인라인 편집 — 빈값이면 "PLAY LIST"
+  where_text?: string; // 인라인 편집 — 빈값이면 "Where"
 } | null;
 
 // 테두리(외곽선) — border.enabled 일 때만 -webkit-text-stroke + paint-order(깔끔한 외곽).
@@ -129,6 +131,9 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
   // ── #35-A 디자인 설정: 미지정 필드는 현재 하드코딩값으로 폴백(designConfig 비면 100% 동일) ──
   const plCfg = designConfig?.play_list ?? {};
   const wlCfg = designConfig?.where_label ?? {};
+  // 인라인 편집 텍스트(빈값=기본값 폴백). 영상 반영.
+  const playlistText = (designConfig?.playlist_text || "").trim() || "PLAY LIST";
+  const whereText = (designConfig?.where_text || "").trim() || "Where";
   const plFontFamily = PRESET_FONTS[plCfg.font_family ?? ""] ?? SERIF;
   const plFontWeight = plCfg.font_weight ?? 700;
   const plColor = plCfg.color ?? textColor;
@@ -269,7 +274,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
             textShadow: "0 2px 12px rgba(0,0,0,0.8)", ...wlStroke,
           }}
         >
-          Where : {locationEn}
+          {whereText} : {locationEn}
         </div>
       )}
 
@@ -322,7 +327,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
             ...plStroke,
           }}
         >
-          PLAY LIST
+          {playlistText}
         </div>
       )}
 
