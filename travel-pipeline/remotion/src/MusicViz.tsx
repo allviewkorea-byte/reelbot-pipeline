@@ -20,6 +20,7 @@ import { loadFont as loadArchivo } from "@remotion/google-fonts/Archivo";
 import { loadFont as loadInter } from "@remotion/google-fonts/Inter";
 import { loadFont as loadDMSans } from "@remotion/google-fonts/DMSans";
 import { loadFont as loadCormorant } from "@remotion/google-fonts/CormorantGaramond";
+import { loadFont as loadBodoni } from "@remotion/google-fonts/BodoniModa";
 import { moodColors } from "./colors";
 import { currentTrack, Track } from "./tracks";
 
@@ -41,6 +42,7 @@ const PRESET_FONTS: Record<string, string> = {
   "DM Sans": loadDMSans().fontFamily,
   "Playfair Display": playfair.fontFamily,
   "Cormorant Garamond": loadCormorant().fontFamily,
+  "Bodoni Moda": loadBodoni().fontFamily,
 };
 
 // #35-A 디자인 설정(채널 설정 본부에서 저장). 비어 있으면 현재 하드코딩값으로 폴백(회귀 0).
