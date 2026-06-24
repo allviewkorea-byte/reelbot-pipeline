@@ -120,7 +120,7 @@ export function normalizeMusicConfig(raw: unknown): MusicChannelConfig {
 export const DESIGN_PRESET_FONTS = [
   "Montserrat", "Poppins", "Bebas Neue", "Oswald", "Anton",
   "Archivo", "Inter", "DM Sans", "Playfair Display", "Cormorant Garamond",
-  "Bodoni Moda",
+  "Bodoni Moda", "Young Serif", "Literata",
 ] as const
 
 export interface TextBorder {
