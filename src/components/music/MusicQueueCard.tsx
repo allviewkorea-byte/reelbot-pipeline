@@ -203,23 +203,46 @@ export function MusicQueueCard({ item, onChanged }: { item: QueueItem; onChanged
     }
   }, [showPlaylist, item.mix_id])
 
+  // #52-B clipboard 헬퍼 — API 우선, 실패 시 execCommand(textarea) 폴백.
+  const writeClipboard = async (text: string): Promise<boolean> => {
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch { /* 권한/제스처 밖 → execCommand 폴백 */ }
+    try {
+      const ta = document.createElement("textarea")
+      ta.value = text
+      ta.style.position = "fixed"
+      ta.style.opacity = "0"
+      document.body.appendChild(ta)
+      ta.focus()
+      ta.select()
+      const ok = document.execCommand("copy")
+      document.body.removeChild(ta)
+      return ok
+    } catch {
+      return false
+    }
+  }
+
   const copyPrompt = async () => {
-    // #49: 장르별 풀에서 매번 새 프롬프트를 받아 복사(같은 장르라도 다른 컷). 실패 시 저장값 폴백.
-    let text = item.gpt_prompt || ""
+    // #52-B iOS Safari 는 clipboard 가 사용자 제스처 직후에만 허용 → fetch 후 복사하면 차단.
+    // ① 클릭 즉시(제스처 컨텍스트) 저장값을 먼저 복사한다.
+    const fallback = item.gpt_prompt || ""
+    const okNow = await writeClipboard(fallback)
+    if (okNow) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    }
+    // ② 백그라운드로 장르별 새 프롬프트를 받아 재복사 시도(실패해도 저장값은 이미 복사됨).
     try {
       if (item.genre) {
         const r = await fetch(`/api/music/genre-prompt?genre=${encodeURIComponent(item.genre)}`)
         const d = await r.json().catch(() => null)
-        if (d?.prompt) text = d.prompt as string
+        if (d?.prompt) await writeClipboard(d.prompt as string)
       }
-    } catch { /* 네트워크 실패 → 저장된 gpt_prompt 폴백 */ }
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch {
-      toast.error("복사 실패 — 텍스트를 직접 선택해 복사하세요.")
-    }
+    } catch { /* 네트워크 실패 → 이미 복사된 저장값 유지 */ }
+    if (!okNow) toast.error("복사 실패 — 텍스트를 직접 선택해 복사하세요.")
   }
 
   const handleFile = useCallback(

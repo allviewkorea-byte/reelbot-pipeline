@@ -236,7 +236,7 @@ def generate_lyrics(
             songs.append({
                 "sub_theme": plan.get("sub_theme", ""),
                 "core_message": plan.get("core_message", ""),
-                "title": plan.get("title", "") or f"{theme} {i}",
+                "title": plan.get("title", ""),  # #52-A 빈값 허용 → 다운스트림이 Suno 자동 제목 사용(장르명+번호 방지)
                 "style": plan.get("style", "") or theme,
                 "vocalGender": plan.get("vocalGender") or None,
                 "lyrics": review["lyrics"],
