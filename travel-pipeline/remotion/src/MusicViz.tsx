@@ -222,8 +222,8 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
   const typeProgress = interpolate(frame, [TYPE_START * fps, TYPE_END * fps], [0, 1], clamp);
   const inIntroType = frame < TYPE_END * fps;
   const blLeft = width * 0.06;
-  const blSubTop = height * 0.73; // #32 부제(위) — 약 4%p(≈50px) 위로
-  const blTitleTop = height * 0.815; // #32 곡 제목(아래) — 동일 4%p 위, 간격 8.5%p 유지
+  const blTitleTop = height * 0.67; // #37 곡 제목(위)로 순서 뒤집기 + 6%p 위로(이퀄 간격 확보)
+  const blSubTop = height * 0.755; // #37 부제(아래) — 간격 8.5%p 유지(0.755-0.67), 6%p 위로
   let blSub = "";
   let blTitle = "";
   let blTitleOpacity = 0;
@@ -322,7 +322,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
         </div>
       )}
 
-      {/* 3) 좌하단 블록(타이핑 후 본 영상): 부제(위) + 곡 제목(아래). #36 디자인 설정 적용(미설정 시 현재값). */}
+      {/* 3) 좌하단 블록(타이핑 후 본 영상): 곡 제목(위) + 부제(아래). #37 순서 뒤집기. #36 디자인 설정 적용(미설정 시 현재값). */}
       {blSub && (
         <div
           style={{
