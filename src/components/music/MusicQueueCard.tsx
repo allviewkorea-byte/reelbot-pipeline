@@ -166,8 +166,17 @@ export function MusicQueueCard({ item, onChanged }: { item: QueueItem; onChanged
   }, [showPlaylist, item.mix_id])
 
   const copyPrompt = async () => {
+    // #49: 장르별 풀에서 매번 새 프롬프트를 받아 복사(같은 장르라도 다른 컷). 실패 시 저장값 폴백.
+    let text = item.gpt_prompt || ""
     try {
-      await navigator.clipboard.writeText(item.gpt_prompt || "")
+      if (item.genre) {
+        const r = await fetch(`/api/music/genre-prompt?genre=${encodeURIComponent(item.genre)}`)
+        const d = await r.json().catch(() => null)
+        if (d?.prompt) text = d.prompt as string
+      }
+    } catch { /* 네트워크 실패 → 저장된 gpt_prompt 폴백 */ }
+    try {
+      await navigator.clipboard.writeText(text)
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     } catch {
