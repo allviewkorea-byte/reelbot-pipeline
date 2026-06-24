@@ -96,27 +96,41 @@ export default function MusicDashboardPage() {
       {/* 헤더 — 채널명+뱃지 / 토글들. 백곰 레이아웃 1:1 */}
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div className="min-w-0 pl-10 md:pl-0">
-          <div className="flex flex-wrap items-center gap-2 md:flex-nowrap">
-            <h1 className="truncate text-lg font-semibold text-foreground">{MUSIC_CHANNEL_NAME}</h1>
-            <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${PLATFORM_BADGE.youtube}`}>
-              {PLATFORM_LABELS.youtube}
-            </span>
-            <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${TRACK_BADGE.auto}`}>
-              {TRACK_LABELS.auto}
-            </span>
-            <span
-              className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors duration-200 ${
-                isActive ? "bg-emerald-500/15 text-emerald-400" : "bg-secondary/50 text-muted-foreground"
-              }`}
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2 md:flex-nowrap">
+              <h1 className="truncate text-lg font-semibold text-foreground">{MUSIC_CHANNEL_NAME}</h1>
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${PLATFORM_BADGE.youtube}`}>
+                {PLATFORM_LABELS.youtube}
+              </span>
+              <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${TRACK_BADGE.auto}`}>
+                {TRACK_LABELS.auto}
+              </span>
+              <span
+                className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors duration-200 ${
+                  isActive ? "bg-emerald-500/15 text-emerald-400" : "bg-secondary/50 text-muted-foreground"
+                }`}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${isActive ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground/50"}`} />
+                {isActive ? "가동 중" : "대기 중"}
+              </span>
+            </div>
+            {/* #51-fix 모바일 전용: 채널 설정을 제목 옆(우)으로. PC 는 아래 툴바에 있음. */}
+            <Link
+              href="/music/settings"
+              title="채널 설정(슬로건·소셜·AI 명시) — 공개 업로드 본문에 반영"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border px-2.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground md:hidden"
             >
-              <span className={`h-1.5 w-1.5 rounded-full ${isActive ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground/50"}`} />
-              {isActive ? "가동 중" : "대기 중"}
-            </span>
+              <Settings className="h-4 w-4" />
+              채널 설정
+            </Link>
           </div>
           <p className="mt-0.5 text-sm text-muted-foreground">운영 채널 관제 대시보드</p>
         </div>
 
-        <div className="flex shrink-0 flex-wrap items-center justify-start gap-2 md:justify-end">
+        {/* #51-fix 모바일: 토글행 / 곡수+시작행 / 네비행으로 세로 스택. PC(md:contents): 기존 우측 정렬 wrap 그대로. */}
+        <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center md:justify-end md:gap-2">
+          {/* 토글 그룹 — 공개/AI/하루 (모바일 1행, PC contents) */}
+          <div className="flex flex-wrap items-center gap-2 md:contents">
           {/* 공개/비공개 */}
           <button
             onClick={() => patch({ mode: isPublic ? "semi" : "auto" })}
@@ -166,17 +180,37 @@ export default function MusicDashboardPage() {
             </div>
             <span className="text-muted-foreground">개</span>
           </div>
-          {/* 곡수 입력창 1~100 (#40) — 영상 1개당 suno 생성 곡수 = 영상 길이(비용·길이 직접 제어) */}
-          <TrackCountInput key={trackCount} current={trackCount} busy={busy} onApply={(n) => patch({ trackCount: n })} />
-          {/* 채널 설정(#37) — 슬로건·소셜·AI 명시 */}
+          </div>{/* /토글 그룹 */}
+
+          {/* 곡수 + 시작(모바일) — 같은 행(곡수 좌 / 시작 우). 예상시간은 곡수 아래. PC contents. */}
+          <div className="flex items-start justify-between gap-2 md:contents">
+            {/* 곡수 입력창 1~100 (#40) — 영상 1개당 suno 생성 곡수 = 영상 길이(비용·길이 직접 제어) */}
+            <TrackCountInput key={trackCount} current={trackCount} busy={busy} onApply={(n) => patch({ trackCount: n })} />
+            {/* #51-fix 모바일 전용 시작/중단 — PC 는 툴바 끝(가동 토글)에 있음 */}
+            <button
+              onClick={() => patch({ isActive: !isActive })}
+              disabled={busy}
+              aria-pressed={isActive}
+              className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-all duration-200 disabled:opacity-60 md:hidden ${
+                isActive ? "border border-red-500/30 text-red-400 hover:bg-red-500/10" : "bg-emerald-600 text-white shadow-sm hover:opacity-90"
+              }`}
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : isActive ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+              {isActive ? "중단" : "시작"}
+            </button>
+          </div>
+
+          {/* 채널 설정(#37) — PC 전용(모바일은 제목 옆) */}
           <Link
             href="/music/settings"
             title="채널 설정(슬로건·소셜·AI 명시) — 공개 업로드 본문에 반영"
-            className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+            className="hidden items-center gap-1.5 rounded-lg border border-border px-2.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground md:flex"
           >
             <Settings className="h-4 w-4" />
             채널 설정
           </Link>
+          {/* 네비 그룹 — 디자인본부/음원라이브러리/검토대기 (모바일 1행, PC contents) */}
+          <div className="flex flex-wrap items-center gap-2 md:contents">
           {/* 디자인 본부(#35-A) — PLAY LIST·Where 폰트/테두리 */}
           <Link
             href="/music/design"
@@ -204,12 +238,13 @@ export default function MusicDashboardPage() {
             검토 대기
             {queueCount > 0 && <span className="rounded-full bg-white/20 px-1.5 text-[10px] font-semibold">{queueCount}</span>}
           </Link>
-          {/* 가동 토글 */}
+          </div>{/* /네비 그룹 */}
+          {/* 가동 토글 — PC 전용(모바일은 곡수 옆에 있음) */}
           <button
             onClick={() => patch({ isActive: !isActive })}
             disabled={busy}
             aria-pressed={isActive}
-            className={`flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-all duration-200 disabled:opacity-60 ${
+            className={`hidden items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-all duration-200 disabled:opacity-60 md:flex ${
               isActive ? "border border-red-500/30 text-red-400 hover:bg-red-500/10" : "bg-emerald-600 text-white shadow-sm hover:opacity-90"
             }`}
           >
