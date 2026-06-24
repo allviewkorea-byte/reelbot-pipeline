@@ -99,7 +99,7 @@ def get_channel_config() -> dict:
 PRESET_FONTS = (
     "Montserrat", "Poppins", "Bebas Neue", "Oswald", "Anton",
     "Archivo", "Inter", "DM Sans", "Playfair Display", "Cormorant Garamond",
-    "Bodoni Moda",
+    "Bodoni Moda", "Young Serif", "Literata",
 )
 
 # UI 초기값(GET 기본). 비어 있을 때의 '렌더'는 MusicViz 가 현재 하드코딩값으로 폴백하므로,
