@@ -1,15 +1,20 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
-import { ArrowLeft, Loader2, Save } from "lucide-react"
+import { ArrowLeft, Loader2, Save, Pencil } from "lucide-react"
 import {
   DEFAULT_DESIGN_CONFIG,
   DESIGN_PRESET_FONTS,
+  DESIGN_TEXT_DEFAULTS,
   type MusicDesignConfig,
   type TextStyleConfig,
 } from "@/lib/music"
+
+// 인라인 편집 텍스트 필드 키 / 스타일(TextStyleConfig) 대상 키.
+type TextKey = "playlist_text" | "where_text" | "preview_title" | "preview_subtitle"
+type StyleKey = "play_list" | "where_label" | "title" | "subtitle"
 
 // 미리보기용 Google Fonts(프리셋 10종) — Remotion 렌더와 동일 패밀리. 가중치는 기본 로드(미리보기는 faux-bold 허용).
 const FONT_LINK =
@@ -32,8 +37,11 @@ export default function MusicDesignPage() {
       .finally(() => setLoading(false))
   }, [])
 
-  const patchTarget = (target: keyof MusicDesignConfig, patch: Partial<TextStyleConfig>) =>
+  const patchTarget = (target: StyleKey, patch: Partial<TextStyleConfig>) =>
     setConfig((c) => ({ ...c, [target]: { ...c[target], ...patch } }))
+
+  const patchText = (key: TextKey, value: string) =>
+    setConfig((c) => ({ ...c, [key]: value }))
 
   const save = useCallback(async () => {
     setSaving(true)
@@ -41,7 +49,15 @@ export default function MusicDesignPage() {
       const res = await fetch("/api/music/design-config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ play_list: config.play_list, where_label: config.where_label }),
+        body: JSON.stringify({
+          play_list: config.play_list,
+          where_label: config.where_label,
+          // 인라인 편집 텍스트(빈값=기본값). playlist/where 는 영상 반영, preview_* 는 미리보기 전용.
+          playlist_text: config.playlist_text ?? "",
+          where_text: config.where_text ?? "",
+          preview_title: config.preview_title ?? "",
+          preview_subtitle: config.preview_subtitle ?? "",
+        }),
       })
       const d = await res.json()
       if (!d?.ok) throw new Error(d?.detail || "저장 실패")
@@ -74,7 +90,9 @@ export default function MusicDesignPage() {
           <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
             <TargetPanel
               title="PLAY LIST (메인 로고)"
-              sample="PLAY LIST"
+              textValue={config.playlist_text ?? ""}
+              textDefault={DESIGN_TEXT_DEFAULTS.playlist_text}
+              onTextChange={(v) => patchText("playlist_text", v)}
               previewScale={0.18}
               value={config.play_list}
               sizeRange={[80, 480]}
@@ -82,15 +100,20 @@ export default function MusicDesignPage() {
             />
             <TargetPanel
               title="Where : ___ 라벨"
-              sample="Where : Tokyo"
+              textValue={config.where_text ?? ""}
+              textDefault={DESIGN_TEXT_DEFAULTS.where_text}
+              textSuffix=" : Tokyo"
+              onTextChange={(v) => patchText("where_text", v)}
               previewScale={1}
               value={config.where_label}
               sizeRange={[12, 80]}
               onChange={(p) => patchTarget("where_label", p)}
             />
             <TargetPanel
-              title="제목 (곡 제목)"
-              sample="시티팝 드라이브"
+              title="제목 (곡 제목 · 미리보기 전용)"
+              textValue={config.preview_title ?? ""}
+              textDefault={DESIGN_TEXT_DEFAULTS.preview_title}
+              onTextChange={(v) => patchText("preview_title", v)}
               previewScale={0.6}
               withItalic
               value={config.title}
@@ -98,8 +121,10 @@ export default function MusicDesignPage() {
               onChange={(p) => patchTarget("title", p)}
             />
             <TargetPanel
-              title="부제목"
-              sample="morning light on endless urban roads"
+              title="부제목 (미리보기 전용)"
+              textValue={config.preview_subtitle ?? ""}
+              textDefault={DESIGN_TEXT_DEFAULTS.preview_subtitle}
+              onTextChange={(v) => patchText("preview_subtitle", v)}
               previewScale={0.7}
               withItalic
               value={config.subtitle}
@@ -125,11 +150,74 @@ export default function MusicDesignPage() {
   )
 }
 
+// 인라인 편집 텍스트 — 클릭하면 contentEditable 로 편집. 엔터/바깥클릭=저장, ESC=취소.
+// 편집 중에는 React 가 내용을 제어하지 않고(uncontrolled), ref 로 textContent 를 다룬다(커서 점프 방지).
+function EditableText({ value, placeholder, onCommit }: {
+  value: string
+  placeholder: string
+  onCommit: (value: string) => void
+}) {
+  const ref = useRef<HTMLSpanElement>(null)
+  const [editing, setEditing] = useState(false)
+
+  const start = () => {
+    if (editing) return
+    setEditing(true)
+    requestAnimationFrame(() => {
+      const el = ref.current
+      if (!el) return
+      el.textContent = value
+      el.focus()
+      const range = document.createRange()
+      range.selectNodeContents(el)
+      const sel = window.getSelection()
+      sel?.removeAllRanges()
+      sel?.addRange(range)
+    })
+  }
+  const commit = () => {
+    setEditing(false)
+    onCommit((ref.current?.textContent ?? "").trim())
+  }
+  const cancel = () => setEditing(false) // onCommit 미호출 → 원래 값 복원(React 재렌더)
+
+  return (
+    <span
+      ref={ref}
+      role="textbox"
+      tabIndex={0}
+      contentEditable={editing}
+      suppressContentEditableWarning
+      onClick={start}
+      onFocus={start}
+      onBlur={() => { if (editing) commit() }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") { e.preventDefault(); ref.current?.blur() }
+        else if (e.key === "Escape") { e.preventDefault(); cancel(); ref.current?.blur() }
+      }}
+      style={{
+        cursor: editing ? "text" : "pointer",
+        outline: editing ? "1px dashed rgba(255,255,255,0.6)" : "none",
+        outlineOffset: 4,
+        borderRadius: 2,
+        minWidth: "1ch",
+        color: value ? undefined : "rgba(255,255,255,0.45)", // 빈 값 → 기본 텍스트는 흐리게
+      }}
+    >
+      {editing ? null : (value || placeholder)}
+    </span>
+  )
+}
+
 function TargetPanel({
-  title, sample, previewScale, value, sizeRange, onChange, withItalic = false,
+  title, textValue, textDefault, textSuffix = "", onTextChange,
+  previewScale, value, sizeRange, onChange, withItalic = false,
 }: {
   title: string
-  sample: string
+  textValue: string
+  textDefault: string
+  textSuffix?: string
+  onTextChange: (value: string) => void
   previewScale: number
   value: TextStyleConfig
   sizeRange: [number, number]
@@ -142,12 +230,17 @@ function TargetPanel({
 
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
-      <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+      <h2 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+        {title}
+        <span className="inline-flex items-center gap-0.5 text-[11px] font-normal text-muted-foreground"><Pencil className="h-3 w-3" /> 텍스트 클릭 편집</span>
+      </h2>
 
-      {/* 미리보기 — 어두운 배경(영상과 유사) */}
+      {/* 미리보기 — 어두운 배경(영상과 유사). 텍스트 클릭 → 인라인 편집. */}
       <div className="flex h-40 items-center justify-center overflow-hidden rounded-lg" style={{ background: "#0c1020" }}>
-        <span
+        <div
           style={{
+            display: "inline-flex",
+            alignItems: "baseline",
             fontFamily: `"${value.font_family}", sans-serif`,
             fontSize: value.font_size,
             fontWeight: value.font_weight,
@@ -161,8 +254,9 @@ function TargetPanel({
             ...stroke,
           }}
         >
-          {sample}
-        </span>
+          <EditableText value={textValue} placeholder={textDefault} onCommit={onTextChange} />
+          {textSuffix && <span>{textSuffix}</span>}
+        </div>
       </div>
 
       {/* 폰트 패밀리 */}

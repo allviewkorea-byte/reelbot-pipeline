@@ -405,6 +405,11 @@ class DesignConfigBody(BaseModel):
     where_label: _DesignTarget | None = None
     title: _DesignTarget | None = None       # #36 곡 제목
     subtitle: _DesignTarget | None = None     # #36 부제
+    # 인라인 편집 텍스트(빈값=기본값 폴백). playlist_text/where_text 는 영상 반영, preview_* 는 미리보기 전용.
+    playlist_text: str | None = None
+    where_text: str | None = None
+    preview_title: str | None = None
+    preview_subtitle: str | None = None
 
 
 @router.post("/design-config")
