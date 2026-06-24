@@ -29,11 +29,12 @@ router = APIRouter()
 
 
 def _with_thumb_url(row: dict) -> dict:
-    """행에 thumbnail_url(있으면) 을 덧붙인다."""
-    key = row.get("thumbnail_r2_key")
+    """행에 thumbnail_url·character_url(있으면) 을 덧붙인다."""
     slug, mix_id = row.get("slug") or "", row.get("mix_id") or ""
-    if key and slug and mix_id:
+    if row.get("thumbnail_r2_key") and slug and mix_id:
         row = {**row, "thumbnail_url": r2_storage.music_thumbnail_url(slug, mix_id)}
+    if row.get("character_r2_key") and slug and mix_id:  # #50 인물 미리보기 URL
+        row = {**row, "character_url": r2_storage.music_character_url(slug, mix_id)}
     return row
 
 
@@ -96,6 +97,50 @@ def upload_thumbnail(mix_id: str, body: ThumbnailBody):
     key = r2_storage.music_thumbnail_key(slug, mix_id)
     music_uploads.set_thumbnail(mix_id, key)
     return {"ok": True, "thumbnail_r2_key": key, "thumbnail_url": r2_storage.music_thumbnail_url(slug, mix_id)}
+
+
+@router.post("/queue/{mix_id}/character")
+def upload_character(mix_id: str, body: ThumbnailBody):
+    """#50 인물 이미지(투명 PNG) 업로드(base64) → R2 music-characters/{slug}/{mix_id}.png → DB 키.
+
+    PNG 무손실 저장(JPEG 변환 금지 — 투명도 보존). 업로드 후 [재렌더]로 영상에 반영된다.
+    """
+    row = music_uploads.get_upload(mix_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="해당 mix_id 의 큐 항목이 없습니다.")
+    slug = body.slug or row.get("slug") or ""
+    if not slug:
+        raise HTTPException(status_code=400, detail="slug 를 확인할 수 없습니다.")
+    if not r2_storage.is_available():
+        raise HTTPException(status_code=503, detail="R2 미설정 — 인물 이미지 저장 불가")
+
+    raw = body.image_base64.split(",", 1)[-1]  # data URL 접두 제거
+    try:
+        data = base64.b64decode(raw)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"잘못된 base64 이미지: {e}") from e
+
+    tmpdir = Path(tempfile.mkdtemp(prefix="char_"))
+    try:
+        png = tmpdir / "character.png"
+        png.write_bytes(data)  # 받은 PNG 바이트 그대로 저장(재인코딩 X → 알파 보존)
+        r2_storage.upload_music_character(str(png), slug, mix_id)
+    finally:
+        import shutil
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    key = r2_storage.music_character_key(slug, mix_id)
+    music_uploads.set_character(mix_id, key)
+    return {"ok": True, "character_r2_key": key, "character_url": r2_storage.music_character_url(slug, mix_id)}
+
+
+@router.delete("/queue/{mix_id}/character")
+def remove_character(mix_id: str):
+    """#50 인물 이미지 제거 — character_r2_key 해제. 다시 업로드 후 [재렌더] 가능."""
+    res = music_uploads.clear_character(mix_id)
+    if res.get("error"):
+        raise HTTPException(status_code=502, detail=res["error"])
+    return {"ok": True}
 
 
 def _load_mix(slug: str, mix_id: str) -> dict:
@@ -290,10 +335,19 @@ def publish(mix_id: str):
             raise HTTPException(status_code=502, detail=f"썸네일 다운로드 실패: {e}") from e
 
         # 2) 깨끗한 이미지를 배경으로 영상 재생성 → 새 mp4(R2). Remotion 이 인트로·텍스트·이퀄 합성.
+        #    #50 인물(투명 PNG)이 있으면 최상단 레이어로 함께 합성(미리보기와 동일).
+        char_path = None
+        if row.get("character_r2_key"):
+            try:
+                char_png = tmpdir / "character.png"
+                r2_storage.download_music_object(row["character_r2_key"], str(char_png))
+                char_path = str(char_png)
+            except Exception as e:  # noqa: BLE001 - 인물 실패해도 배경만으로 진행
+                logger.warning("[music-dashboard] 인물 다운로드 실패(배경만 업로드): %s", e)
         # #39 영상별 PLAY LIST 표시(미지정/없음 → True).
         _sp = row.get("show_playlist")
         vres = make_video(
-            theme, mix, background_path=str(thumb),
+            theme, mix, background_path=str(thumb), character_path=char_path,
             show_playlist=(True if _sp is None else bool(_sp)),
         )
         new_mp4_url = vres["video_url"]

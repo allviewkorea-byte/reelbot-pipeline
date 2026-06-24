@@ -91,10 +91,12 @@ export type MusicVizProps = {
   vizSpec: VizSpec | null;
   designConfig?: DesignConfig;
   showPlaylist?: boolean; // #39 영상별 PLAY LIST 표시(기본 true; false 면 인트로·도킹 모두 안 그림)
+  hasCharacter?: boolean; // #50 인물 레이어(투명 PNG)를 최상단에 얹을지(기본 false → 기존 2레이어)
 };
 
 const AUDIO = "audio.mp3";
 const BG = "bg.png";
+const CHARACTER = "character.png"; // #50 인물 투명 PNG(hasCharacter 일 때만 staticFile 로 존재)
 
 const BARS = 48;
 const NUM_SAMPLES = 256; // visualizeAudio 는 2의 거듭제곱 필요.
@@ -109,7 +111,7 @@ const TYPE_END = 6.1; // 6.1~ 본 영상
 const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp" } as const;
 const easeInOut = Easing.bezier(0.65, 0, 0.35, 1);
 
-export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, vizSpec, designConfig, showPlaylist }) => {
+export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, vizSpec, designConfig, showPlaylist, hasCharacter }) => {
   const frame = useCurrentFrame();
   const { width, height, fps } = useVideoConfig();
   const audioData = useAudioData(staticFile(AUDIO));
@@ -376,6 +378,23 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
           );
         })}
       </div>
+
+      {/* 5) #50 인물(투명 PNG) — 최상단 레이어(DOM 마지막 = z 최상). hasCharacter 일 때만 그린다.
+          objectFit:contain 으로 원본 비율 유지(잘림 없음). 투명부로 배경·PLAYLIST·이퀄이 비쳐
+          인물이 앞에 선 효과. 미지정이면 JSX 자체가 없어 기존 렌더와 100% 동일(회귀 0). */}
+      {hasCharacter && (
+        <Img
+          src={staticFile(CHARACTER)}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "contain",
+          }}
+        />
+      )}
     </AbsoluteFill>
   );
 };

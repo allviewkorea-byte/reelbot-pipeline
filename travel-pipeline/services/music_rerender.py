@@ -105,12 +105,24 @@ def run(job_id: str) -> None:
         thumb = tmpdir / "thumb.png"
         r2_storage.download_music_object(row["thumbnail_r2_key"], str(thumb))
 
+        # #50 인물(투명 PNG) — 있으면 다운로드해 최상단 레이어로. 없으면 None(기존 동작).
+        char_path: str | None = None
+        char_key = row.get("character_r2_key")
+        if char_key:
+            try:
+                cpath = tmpdir / "character.png"
+                r2_storage.download_music_object(char_key, str(cpath))
+                char_path = str(cpath)
+            except Exception as e:  # noqa: BLE001 - 인물 다운로드 실패해도 배경만으로 렌더 진행
+                logger.warning("[music-rerender] 인물 다운로드 실패(배경만 렌더): %s", e)
+
         _step("렌더")
         # #39 영상별 PLAY LIST 표시(미지정/없음 → True). 싱글곡 OFF, 플레이리스트 ON.
         sp = row.get("show_playlist")
         show_playlist = True if sp is None else bool(sp)
         vres = music_video.make_video(
-            theme, mix, background_path=str(thumb), persist=True, show_playlist=show_playlist,
+            theme, mix, background_path=str(thumb), character_path=char_path,
+            persist=True, show_playlist=show_playlist,
         )
         job["video_url"] = vres.get("video_url")
         job["status"] = "done"

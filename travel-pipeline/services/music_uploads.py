@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 _TABLE = "music_uploads"
 _KST = timezone(timedelta(hours=9))
 _SELECT = (
-    "slug,mix_id,title_kr,genre,mood,mp4_url,gpt_prompt,thumbnail_r2_key,viz_spec,"
+    "slug,mix_id,title_kr,genre,mood,mp4_url,gpt_prompt,thumbnail_r2_key,character_r2_key,viz_spec,"
     "localizations,show_playlist,status,youtube_video_id,youtube_url,created_at"
 )
 
@@ -271,6 +271,42 @@ def set_localizations(mix_id: str, localizations: dict) -> dict:
                 f"{url}/rest/v1/{_TABLE}?mix_id=eq.{mix_id}",
                 headers=_headers(key, patch=True),
                 json={"localizations": localizations},
+            )
+            r.raise_for_status()
+        return {"stored": True, "error": None}
+    except Exception as e:  # noqa: BLE001
+        return {"stored": False, "error": _http_err(e)}
+
+
+def set_character(mix_id: str, character_r2_key: str) -> dict:
+    """#50 인물 이미지 R2 키 업데이트(PATCH). {stored, error}."""
+    url, key = _supabase_cfg()
+    if not (url and key):
+        return {"stored": False, "error": "supabase 미설정"}
+    try:
+        with httpx.Client(timeout=30.0) as c:
+            r = c.patch(
+                f"{url}/rest/v1/{_TABLE}?mix_id=eq.{mix_id}",
+                headers=_headers(key, patch=True),
+                json={"character_r2_key": character_r2_key},
+            )
+            r.raise_for_status()
+        return {"stored": True, "error": None}
+    except Exception as e:  # noqa: BLE001
+        return {"stored": False, "error": _http_err(e)}
+
+
+def clear_character(mix_id: str) -> dict:
+    """#50 인물 제거 — character_r2_key='' (PATCH). R2 파일은 만료/덮어쓰기에 위임."""
+    url, key = _supabase_cfg()
+    if not (url and key):
+        return {"stored": False, "error": "supabase 미설정"}
+    try:
+        with httpx.Client(timeout=30.0) as c:
+            r = c.patch(
+                f"{url}/rest/v1/{_TABLE}?mix_id=eq.{mix_id}",
+                headers=_headers(key, patch=True),
+                json={"character_r2_key": ""},
             )
             r.raise_for_status()
         return {"stored": True, "error": None}

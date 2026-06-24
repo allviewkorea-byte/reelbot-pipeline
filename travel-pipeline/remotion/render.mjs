@@ -22,6 +22,7 @@ const { values } = parseArgs({
     bg: { type: "string" },
     out: { type: "string" },
     props: { type: "string" },
+    character: { type: "string" }, // #50 인물 투명 PNG(있을 때만) — staticFile("character.png")
     // #43 분할 렌더 — 주어지면 그 프레임 구간만 렌더(frameRange). 미지정 시 전체(기존 동작).
     "frame-start": { type: "string" },
     "frame-end": { type: "string" },
@@ -47,6 +48,10 @@ const browserExecutable =
 const publicDir = mkdtempSync(path.join(tmpdir(), "rmpub-"));
 copyFileSync(values.audio, path.join(publicDir, "audio.mp3"));
 copyFileSync(values.bg, path.join(publicDir, "bg.png"));
+// #50 인물 PNG(투명) — 주어졌을 때만 staticFile("character.png")로 스테이징(없으면 기존 동작).
+if (values.character) {
+  copyFileSync(values.character, path.join(publicDir, "character.png"));
+}
 
 const t0 = Date.now();
 try {
