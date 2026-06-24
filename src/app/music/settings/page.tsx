@@ -57,17 +57,29 @@ export default function MusicSettingsPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-auto p-4 md:p-6">
-      <header className="flex items-center gap-3 pl-10 md:pl-0">
-        <Link href="/music" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-white/5 hover:text-foreground">
-          <ArrowLeft className="h-4 w-4" /> 대시보드
-        </Link>
-        <div>
-          <h1 className="text-xl font-semibold text-foreground">채널 설정</h1>
-          <p className="text-sm text-muted-foreground">공개 업로드 본문·SEO 에 쓰이는 운영 정보입니다. 빈 칸은 본문에 출력되지 않아요.</p>
+      <header className="pl-10 md:pl-0">
+        {/* 모바일: 버튼 가로 한 줄(좌/우 정렬, 줄바꿈 없음). 데스크탑은 아래 인라인 행 사용. */}
+        <div className="mb-3 flex items-center justify-between gap-2 md:hidden">
+          <Link href="/music" className="inline-flex min-h-[44px] items-center gap-1.5 whitespace-nowrap rounded-lg border border-border px-3 text-sm text-muted-foreground hover:bg-white/5 hover:text-foreground">
+            <ArrowLeft className="h-4 w-4" /> 대시보드
+          </Link>
+          <Link href="/music/design" className="inline-flex min-h-[44px] items-center gap-1.5 whitespace-nowrap rounded-lg border border-border px-3 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground">
+            디자인 본부
+          </Link>
         </div>
-        <Link href="/music/design" className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground">
-          디자인 본부
-        </Link>
+        {/* 데스크탑 인라인 행(기존 그대로) + 제목(모바일 공통) */}
+        <div className="flex items-center gap-3">
+          <Link href="/music" className="hidden items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-white/5 hover:text-foreground md:inline-flex">
+            <ArrowLeft className="h-4 w-4" /> 대시보드
+          </Link>
+          <div>
+            <h1 className="text-xl font-semibold text-foreground">채널 설정</h1>
+            <p className="text-sm text-muted-foreground">공개 업로드 본문·SEO 에 쓰이는 운영 정보입니다. 빈 칸은 본문에 출력되지 않아요.</p>
+          </div>
+          <Link href="/music/design" className="ml-auto hidden items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground md:inline-flex">
+            디자인 본부
+          </Link>
+        </div>
       </header>
 
       {loading ? (

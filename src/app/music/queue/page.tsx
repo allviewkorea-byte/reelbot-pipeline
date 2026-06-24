@@ -174,17 +174,28 @@ export default function MusicQueueGridPage() {
           {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : pull > 60 ? "놓으면 새로고침" : "당겨서 새로고침"}
         </div>
       )}
-      <header className="flex items-center gap-3 pl-10 md:pl-0">
-        <Link href="/music" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-white/5 hover:text-foreground">
-          <ArrowLeft className="h-4 w-4" /> 대시보드
-        </Link>
-        <div>
-          <h1 className="text-xl font-semibold text-foreground">검토 대기 ({items.length})</h1>
-          <p className="text-sm text-muted-foreground">카드에서 바로 재생·썸네일·공개를 처리하세요.</p>
+      <header className="pl-10 md:pl-0">
+        {/* 모바일: 버튼 가로 한 줄(좌/우 정렬, 줄바꿈 없음). 데스크탑은 아래 인라인 행 사용. */}
+        <div className="mb-3 flex items-center justify-between gap-2 md:hidden">
+          <Link href="/music" className="inline-flex min-h-[44px] items-center gap-1.5 whitespace-nowrap rounded-lg border border-border px-3 text-sm text-muted-foreground hover:bg-white/5 hover:text-foreground">
+            <ArrowLeft className="h-4 w-4" /> 대시보드
+          </Link>
+          <Link href="/music/design" className="inline-flex min-h-[44px] items-center gap-1.5 whitespace-nowrap rounded-lg border border-border px-3 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground">
+            디자인 본부
+          </Link>
         </div>
-        <Link href="/music/design" className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground">
-          디자인 본부
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link href="/music" className="hidden items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-white/5 hover:text-foreground md:inline-flex">
+            <ArrowLeft className="h-4 w-4" /> 대시보드
+          </Link>
+          <div>
+            <h1 className="text-xl font-semibold text-foreground">검토 대기 ({items.length})</h1>
+            <p className="text-sm text-muted-foreground">카드에서 바로 재생·썸네일·공개를 처리하세요.</p>
+          </div>
+          <Link href="/music/design" className="ml-auto hidden items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground md:inline-flex">
+            디자인 본부
+          </Link>
+        </div>
       </header>
 
       {/* #36 진행 중 작업 — 항상 상단 노출(페이지 이동·기기 전환에도 DB 기준 유지) */}
@@ -200,10 +211,10 @@ export default function MusicQueueGridPage() {
       )}
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 md:flex-row">
-        {/* 좌측 패널 — 모바일은 가로 스크롤, md+ 사이드바 */}
-        <aside className="flex shrink-0 flex-row gap-2 overflow-x-auto md:w-[240px] md:flex-col md:overflow-x-visible">
-          {/* 영상 생성 — 수동(검토 큐 정식) + 빠른 테스트(폐기) */}
-          <div className="flex shrink-0 flex-col gap-1.5 rounded-xl border border-dashed border-border bg-secondary/20 p-2.5">
+        {/* 좌측 패널 — 모바일: 필터(위) + 수동 생성(아래) 세로 스택·전체 폭 / md+: 사이드바 */}
+        <aside className="flex shrink-0 flex-col gap-3 md:w-[240px]">
+          {/* 영상 생성 — 수동(검토 큐 정식) + 빠른 테스트(폐기). 모바일은 아래(order-2). */}
+          <div className="order-2 flex w-full flex-col gap-1.5 rounded-xl border border-dashed border-border bg-secondary/20 p-2.5 md:order-1 md:w-auto">
             <select
               value={testMood}
               onChange={(e) => setTestMood(e.target.value)}
@@ -260,8 +271,11 @@ export default function MusicQueueGridPage() {
             </button>
           </div>
 
-          {/* 카테고리 필터 */}
-          <div className="flex shrink-0 flex-row gap-1.5 md:flex-col">
+          {/* 카테고리 필터 — 모바일: 위(order-1) + 가로 스크롤(스크롤바 숨김) / md+: 세로 */}
+          <div
+            className="order-1 flex flex-nowrap gap-1.5 overflow-x-auto [&::-webkit-scrollbar]:hidden md:order-2 md:flex-col md:overflow-x-visible"
+            style={{ scrollbarWidth: "none" }}
+          >
             {CATEGORIES.map((c) => (
               <button
                 key={c.key}
