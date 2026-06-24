@@ -27,8 +27,14 @@ from pathlib import Path
 import httpx
 
 from adapters import r2_storage
+from services import music_genres, music_image_prompts  # #49 장르별 이미지 프롬프트(둘 다 의존성 경량)
 
 logger = logging.getLogger(__name__)
+
+
+def _genre_image_prompt(theme: dict) -> str | None:
+    """#49 — 주제의 14장르를 분류해 장르별 이미지 프롬프트 풀에서 1개 반환(없으면 None=폴백)."""
+    return music_image_prompts.get_image_prompt(music_genres.classify_theme(theme))
 
 W, H = 1920, 1080
 FPS = 30
@@ -148,6 +154,12 @@ def image_available() -> bool:
 
 
 def _bg_prompt(theme: dict) -> str:
+    # #49 장르별 풀 우선 — 풀 프롬프트 + 배경 제약(16:9·글자/인물 없음). 없으면 기존 방식.
+    pooled = _genre_image_prompt(theme)
+    if pooled:
+        return (
+            f"{pooled} 가로형 16:9 와이드 구도, 글자·텍스트 없음, 정면 인물 없음, 고품질."
+        )
     genre = theme.get("genre", "")
     mood = theme.get("mood", "")
     situation = theme.get("situation", "")
@@ -325,7 +337,13 @@ def build_thumbnail_prompt(theme: dict, viz_spec: dict | None = None) -> str:
     #27: viz_spec 가 있으면 **풍경·도시·자연 중심**(인물 거의 없음, 80/15/5) + location_en·
     씬키워드 강조 + 색감, **텍스트 0개**(글자는 Remotion 이 그림). viz_spec 없으면 #17 동작.
     배경은 데이터(_THUMB_SCENES) 매핑. 영어 한 문단.
+    #49: 14장르 분류가 되면 장르별 이미지 프롬프트 풀(한국어 15개 중 랜덤)을 우선 반환한다.
+    매칭 실패 시에만 아래 기존(viz_spec/#17) 방식으로 폴백한다.
     """
+    pooled = _genre_image_prompt(theme)
+    if pooled:
+        return pooled
+
     scene, tone = _thumb_scene(theme)
     person = _thumb_person()
 

@@ -234,6 +234,19 @@ def manual_render_status(job_id: str):
     return st
 
 
+@router.get("/genre-prompt")
+def genre_prompt(genre: str = ""):
+    """#49 — 장르(라벨 또는 id)에 맞는 이미지 프롬프트 1개(풀 15개 중 랜덤). 매번 새로 뽑는다.
+
+    검토대기 'GPT 프롬프트 복사'가 클릭마다 호출 → 같은 장르라도 다른 프롬프트.
+    매칭 실패 시 prompt=null → 프론트가 저장된 gpt_prompt 로 폴백.
+    """
+    from services import music_genres, music_image_prompts
+    g = (genre or "").strip()
+    gid = g.lower() if g.lower() in music_image_prompts.IMAGE_PROMPTS else music_genres.classify(g)
+    return {"prompt": music_image_prompts.get_image_prompt(gid), "genre_id": gid}
+
+
 class LibraryCreateBody(BaseModel):
     track_ids: list[str] = []
     mood: str | None = None  # 장르 자동 판별(첫 트랙) 또는 직접 지정
