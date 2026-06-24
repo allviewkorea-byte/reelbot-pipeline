@@ -20,6 +20,8 @@ export interface QueueItem {
   gpt_prompt?: string
   thumbnail_r2_key?: string | null
   thumbnail_url?: string | null
+  character_r2_key?: string | null // #50 인물(투명 PNG) R2 키(빈값/null=없음)
+  character_url?: string | null
   viz_spec?: VizSpec | null
   status?: string
   show_playlist?: boolean // #39 영상별 PLAY LIST 표시(미지정=표시)
@@ -64,6 +66,38 @@ async function compressImage(file: File, maxPx = 2560, quality = 0.95): Promise<
       out = canvas.toDataURL("image/jpeg", q)
     }
     return out
+  } catch {
+    return fileToDataUrl(file)
+  }
+}
+
+// #50 인물 PNG 압축 — 투명도 유지를 위해 **PNG 무손실**로만 내보낸다(JPEG 금지 = 알파 보존).
+// PNG 는 품질 파라미터가 없으므로 해상도를 단계적으로 낮춰 Vercel 본문 한도(~4MB) 안에 맞춘다.
+async function compressPng(file: File): Promise<string> {
+  try {
+    const dataUrl = await fileToDataUrl(file)
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image()
+      el.onload = () => resolve(el)
+      el.onerror = reject
+      el.src = dataUrl
+    })
+    let out = dataUrl
+    for (const maxPx of [1920, 1536, 1280, 1024, 800]) {
+      const scale = Math.min(1, maxPx / Math.max(img.width, img.height))
+      const w = Math.round(img.width * scale)
+      const h = Math.round(img.height * scale)
+      const canvas = document.createElement("canvas")
+      canvas.width = w
+      canvas.height = h
+      const ctx = canvas.getContext("2d")
+      if (!ctx) return dataUrl
+      ctx.clearRect(0, 0, w, h) // 투명 캔버스 유지
+      ctx.drawImage(img, 0, 0, w, h)
+      out = canvas.toDataURL("image/png") // 무손실 + 알파 보존
+      if (out.length <= _UPLOAD_MAX_DATAURL) return out
+    }
+    return out // 최저 해상도에도 크면 그대로(서버 413 시 안내)
   } catch {
     return fileToDataUrl(file)
   }
@@ -141,6 +175,10 @@ export function MusicQueueCard({ item, onChanged }: { item: QueueItem; onChanged
   const [showPlaylist, setShowPlaylist] = useState(item.show_playlist ?? true)
   const [savingPl, setSavingPl] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  // #50 인물(투명 PNG) 업로드 상태.
+  const [charUrl, setCharUrl] = useState<string | null>(item.character_url ?? null)
+  const [charUploading, setCharUploading] = useState(false)
+  const charFileRef = useRef<HTMLInputElement>(null)
   const viz = item.viz_spec || undefined
 
   const togglePlaylist = useCallback(async () => {
@@ -211,6 +249,48 @@ export function MusicQueueCard({ item, onChanged }: { item: QueueItem; onChanged
     },
     [item.mix_id, item.slug],
   )
+
+  // #50 인물(투명 PNG) 업로드 — PNG 만, 무손실 전송(JPEG 변환 금지). 업로드 후 [재렌더]로 반영.
+  const handleCharacterFile = useCallback(
+    async (file: File | undefined | null) => {
+      if (!file) return
+      if (file.type !== "image/png") { toast.error("투명 배경 PNG 파일만 업로드할 수 있습니다."); return }
+      if (file.size > 10 * 1024 * 1024) { toast.error("인물 PNG는 최대 10MB까지 가능합니다."); return }
+      setCharUploading(true)
+      try {
+        const dataUrl = await compressPng(file) // 투명도 유지(PNG 무손실) + 본문 한도 내 리사이즈
+        const res = await fetch(`/api/music/queue/${encodeURIComponent(item.mix_id)}/character`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image_base64: dataUrl, slug: item.slug }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (res.status === 413) throw new Error("PNG가 너무 큽니다. 더 작은 이미지를 사용하세요.")
+        if (!res.ok) throw new Error(data?.detail || "인물 업로드 실패")
+        setCharUrl(`${data.character_url}?v=${Date.now()}`)
+        setNeedsRerender(true)
+        toast.success("인물 업로드됨 — [재렌더]를 눌러 영상에 반영하세요.")
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "인물 업로드 실패")
+      } finally {
+        setCharUploading(false)
+      }
+    },
+    [item.mix_id, item.slug],
+  )
+
+  const removeCharacter = async () => {
+    try {
+      const res = await fetch(`/api/music/queue/${encodeURIComponent(item.mix_id)}/character`, { method: "DELETE" })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data?.detail || "인물 제거 실패")
+      setCharUrl(null)
+      setNeedsRerender(true)
+      toast.success("인물 제거됨 — [재렌더]로 기존(배경+PLAYLIST)으로 되돌립니다.")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "인물 제거 실패")
+    }
+  }
 
   const publish = async () => {
     setPublishing(true)
@@ -357,6 +437,46 @@ export function MusicQueueCard({ item, onChanged }: { item: QueueItem; onChanged
           ) : (
             <span className="flex flex-col items-center gap-1 py-2 text-[11px]"><Upload className="h-4 w-4" /> 깨끗한 이미지 업로드</span>
           )}
+        </div>
+
+        {/* #50 인물 이미지 업로드(선택) — 투명 PNG. 배경·PLAYLIST 위 최상단 레이어로 합성된다. */}
+        <input ref={charFileRef} type="file" accept="image/png" className="hidden" onChange={(e) => handleCharacterFile(e.target.files?.[0])} />
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-medium text-muted-foreground">인물 이미지 (선택 · 투명 PNG)</span>
+            {charUrl && (
+              <button
+                type="button"
+                onClick={removeCharacter}
+                className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-red-400"
+                title="인물 제거 — [재렌더]로 기존(배경+PLAYLIST)으로 복귀"
+              >
+                <Trash2 className="h-3 w-3" /> 삭제
+              </button>
+            )}
+          </div>
+          <div
+            onClick={() => charFileRef.current?.click()}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => { e.preventDefault(); handleCharacterFile(e.dataTransfer.files?.[0]) }}
+            className="flex min-h-[72px] cursor-pointer items-center justify-center overflow-hidden rounded-md border border-dashed border-border text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
+            // 체크무늬 배경 — 투명 부분을 시각화.
+            style={{
+              backgroundImage:
+                "linear-gradient(45deg,#33415544 25%,transparent 25%),linear-gradient(-45deg,#33415544 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#33415544 75%),linear-gradient(-45deg,transparent 75%,#33415544 75%)",
+              backgroundSize: "16px 16px",
+              backgroundPosition: "0 0,0 8px,8px -8px,-8px 0",
+            }}
+          >
+            {charUploading ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : charUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={charUrl} alt="인물 미리보기" className="max-h-32 w-full object-contain" />
+            ) : (
+              <span className="flex flex-col items-center gap-1 py-2 text-[11px]"><Upload className="h-4 w-4" /> 인물 PNG 업로드</span>
+            )}
+          </div>
         </div>
 
         {/* #39 영상별 PLAY LIST 표시 토글 — 싱글곡 OFF, 플레이리스트 ON. 변경 후 [재렌더]로 반영. */}

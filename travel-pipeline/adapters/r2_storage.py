@@ -513,6 +513,30 @@ def music_thumbnail_url(theme_slug: str, mix_id: str) -> str:
     return f"{_music_public_base()}/{music_thumbnail_key(theme_slug, mix_id)}"
 
 
+# ── #50 인물 이미지(투명 PNG) — music-characters/{slug}/{mix_id}.png ──
+def music_character_key(theme_slug: str, mix_id: str) -> str:
+    return f"music-characters/{theme_slug.strip('/')}/{mix_id}.png"
+
+
+def upload_music_character(file_path: str, theme_slug: str, mix_id: str) -> str:
+    """대표가 올린 인물 PNG(투명 배경)를 R2 에 무손실 저장(image/png — 알파 보존)하고 URL 반환."""
+    bucket = os.environ.get("R2_MUSIC_BUCKET")
+    public_base = os.environ.get("R2_MUSIC_PUBLIC_BASE_URL")
+    if not bucket:
+        logger.warning("R2_MUSIC_BUCKET 미설정 — 기본 버킷 사용(인물).")
+    return upload_image(
+        file_path,
+        music_character_key(theme_slug, mix_id),
+        bucket=bucket,
+        public_base_url=public_base,
+        content_type="image/png",
+    )
+
+
+def music_character_url(theme_slug: str, mix_id: str) -> str:
+    return f"{_music_public_base()}/{music_character_key(theme_slug, mix_id)}"
+
+
 # ── 음악 영상 — music-videos/{slug}/{name} (배경 bg.png · 완성 mp4) ──
 # 음악 버킷(R2_MUSIC_BUCKET)을 prefix 만 달리해 재사용한다(신규 버킷 없음).
 def music_video_key(theme_slug: str, name: str) -> str:

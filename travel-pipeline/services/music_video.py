@@ -455,6 +455,7 @@ def _render_remotion(
     viz_spec: dict | None = None,
     design_config: dict | None = None,
     show_playlist: bool = True,
+    character_path: str | None = None,
     frame_start: int | None = None,
     frame_end: int | None = None,
     muted: bool = False,
@@ -479,6 +480,7 @@ def _render_remotion(
         "vizSpec": viz_spec or None,
         "designConfig": design_config or None,  # #35-A None 이면 MusicViz 가 현재값 폴백
         "showPlaylist": bool(show_playlist),  # #39 영상별 PLAY LIST 표시(기본 True)
+        "hasCharacter": bool(character_path),  # #50 인물 레이어(없으면 False → 기존 동작)
     }
     cmd = [
         "node", str(_REMOTION_DIR / "render.mjs"),
@@ -487,6 +489,8 @@ def _render_remotion(
         "--out", os.path.abspath(str(out_path)),
         "--props", json.dumps(props, ensure_ascii=False),
     ]
+    if character_path:
+        cmd += ["--character", os.path.abspath(str(character_path))]
     if frame_start is not None and frame_end is not None:
         cmd += ["--frame-start", str(int(frame_start)), "--frame-end", str(int(frame_end))]
     if muted:
@@ -539,7 +543,7 @@ def _plan_chunks(
 def _render_chunks(
     bg: str, audio: str, out: str, chunks: list[dict], *, work: Path,
     tracks: list[dict], mood: str, duration: float, viz_spec: dict | None,
-    design_config: dict | None, show_playlist: bool,
+    design_config: dict | None, show_playlist: bool, character_path: str | None = None,
 ) -> str:
     """청크별 muted 비디오 렌더(frameRange) → concat(-c copy) → 풀 믹스 오디오 mux.
 
@@ -557,6 +561,7 @@ def _render_chunks(
             str(bg), str(audio), str(cf),
             tracks=tracks, mood=mood, duration=duration, viz_spec=viz_spec,
             design_config=design_config, show_playlist=show_playlist,
+            character_path=character_path,
             frame_start=ch["start_frame"], frame_end=ch["end_frame"], muted=True,
         )
         chunk_files.append(cf)
@@ -714,6 +719,7 @@ def make_video(
     viz: str | None = None,
     force_bg: bool = False,
     background_path: str | None = None,
+    character_path: str | None = None,
     viz_spec: dict | None = None,
     persist: bool = True,
     show_playlist: bool = True,
@@ -721,6 +727,8 @@ def make_video(
     """주제 + 믹스 → 배경 → 합성(Remotion/ffmpeg) → mp4 → R2. 영상 메타 반환.
 
     background_path: 주면 그 이미지(대표가 올린 깨끗한 이미지)를 배경으로 쓴다.
+    character_path(#50): 주면 투명 PNG 인물을 배경·PLAYLIST 위 최상단 레이어로 얹는다
+      (Remotion 경로 한정). 미지정(None)이면 기존 2레이어 렌더와 100% 동일(회귀 0).
     viz_spec(#20): 곡 분석. None 이고 Remotion on 이면 캐시→분석으로 채운다.
     Remotion 경로(USE_REMOTION on): 인트로·텍스트·이퀄 + 첫프레임 자동 썸네일.
     off/실패 시 기존 ffmpeg 폴백(인트로·텍스트·자동썸네일 없음, 회귀 0).
@@ -768,6 +776,13 @@ def make_video(
         else:
             generate_background(theme, str(bg), force=force_bg)
 
+        # #50 인물(투명 PNG) — 있으면 work/character.png 로 준비(없으면 None → 기존 동작).
+        char_local: str | None = None
+        if character_path:
+            char_png = work / "character.png"
+            _fetch(character_path, char_png)
+            char_local = str(char_png)
+
         out = work / f"{video_id}.mp4"
 
         # 합성: Remotion(인트로+텍스트+이퀄) 우선, 실패/off 면 ffmpeg 폴백(회귀 0).
@@ -795,6 +810,7 @@ def make_video(
                         str(bg), str(audio), str(out),
                         tracks=tracks, mood=mood_hint, duration=duration, viz_spec=viz_spec,
                         design_config=design_config, show_playlist=show_playlist,
+                        character_path=char_local,
                     )
                 else:
                     logger.info("[video] 분할 렌더 %d청크 (총 %.1f분) slug=%s", len(chunks), duration / 60, slug)
@@ -802,6 +818,7 @@ def make_video(
                         str(bg), str(audio), str(out), chunks, work=work,
                         tracks=tracks, mood=mood_hint, duration=duration, viz_spec=viz_spec,
                         design_config=design_config, show_playlist=show_playlist,
+                        character_path=char_local,
                     )
                 rendered = True
                 logger.info("[video] Remotion 렌더 완료 slug=%s", slug)
