@@ -338,6 +338,14 @@ def music_url(theme_slug: str, audio_id: str) -> str:
     return f"{_music_public_base()}/{music_key(theme_slug, audio_id)}"
 
 
+def music_object_url(object_key: str) -> str:
+    """음악 버킷 오브젝트 키(r2_key) → 공개 재생 URL(#48 라이브러리 미리듣기).
+
+    음악 버킷은 공개 베이스(R2_MUSIC_PUBLIC_BASE_URL)로 서빙되므로 서명 불필요.
+    """
+    return f"{_music_public_base()}/{(object_key or '').lstrip('/')}"
+
+
 def music_exists(theme_slug: str, audio_id: str) -> bool:
     """해당 음악 마스터가 R2 에 이미 있는지(head_object). 멱등 저장 판단용.
 

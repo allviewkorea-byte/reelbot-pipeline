@@ -122,6 +122,77 @@ def list_tracks(theme_slug: str, *, status: str | None = "SUCCESS") -> list[dict
         return []
 
 
+# ── 음원 라이브러리(#48) — 적립곡 목록·조회·통계 ───────────────────────
+_LIBRARY_SELECT = (
+    "id,theme_slug,task_id,audio_id,title,tags,duration,r2_key,status,used,genre,created_at"
+)
+
+
+def list_library(
+    *, genre: str | None = None, used: bool | None = None, limit: int = 100, offset: int = 0,
+) -> list[dict]:
+    """적립곡(SUCCESS) 목록을 최신순으로 조회. genre/used 필터 선택. 미설정/오류 시 빈 리스트."""
+    url, key = _supabase_cfg()
+    if not (url and key):
+        logger.warning("[music-db] SUPABASE 미설정 — 라이브러리 조회 생략")
+        return []
+    try:
+        headers = {"apikey": key, "Authorization": f"Bearer {key}"}
+        params = {
+            "select": _LIBRARY_SELECT,
+            "status": "eq.SUCCESS",
+            "order": "created_at.desc",
+            "limit": str(max(1, min(500, limit))),
+            "offset": str(max(0, offset)),
+        }
+        if genre:
+            params["genre"] = f"eq.{genre}"
+        if used is not None:
+            params["used"] = f"eq.{'true' if used else 'false'}"
+        with httpx.Client(timeout=30.0) as c:
+            r = c.get(f"{url}/rest/v1/{_TABLE}", headers=headers, params=params)
+            r.raise_for_status()
+            rows = r.json()
+        return rows if isinstance(rows, list) else []
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[music-db] 라이브러리 조회 실패: %s", _http_err(e))
+        return []
+
+
+def get_tracks_by_ids(ids: list[str]) -> list[dict]:
+    """id(=audio_id) 목록으로 트랙 조회(영상 만들기용). 빈 입력/오류 시 빈 리스트."""
+    url, key = _supabase_cfg()
+    clean = [i for i in (ids or []) if i]
+    if not (url and key) or not clean:
+        return []
+    try:
+        headers = {"apikey": key, "Authorization": f"Bearer {key}"}
+        params = {"select": _LIBRARY_SELECT, "id": f"in.({','.join(clean)})"}
+        with httpx.Client(timeout=30.0) as c:
+            r = c.get(f"{url}/rest/v1/{_TABLE}", headers=headers, params=params)
+            r.raise_for_status()
+            rows = r.json()
+        return rows if isinstance(rows, list) else []
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[music-db] 트랙 조회 실패(ids=%d): %s", len(clean), _http_err(e))
+        return []
+
+
+def library_stats() -> list[dict]:
+    """장르별 적립 현황 [{genre, total, unused}]. 단순화를 위해 전체를 읽어 집계한다."""
+    rows = list_library(limit=500)
+    agg: dict[str, dict] = {}
+    for r in rows:
+        g = (r.get("genre") or "").strip()
+        if not g:
+            continue
+        a = agg.setdefault(g, {"genre": g, "total": 0, "unused": 0})
+        a["total"] += 1
+        if not r.get("used"):
+            a["unused"] += 1
+    return sorted(agg.values(), key=lambda a: a["total"], reverse=True)
+
+
 # ── Suno 재활용(#46) — 미사용 트랙 검색 + 사용 마킹 ────────────────────
 def find_unused_track(genre: str, *, exclude_ids: set[str] | None = None) -> dict | None:
     """같은 genre 의 미사용(used=false, SUCCESS) 트랙 1개를 최신순으로 반환(없으면 None).

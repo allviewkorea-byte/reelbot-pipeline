@@ -234,6 +234,61 @@ def manual_render_status(job_id: str):
     return st
 
 
+class LibraryCreateBody(BaseModel):
+    track_ids: list[str] = []
+    mood: str | None = None  # 장르 자동 판별(첫 트랙) 또는 직접 지정
+
+
+@router.get("/library")
+def library_list(
+    genre: str | None = None, used: str | None = None, limit: int = 100, offset: int = 0,
+):
+    """적립곡 목록(#48) — status=SUCCESS, 최신순. genre/used 필터 + 페이지네이션.
+
+    used: 'true'/'false'(미지정=전체). 각 항목에 play_url(공개 재생 URL) 포함.
+    """
+    from services import music_library
+    used_flag = None if used is None else (str(used).lower() == "true")
+    items = music_library.list_library(genre=genre, used=used_flag, limit=limit, offset=offset)
+    return {"items": items}
+
+
+@router.get("/library/stats")
+def library_stats():
+    """장르별 적립 현황(#48) — [{genre, total, unused}]."""
+    from services import music_library
+    return {"stats": music_library.stats()}
+
+
+@router.post("/library/create-video")
+def library_create_video(background: BackgroundTasks, body: LibraryCreateBody | None = None):
+    """선택곡으로 영상 만들기(#48) — Suno 스킵, 믹스+풀 렌더(비동기). 동시 1개.
+
+    완료 시 검토 큐(status=pending) 적재 + 사용 트랙 used=true. 상태는
+    GET /library/create-video/status/{job_id} 폴링.
+    """
+    from services import music_library
+    started = music_library.start(
+        track_ids=body.track_ids if body else [],
+        mood=body.mood if body else None,
+    )
+    if not started.get("ok"):
+        code = 409 if started.get("busy_job") else 400
+        raise HTTPException(status_code=code, detail=started.get("error") or "시작 실패")
+    background.add_task(music_library.run, started["job_id"])
+    return {"ok": True, "job_id": started["job_id"]}
+
+
+@router.get("/library/create-video/status/{job_id}")
+def library_create_status(job_id: str):
+    """선택곡 영상 제작 상태 폴링(#48) — {status, step, video_url, mix_id, error}. 없으면 404."""
+    from services import music_library
+    st = music_library.get_status(job_id)
+    if st is None:
+        raise HTTPException(status_code=404, detail="해당 job 을 찾을 수 없습니다(재시작 시 소실).")
+    return st
+
+
 @router.get("/jobs/active")
 def jobs_active():
     """진행 중(+미확인 실패) 작업 목록 — 대시보드 파이프라인·검토대기 진행 카드용(#36)."""

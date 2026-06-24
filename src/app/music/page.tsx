@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
-import { Users, Eye, BarChart3, Video, ClipboardList, Play, Square, Loader2, Settings, Palette } from "lucide-react"
+import { Users, Eye, BarChart3, Video, ClipboardList, Play, Square, Loader2, Settings, Palette, Music2 } from "lucide-react"
 import { PLATFORM_BADGE, PLATFORM_LABELS, TRACK_BADGE, TRACK_LABELS } from "@/lib/channels"
 import { MUSIC_CHANNEL_ID, MUSIC_CHANNEL_NAME, fmtCount, estimateProductionTime, fmtMinutes, type MusicMetrics } from "@/lib/music"
 import { MusicPipeline } from "@/components/music/MusicPipeline"
@@ -185,6 +185,15 @@ export default function MusicDashboardPage() {
           >
             <Palette className="h-4 w-4" />
             디자인 본부
+          </Link>
+          {/* 음원 라이브러리(#48) — 적립곡 큐레이션 → 선택 영상 만들기 */}
+          <Link
+            href="/music/library"
+            title="음원 라이브러리 — 적립곡 미리듣기·선택 → Suno 없이 바로 영상 만들기"
+            className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+          >
+            <Music2 className="h-4 w-4" />
+            음원 라이브러리
           </Link>
           {/* 검토 대기 (백곰 캐릭터 시트 자리 — 보라 강조) */}
           <Link
