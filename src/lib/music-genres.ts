@@ -27,4 +27,14 @@ export const MUSIC_GENRES: MusicGenre[] = [
   { id: "pop", label: "팝송", color: "#f43f5e", keywords: ["팝송", "팝뮤직", "팝 뮤직", "american pop", "빌보드", "billboard", "radio hit"] },
   { id: "rnb_soul", label: "R&B/소울", color: "#c084fc", keywords: ["r&b", "rnb", "알앤비", "소울", "soul", "네오소울", "neo soul", "펑크", "funk", "모타운", "motown", "k-r&b", "그루브", "groove"] },
   { id: "hiphop", label: "힙합", color: "#64748b", keywords: ["힙합", "hiphop", "hip hop", "hip-hop", "랩", "rap", "트랩", "trap", "808", "비트박스"] },
+  // ── 장소 BGM(#52-D) — 드롭다운·필터에서 구분선 뒤에 표시 ──
+  { id: "hotel_lobby", label: "호텔 로비", color: "#d4af37", keywords: ["호텔", "hotel", "로비", "lobby", "그랜드 피아노", "고급 라운지"] },
+  { id: "cafe_bgm", label: "카페 BGM", color: "#b45309", keywords: ["카페 bgm", "cafe bgm", "매장", "매장음악", "배경음악 카페"] },
+  { id: "bar_lounge", label: "바/라운지", color: "#7c3aed", keywords: ["바/라운지", "바·라운지", "bar lounge", "칵테일", "cocktail", "라운지 바", "lounge bar", "위스키 바", "고급 바", "무디"] },
+  { id: "spa_meditation", label: "스파/명상", color: "#10b981", keywords: ["스파", "spa", "명상", "meditation", "힐링", "healing", "요가 스파", "마사지"] },
+  { id: "library_study", label: "도서관/서재", color: "#0ea5e9", keywords: ["도서관", "library", "서재", "study room", "독서실", "클래식 피아노"] },
 ]
+
+// 장소 BGM 장르 id — 드롭다운·필터에서 "── 장소 BGM ──" 구분선 뒤에 묶어 표시.
+export const PLACE_BGM_IDS = ["hotel_lobby", "cafe_bgm", "bar_lounge", "spa_meditation", "library_study"]
+export const PLACE_BGM_SET = new Set(PLACE_BGM_IDS)

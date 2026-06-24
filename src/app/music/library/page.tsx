@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
 import {
@@ -258,17 +258,21 @@ export default function MusicLibraryPage() {
       <div className="flex flex-col gap-2">
         <div className={HSCROLL} style={NOSCROLLBAR}>
           {genreChips.map((g) => (
-            <button
-              key={g.id}
-              type="button"
-              onClick={() => setGenre(g.id)}
-              className={cn(
-                "shrink-0 whitespace-nowrap rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors",
-                genre === g.id ? "border-primary/40 bg-primary/15 text-primary" : "border-border text-muted-foreground hover:border-primary/30 hover:text-foreground",
+            <Fragment key={g.id}>
+              {g.id === "hotel_lobby" && (
+                <span className="shrink-0 self-center whitespace-nowrap px-1 text-[10px] text-muted-foreground/60">── 장소 BGM ──</span>
               )}
-            >
-              {g.label}
-            </button>
+              <button
+                type="button"
+                onClick={() => setGenre(g.id)}
+                className={cn(
+                  "shrink-0 whitespace-nowrap rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors",
+                  genre === g.id ? "border-primary/40 bg-primary/15 text-primary" : "border-border text-muted-foreground hover:border-primary/30 hover:text-foreground",
+                )}
+              >
+                {g.label}
+              </button>
+            </Fragment>
           ))}
         </div>
         <div className="flex gap-1.5">

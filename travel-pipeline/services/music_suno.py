@@ -110,8 +110,12 @@ def _build_body(theme: dict) -> dict:
         "instrumental": instrumental,
         "model": theme.get("model") or default_model,
         "style": theme.get("style", ""),
-        "title": theme.get("title", ""),
     }
+    # #52-A 제목: 값이 있으면 그대로, 비면 omit → Suno 가 곡 제목을 자동 생성한다
+    # (장르명+번호 "시티팝 5" 가 영상에 박히던 문제 해결). 빈 문자열도 전송 안 함.
+    _title = (theme.get("title") or "").strip()
+    if _title:
+        body["title"] = _title
     # 보컬곡: prompt(가사) 필수. lyrics(우선) 또는 prompt 필드를 받는다.
     if not instrumental:
         lyrics = (theme.get("lyrics") or theme.get("prompt") or "").strip()

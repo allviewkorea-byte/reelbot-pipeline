@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState, type TouchEvent as ReactTouchEvent } from "react"
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type TouchEvent as ReactTouchEvent } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
 import { ArrowLeft, Loader2, Music, Music2, Clapperboard } from "lucide-react"
@@ -9,7 +9,7 @@ import { MusicQueueCard, TestCard, type QueueItem } from "@/components/music/Mus
 import { MusicJobCard } from "@/components/music/MusicJobCard"
 import type { MusicJob } from "@/lib/music-jobs"
 import { estimateProductionTime, fmtMinutes } from "@/lib/music"
-import { MUSIC_GENRES } from "@/lib/music-genres"
+import { MUSIC_GENRES, PLACE_BGM_SET } from "@/lib/music-genres"
 
 // 카테고리(14장르 SSOT) + 전체. 클라이언트 사이드 필터(genre·mood 등 텍스트 키워드 매칭).
 // 옛 5분류로 저장된 영상도 raw genre 라벨을 그대로 표시하고, 키워드로 해당 장르 필터에 잡힌다.
@@ -221,7 +221,10 @@ export default function MusicQueueGridPage() {
               disabled={testLoading || manualLoading}
               className="h-8 rounded-md border border-border bg-background px-1.5 text-xs text-foreground"
             >
-              {TEST_MOODS.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+              {TEST_MOODS.filter((m) => !PLACE_BGM_SET.has(m.key)).map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+              <optgroup label="── 장소 BGM ──">
+                {TEST_MOODS.filter((m) => PLACE_BGM_SET.has(m.key)).map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+              </optgroup>
             </select>
             {/* #42 곡수 입력(1~100) */}
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -277,17 +280,21 @@ export default function MusicQueueGridPage() {
             style={{ scrollbarWidth: "none" }}
           >
             {CATEGORIES.map((c) => (
-              <button
-                key={c.key}
-                type="button"
-                onClick={() => setFilter(c.key)}
-                className={cn(
-                  "shrink-0 whitespace-nowrap rounded-lg border px-3 py-1.5 text-left text-xs font-medium transition-colors md:w-full",
-                  filter === c.key ? "border-primary/40 bg-primary/15 text-primary" : "border-border text-muted-foreground hover:border-primary/30 hover:text-foreground",
+              <Fragment key={c.key}>
+                {c.key === "hotel_lobby" && (
+                  <span className="shrink-0 self-center whitespace-nowrap px-1 text-[10px] text-muted-foreground/60">── 장소 BGM ──</span>
                 )}
-              >
-                {c.label}
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setFilter(c.key)}
+                  className={cn(
+                    "shrink-0 whitespace-nowrap rounded-lg border px-3 py-1.5 text-left text-xs font-medium transition-colors md:w-full",
+                    filter === c.key ? "border-primary/40 bg-primary/15 text-primary" : "border-border text-muted-foreground hover:border-primary/30 hover:text-foreground",
+                  )}
+                >
+                  {c.label}
+                </button>
+              </Fragment>
             ))}
           </div>
         </aside>

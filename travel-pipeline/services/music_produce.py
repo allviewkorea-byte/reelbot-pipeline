@@ -132,7 +132,7 @@ def _gen_vocal(
             "theme_slug": theme_slug,
             "instrumental": False,
             "style": _vocal_style(s.get("style") or base_style, gender),
-            "title": s.get("title") or f"{genre_theme} {i}",
+            "title": s.get("title") or "",  # #52-A 빈값 → Suno 가 곡 제목 자동 생성(장르명+번호 표시 방지)
             "lyrics": lyric,
             "vocalGender": gender,
             "genre_id": genre_id,  # #46: 트랙에 장르 기록(used=false로 적립)
@@ -188,7 +188,7 @@ def _gen_instrumental(
             "theme_slug": theme_slug,
             "instrumental": True,
             "style": style,
-            "title": f"{genre_theme} {i}",
+            "title": "",  # #52-A 빈값 → Suno 가 곡 제목 자동 생성(장르명+번호 "시티팝 5" 표시 방지)
             "genre_id": genre_id,  # #46: 둘째 클립이 used=false 로 적립 → 다음에 재활용
         }
         try:
