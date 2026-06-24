@@ -1,7 +1,6 @@
 import {
   AbsoluteFill,
   Audio,
-  Easing,
   Img,
   interpolate,
   staticFile,
@@ -66,6 +65,7 @@ export type DesignConfig = {
   subtitle?: TextStyleCfg; // #36 부제(좌하단)
   playlist_text?: string; // 인라인 편집 — 빈값이면 "PLAY LIST"
   where_text?: string; // 인라인 편집 — 빈값이면 "Where"
+  where_label_hidden?: boolean; // Where 라벨 숨김(미지정=true=숨김)
 } | null;
 
 // 테두리(외곽선) — border.enabled 일 때만 -webkit-text-stroke + paint-order(깔끔한 외곽).
@@ -115,7 +115,6 @@ const TYPE_START = 4.9; // 4.9~6.1 타이프라이터 재등장
 const TYPE_END = 6.1; // 6.1~ 본 영상
 
 const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp" } as const;
-const easeInOut = Easing.bezier(0.65, 0, 0.35, 1);
 
 export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, vizSpec, designConfig, showPlaylist, hasCharacter }) => {
   const frame = useCurrentFrame();
@@ -138,6 +137,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
   // 인라인 편집 텍스트(빈값=기본값 폴백). 영상 반영.
   const playlistText = (designConfig?.playlist_text || "").trim() || "PLAY LIST";
   const whereText = (designConfig?.where_text || "").trim() || "Where";
+  const whereLabelHidden = designConfig?.where_label_hidden ?? true; // 기본 숨김
   const plFontFamily = PRESET_FONTS[plCfg.font_family ?? ""] ?? SERIF;
   const plFontWeight = plCfg.font_weight ?? 700;
   const plColor = plCfg.color ?? textColor;
@@ -206,16 +206,12 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
   const eqIn = interpolate(frame, [STATIC_END * fps, FADE_END * fps], [0, 1], clamp);
   const eqTranslateY = (1 - eqIn) * (maxBarH + baseBottom + 60);
 
-  // ── PLAY LIST: 0~3.5 중앙상단 거대 → 3.5~4.7 좌하단 이동·축소·페이드 ──
-  const LARGE = plFontSize; // 폰트 높이 ~30%(기본) — #35-A 설정 시 그 px. 인트로 도킹 비율은 불변.
-  const plProgress = interpolate(frame, [STATIC_END * fps, FADE_END * fps], [0, 1], {
-    ...clamp,
-    easing: easeInOut,
-  });
-  const plScale = interpolate(plProgress, [0, 1], [1, (height * 0.05) / LARGE]); // 끝 ~5% 높이
-  const plX = interpolate(plProgress, [0, 1], [width * 0.5, width * 0.22]); // 중앙 → 좌
-  const plY = interpolate(plProgress, [0, 1], [height * 0.2, height * 0.86]); // 상단 → 하단
-  const plOpacity = interpolate(plProgress, [0.85, 1], [1, 0], clamp); // 끝부분에서만 페이드
+  // ── PLAY LIST(메인 로고): 항상 화면 정중앙 고정. 이동·축소·페이드아웃 제거(페이드인만 유지). ──
+  const LARGE = plFontSize; // 폰트 높이 ~30%(기본) — #35-A 설정 시 그 px.
+  const plScale = 1; // 축소 없음 — 항상 원본 크기
+  const plX = width * 0.5; // 항상 가로 중앙
+  const plY = height * 0.5; // 항상 세로 중앙
+  const plOpacity = interpolate(frame, [0, 0.5 * fps], [0, 1], clamp); // 등장 페이드인만(이후 1 유지)
 
   // ── 곡 제목(본 영상 구간별, 경계 페이드) ─────────────────────────
   const t = frame / fps;
@@ -268,8 +264,9 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
         }}
       />
 
-      {/* #37-B WHERE 라벨(상단 중앙, 'Where :' 표기) — #35-A 디자인 설정 적용(미설정 시 현재값). */}
-      {locationEn && (
+      {/* #37-B WHERE 라벨(상단 중앙, 'Where :' 표기) — #35-A 디자인 설정 적용(미설정 시 현재값).
+          where_label_hidden(기본 true)이면 렌더 안 함(완전 삭제 아님 — 조건부 렌더). */}
+      {locationEn && !whereLabelHidden && (
         <div
           style={{
             position: "absolute", top: height * 0.04, width: "100%", textAlign: "center",

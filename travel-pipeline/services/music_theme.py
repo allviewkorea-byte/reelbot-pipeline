@@ -253,6 +253,7 @@ def _build_messages(
         f"- 최근 상황 {avoid_s} 와 연속되지 않게 한다.\n"
         "- 4번 코히어런스(상황×무드×장르가 말 되는 조합)·6번 style_prompt 작성법을 지킨다.\n"
         "- type 이 instrumental 이면 lyric_tone 은 null, vocal 이면 lyric_tone 한 줄을 채운다.\n"
+        "- title_kr 은 반드시 한글 제목으로 작성한다(영어 제목 금지).\n"
         "- slug 은 영문 소문자_스네이크(^[a-z0-9_]+$).\n"
         f"{trend_hint}\n"
         "**JSON 외 다른 텍스트 금지.**"

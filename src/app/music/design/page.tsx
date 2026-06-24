@@ -55,6 +55,7 @@ export default function MusicDesignPage() {
           // 인라인 편집 텍스트(빈값=기본값). playlist/where 는 영상 반영, preview_* 는 미리보기 전용.
           playlist_text: config.playlist_text ?? "",
           where_text: config.where_text ?? "",
+          where_label_hidden: config.where_label_hidden ?? true,
           preview_title: config.preview_title ?? "",
           preview_subtitle: config.preview_subtitle ?? "",
         }),
@@ -89,7 +90,7 @@ export default function MusicDesignPage() {
         <>
           <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
             <TargetPanel
-              title="PLAY LIST (메인 로고)"
+              title="메인 로고"
               textValue={config.playlist_text ?? ""}
               textDefault={DESIGN_TEXT_DEFAULTS.playlist_text}
               onTextChange={(v) => patchText("playlist_text", v)}
@@ -108,6 +109,8 @@ export default function MusicDesignPage() {
               value={config.where_label}
               sizeRange={[12, 80]}
               onChange={(p) => patchTarget("where_label", p)}
+              hidden={config.where_label_hidden ?? true}
+              onHiddenChange={(v) => setConfig((c) => ({ ...c, where_label_hidden: v }))}
             />
             <TargetPanel
               title="제목 (곡 제목 · 미리보기 전용)"
@@ -201,7 +204,7 @@ function EditableText({ value, placeholder, onCommit }: {
         outlineOffset: 4,
         borderRadius: 2,
         minWidth: "1ch",
-        color: value ? undefined : "rgba(255,255,255,0.45)", // 빈 값 → 기본 텍스트는 흐리게
+        // 빈 값(기본 텍스트)도 부모 색(흰색)을 그대로 사용 — 미리보기 100% 흰색.
       }}
     >
       {editing ? null : (value || placeholder)}
@@ -212,6 +215,7 @@ function EditableText({ value, placeholder, onCommit }: {
 function TargetPanel({
   title, textValue, textDefault, textSuffix = "", onTextChange,
   previewScale, value, sizeRange, onChange, withItalic = false,
+  hidden, onHiddenChange,
 }: {
   title: string
   textValue: string
@@ -223,6 +227,8 @@ function TargetPanel({
   sizeRange: [number, number]
   onChange: (patch: Partial<TextStyleConfig>) => void
   withItalic?: boolean
+  hidden?: boolean
+  onHiddenChange?: (value: boolean) => void
 }) {
   const stroke = value.border.enabled
     ? { WebkitTextStroke: `${value.border.width}px ${value.border.color}`, paintOrder: "stroke fill" as const }
@@ -258,6 +264,17 @@ function TargetPanel({
           {textSuffix && <span>{textSuffix}</span>}
         </div>
       </div>
+
+      {/* 영상에서 라벨 숨김(Where 전용) — 체크 시 영상에 렌더 안 함(기본 체크). */}
+      {onHiddenChange && (
+        <label className="flex items-center gap-2 text-sm text-foreground">
+          <input
+            type="checkbox" checked={!!hidden}
+            onChange={(e) => onHiddenChange(e.target.checked)}
+          />
+          영상에서 사용 안 함 (숨김)
+        </label>
+      )}
 
       {/* 폰트 패밀리 */}
       <Field label="폰트">

@@ -187,6 +187,9 @@ def normalize_design_config(raw, *, include_all: bool = False) -> dict:
             out[name] = _norm_target(raw.get(name), DEFAULT_DESIGN_CONFIG[name])
     for key, maxlen in _TEXT_FIELDS.items():
         out[key] = _text(raw.get(key), maxlen)
+    # Where 라벨 영상 숨김(기본 True=숨김). bool 아니면 기본값.
+    wlh = raw.get("where_label_hidden")
+    out["where_label_hidden"] = wlh if isinstance(wlh, bool) else True
     return out
 
 
