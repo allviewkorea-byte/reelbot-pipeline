@@ -236,7 +236,7 @@ def plan_songs(
         "\"situation\":\"상황/장면\",\"emotion\":\"감정의 결\",\"title\":\"곡 제목\","
         "\"style\":\"음악 변주 스타일(영문, sunoapi style 용)\",\"vocalGender\":\"male|female\"}"
     )
-    data = _extract_json(_call(system, user, max_tokens=2200, model=model))
+    data = _extract_json(_call(system, user, max_tokens=4400, model=model))
     if not isinstance(data, list):
         raise RuntimeError("플랜 응답이 배열이 아닙니다.")
     return data[:n]
