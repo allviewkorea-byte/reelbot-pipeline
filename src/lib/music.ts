@@ -175,7 +175,7 @@ export interface MusicDesignConfig {
   title_scale?: number
   subtitle_scale?: number
   location_scale?: number
-  // 메인 로고 텍스트 중 밑줄('_') 문자에만 적용할 두께(미지정=로고 두께와 동일).
+  // 메인 로고 텍스트의 '_'(밑줄)을 실제 선으로 렌더 — 선 굵기(px, 0.5~20, 기본 2).
   logo_underline_weight?: number
   // 라벨(지역명) 글자 간격(px, 기본 0).
   location_letter_spacing?: number

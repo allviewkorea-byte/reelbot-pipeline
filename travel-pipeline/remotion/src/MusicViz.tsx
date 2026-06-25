@@ -117,7 +117,7 @@ export type DesignConfig = {
   title_scale?: number;
   subtitle_scale?: number;
   location_scale?: number;
-  logo_underline_weight?: number; // 로고 텍스트의 '_' 문자에만 적용할 두께(미지정=로고 두께)
+  logo_underline_weight?: number; // 로고 '_' → 실제 선의 굵기(px, 0.5~20, 기본 2)
   location_letter_spacing?: number; // 라벨 글자 간격(px, 기본 0)
   equalizer?: EqualizerCfg; // 오디오 반응 이퀄(로고 위, pill 막대)
 } | null;
@@ -233,7 +233,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
   const whereLabelHidden = designConfig?.where_label_hidden ?? true; // 기본 숨김
   const plFontFamily = PRESET_FONTS[plCfg.font_family ?? ""] ?? SERIF;
   const plFontWeight = plCfg.font_weight ?? 700;
-  const plUnderlineWeight = designConfig?.logo_underline_weight ?? plFontWeight; // '_' 문자 두께(기본=로고 두께)
+  const plUnderlineThickness = designConfig?.logo_underline_weight ?? 2; // '_' → 실제 선 굵기(px, 기본 2)
   const plColor = plCfg.color ?? textColor;
   const plOpacityMul = plCfg.opacity ?? 1;
   const plFontSize = plCfg.font_size ?? height * 0.3;
@@ -443,8 +443,14 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
             ...plStroke,
           }}
         >
-          {logoRuns(playlistText).map((r, i) => (
-            <span key={i} style={r.underline ? { fontWeight: plUnderlineWeight } : undefined}>{r.s}</span>
+          {logoRuns(playlistText).map((r, i) => r.underline ? (
+            // '_' 런 → 실제 가로 선(굵기 px 자유 조절). 투명 언더스코어로 동일 너비 확보.
+            <span key={i} style={{ position: "relative", display: "inline-block", color: "transparent", whiteSpace: "pre" }}>
+              {r.s}
+              <span style={{ position: "absolute", left: 0, right: 0, bottom: "0.1em", height: plUnderlineThickness, borderRadius: 9999, background: plColor }} />
+            </span>
+          ) : (
+            <span key={i}>{r.s}</span>
           ))}
         </div>
       )}

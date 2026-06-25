@@ -205,10 +205,8 @@ def normalize_design_config(raw, *, include_all: bool = False) -> dict:
     # 요소 크기 배율(0.5~2.0, 미지정=1.0 → 회귀 0).
     for key in _SCALE_KEYS:
         out[key] = _num(raw.get(key), 0.5, 5.0, 1.0)
-    # 로고 텍스트의 '_'(밑줄) 문자 두께(100~900, 미지정=로고 두께 → 회귀 0).
-    out["logo_underline_weight"] = _num(
-        raw.get("logo_underline_weight"), 100, 900, out["play_list"]["font_weight"]
-    )
+    # 로고 '_'(밑줄)을 실제 선으로 렌더 — 선 굵기(px, 0.5~20, 미지정=2.0). float 기본값으로 0.5 단위 보존.
+    out["logo_underline_weight"] = _num(raw.get("logo_underline_weight"), 0.5, 20, 2.0)
     # 라벨(지역명) 글자 간격(-10~50px, 미지정=0).
     out["location_letter_spacing"] = _num(raw.get("location_letter_spacing"), -10, 50, 0)
     # 이퀄라이저(오디오 반응, 로고 위) 설정.
