@@ -170,7 +170,12 @@ export interface MusicDesignConfig {
   subtitle_y?: number
   location_x?: number
   location_y?: number
-  // 이퀄라이저(산 모양, 로고 위) 설정.
+  // 요소 크기(배율 0.5~2.0, 미지정=1.0 → 회귀 0).
+  logo_scale?: number
+  title_scale?: number
+  subtitle_scale?: number
+  location_scale?: number
+  // 이퀄라이저(오디오 반응, 로고 위) 설정.
   equalizer?: EqualizerConfig
 }
 
@@ -189,8 +194,8 @@ export const DEFAULT_EQUALIZER: EqualizerConfig = {
   color1: "#FF00AA",
   color2: "#00AAFF",
   gradient: "center",
-  max_height: 130,
-  width: 520,
+  max_height: 65,
+  width: 260,
   gap_above_logo: 40,
 }
 

@@ -26,6 +26,12 @@ const POS_DEFAULTS = {
 } as const
 type PosKey = keyof typeof POS_DEFAULTS
 
+// 요소 크기 배율 기본값(1.0 = 100%, 범위 0.5~2.0). 미설정 시 회귀 0.
+const SCALE_DEFAULTS = {
+  logo_scale: 1, title_scale: 1, subtitle_scale: 1, location_scale: 1,
+} as const
+type ScaleKey = keyof typeof SCALE_DEFAULTS
+
 // 심경하체 미리보기 @font-face — Google Fonts 미존재라 /public/fonts 번들 TTF 로드(globals.css 무수정).
 const SIMGYEONGHA_FACE = `@font-face{font-family:"SimgyeongHa";src:url("/fonts/SimgyeongHa.ttf") format("truetype");font-display:swap;}`
 
@@ -63,6 +69,9 @@ export default function MusicDesignPage() {
   const patchPos = (key: PosKey, value: number) =>
     setConfig((c) => ({ ...c, [key]: value }))
 
+  const patchScale = (key: ScaleKey, value: number) =>
+    setConfig((c) => ({ ...c, [key]: value }))
+
   const patchEq = (patch: Partial<EqualizerConfig>) =>
     setConfig((c) => ({ ...c, equalizer: { ...DEFAULT_EQUALIZER, ...c.equalizer, ...patch } }))
 
@@ -92,6 +101,11 @@ export default function MusicDesignPage() {
           subtitle_y: config.subtitle_y ?? POS_DEFAULTS.subtitle_y,
           location_x: config.location_x ?? POS_DEFAULTS.location_x,
           location_y: config.location_y ?? POS_DEFAULTS.location_y,
+          // #크기 배율(0.5~2.0).
+          logo_scale: config.logo_scale ?? SCALE_DEFAULTS.logo_scale,
+          title_scale: config.title_scale ?? SCALE_DEFAULTS.title_scale,
+          subtitle_scale: config.subtitle_scale ?? SCALE_DEFAULTS.subtitle_scale,
+          location_scale: config.location_scale ?? SCALE_DEFAULTS.location_scale,
           equalizer: config.equalizer ?? DEFAULT_EQUALIZER,
         }),
       })
@@ -178,7 +192,7 @@ export default function MusicDesignPage() {
           </div>
 
           {/* #E 레이아웃(위치 조정) — 16:9 미리보기 + 요소별 X/Y 슬라이더 */}
-          <LayoutSection config={config} onPos={patchPos} />
+          <LayoutSection config={config} onPos={patchPos} onScale={patchScale} />
 
           {/* #C 이퀄라이저(산 모양, 로고 위) 설정 */}
           <EqualizerSection eq={{ ...DEFAULT_EQUALIZER, ...config.equalizer }} onChange={patchEq} />
@@ -450,25 +464,27 @@ function mixHex(a: string, b: string, t: number): string {
 }
 
 // #E 레이아웃 — 16:9 미리보기 + 요소별 X/Y 슬라이더(실시간 반영).
-function LayoutSection({ config, onPos }: {
+function LayoutSection({ config, onPos, onScale }: {
   config: MusicDesignConfig
   onPos: (key: PosKey, value: number) => void
+  onScale: (key: ScaleKey, value: number) => void
 }) {
   const at = (k: PosKey) => config[k] ?? POS_DEFAULTS[k]
+  const sc = (k: ScaleKey) => config[k] ?? SCALE_DEFAULTS[k]
   const eq = { ...DEFAULT_EQUALIZER, ...config.equalizer }
-  const elements: { label: string; xk: PosKey; yk: PosKey; center: boolean; cls: string }[] = [
-    { label: (config.playlist_text || "PLAY LIST"), xk: "logo_x", yk: "logo_y", center: true, cls: "text-base font-bold text-white" },
-    { label: (config.preview_title || "제목"), xk: "title_x", yk: "title_y", center: false, cls: "text-xs text-white/90" },
-    { label: (config.preview_subtitle || "부제목"), xk: "subtitle_x", yk: "subtitle_y", center: false, cls: "text-[10px] italic text-white/70" },
-    { label: "Tokyo", xk: "location_x", yk: "location_y", center: true, cls: "text-[10px] tracking-wide text-white/80" },
+  const elements: { label: string; xk: PosKey; yk: PosKey; sk: ScaleKey; center: boolean; cls: string }[] = [
+    { label: (config.playlist_text || "PLAY LIST"), xk: "logo_x", yk: "logo_y", sk: "logo_scale", center: true, cls: "text-base font-bold text-white" },
+    { label: (config.preview_title || "제목"), xk: "title_x", yk: "title_y", sk: "title_scale", center: false, cls: "text-xs text-white/90" },
+    { label: (config.preview_subtitle || "부제목"), xk: "subtitle_x", yk: "subtitle_y", sk: "subtitle_scale", center: false, cls: "text-[10px] italic text-white/70" },
+    { label: "Tokyo", xk: "location_x", yk: "location_y", sk: "location_scale", center: true, cls: "text-[10px] tracking-wide text-white/80" },
   ]
-  // 미리보기 이퀄(로고 바로 위, 산 모양) — 1080 기준 px 를 미리보기 높이(상대)로 환산.
-  const eqBars = Array.from({ length: 20 }, (_, i) => Math.cos((i / 19 - 0.5) * Math.PI))
+  // 미리보기 이퀄(로고 바로 위) — 오디오 반응 형태를 흉내낸 비대칭 막대(산 모양 고정 아님), pill.
+  const eqBars = Array.from({ length: 20 }, (_, i) => 0.32 + 0.6 * Math.abs(Math.sin(i * 1.7 + 0.5)))
   return (
     <section className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
-      <h2 className="text-sm font-semibold text-foreground">레이아웃 (위치 조정) · 16:9 미리보기</h2>
+      <h2 className="text-sm font-semibold text-foreground">레이아웃 (위치·크기 조정) · 16:9 미리보기</h2>
       <div className="relative w-full overflow-hidden rounded-lg" style={{ aspectRatio: "16 / 9", background: "#0c1020" }}>
-        {/* 로고 위 산 모양 이퀄 미리보기 */}
+        {/* 로고 위 이퀄 미리보기(오디오 반응형 · pill) */}
         <div
           className="absolute flex items-end justify-center"
           style={{
@@ -480,9 +496,9 @@ function LayoutSection({ config, onPos }: {
             gap: 2,
           }}
         >
-          {eqBars.map((env, i) => {
+          {eqBars.map((v, i) => {
             const tCol = eq.gradient === "center" ? Math.abs(i / 19 - 0.5) * 2 : i / 19
-            return <div key={i} style={{ flex: 1, height: `${Math.max(8, env * 100)}%`, borderRadius: 2, background: mixHex(eq.color1, eq.color2, tCol) }} />
+            return <div key={i} style={{ flex: 1, height: `${Math.max(12, v * 100)}%`, borderRadius: 9999, background: mixHex(eq.color1, eq.color2, tCol) }} />
           })}
         </div>
         {elements.map((el) => (
@@ -492,7 +508,8 @@ function LayoutSection({ config, onPos }: {
             style={{
               left: `${at(el.xk) * 100}%`,
               top: `${at(el.yk) * 100}%`,
-              transform: el.center ? "translate(-50%, -50%)" : "translateY(-50%)",
+              transform: `${el.center ? "translate(-50%, -50%)" : "translateY(-50%)"} scale(${sc(el.sk)})`,
+              transformOrigin: el.center ? "center" : "left center",
             }}
           >
             {el.label}
@@ -513,6 +530,11 @@ function LayoutSection({ config, onPos }: {
                 onChange={(e) => onPos(el.yk, Number(e.target.value) / 100)}
                 className="w-full accent-[var(--color-primary,#a78bfa)]" />
             </Field>
+            <Field label={`크기 (${Math.round(sc(el.sk) * 100)}%)`}>
+              <input type="range" min={50} max={200} step={1} value={Math.round(sc(el.sk) * 100)}
+                onChange={(e) => onScale(el.sk, Number(e.target.value) / 100)}
+                className="w-full accent-[var(--color-primary,#a78bfa)]" />
+            </Field>
           </div>
         ))}
       </div>
@@ -525,15 +547,15 @@ function EqualizerSection({ eq, onChange }: {
   eq: EqualizerConfig
   onChange: (patch: Partial<EqualizerConfig>) => void
 }) {
-  const bars = Array.from({ length: 20 }, (_, i) => Math.cos((i / 19 - 0.5) * Math.PI))
+  const bars = Array.from({ length: 20 }, (_, i) => 0.32 + 0.6 * Math.abs(Math.sin(i * 1.7 + 0.5)))
   return (
     <section className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
-      <h2 className="text-sm font-semibold text-foreground">이퀄라이저 (산 모양 · 로고 위)</h2>
-      {/* 미리보기 막대 */}
+      <h2 className="text-sm font-semibold text-foreground">이퀄라이저 (오디오 반응 · pill · 로고 위)</h2>
+      {/* 미리보기 막대(오디오 반응형 · pill 끝) */}
       <div className="flex h-24 items-end justify-center gap-1 overflow-hidden rounded-lg" style={{ background: "#0c1020" }}>
-        {bars.map((env, i) => {
+        {bars.map((v, i) => {
           const tCol = eq.gradient === "center" ? Math.abs(i / 19 - 0.5) * 2 : i / 19
-          return <div key={i} style={{ width: 8, height: `${Math.max(10, env * 90)}%`, borderRadius: 4, background: mixHex(eq.color1, eq.color2, tCol) }} />
+          return <div key={i} style={{ width: 8, height: `${Math.max(11, v * 90)}%`, borderRadius: 9999, background: mixHex(eq.color1, eq.color2, tCol) }} />
         })}
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
