@@ -146,6 +146,7 @@ export interface TextStyleConfig {
   color: string
   opacity: number
   italic?: boolean // #36 title/subtitle 만 사용
+  letter_spacing?: number // 글자 간격(px, 기본 0). 현재 메인 로고에 적용.
   border: TextBorder
 }
 export interface MusicDesignConfig {

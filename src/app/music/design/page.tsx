@@ -188,6 +188,9 @@ export default function MusicDesignPage() {
                 onChange={(p) => patchTarget("play_list", p)}
                 underlineWeight={config.logo_underline_weight ?? 2}
                 onUnderlineWeight={(v) => setConfig((c) => ({ ...c, logo_underline_weight: v }))}
+                letterSpacing={config.play_list.letter_spacing ?? 0}
+                onLetterSpacing={(v) => patchTarget("play_list", { letter_spacing: v })}
+                letterSpacingRange={[-50, 300]}
               />
               <TargetPanel
                 title="라벨"
@@ -309,7 +312,7 @@ function TargetPanel({
   value, sizeRange, onChange, withItalic = false,
   hidden, onHiddenChange, krFont, onKrFontChange,
   underlineWeight, onUnderlineWeight,
-  letterSpacing, onLetterSpacing,
+  letterSpacing, onLetterSpacing, letterSpacingRange = [-10, 50],
 }: {
   title: string
   textValue: string
@@ -328,6 +331,7 @@ function TargetPanel({
   onUnderlineWeight?: (value: number) => void
   letterSpacing?: number
   onLetterSpacing?: (value: number) => void
+  letterSpacingRange?: [number, number]
 }) {
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3">
@@ -407,11 +411,11 @@ function TargetPanel({
         </Field>
       )}
 
-      {/* 글자 간격(라벨만) */}
+      {/* 글자 간격 — 라벨·메인 로고 */}
       {onLetterSpacing && (
         <Field label={`글자 간격 (${letterSpacing ?? 0}px)`}>
           <input
-            type="range" min={-10} max={50} step={1} value={letterSpacing ?? 0}
+            type="range" min={letterSpacingRange[0]} max={letterSpacingRange[1]} step={1} value={letterSpacing ?? 0}
             onChange={(e) => onLetterSpacing(Number(e.target.value))}
             className="w-full accent-[var(--color-primary,#a78bfa)]"
           />
@@ -553,7 +557,7 @@ function UnifiedPreview({ config }: { config: MusicDesignConfig }) {
         position: "absolute", left: `${pos("logo_x") * 100}%`, top: `${pos("logo_y") * 100}%`,
         transform: `translate(-50%, -50%) scale(${scl("logo_scale")})`,
         fontFamily: `"${logo.font_family}", sans-serif`, fontSize: cqw(logo.font_size), fontWeight: logo.font_weight,
-        color: logo.color, opacity: logo.opacity, lineHeight: 1, whiteSpace: "nowrap", textShadow: shadow, ...strokeOf(logo.border),
+        color: logo.color, opacity: logo.opacity, lineHeight: 1, letterSpacing: cqw(logo.letter_spacing ?? 0), whiteSpace: "nowrap", textShadow: shadow, ...strokeOf(logo.border),
       }}>{logoRuns(config.playlist_text || DESIGN_TEXT_DEFAULTS.playlist_text).map((r, i) => r.underline ? (
         // '_' 런 → 토막 없는 단일 가로 선. 너비 ≈ 글자수 × 0.6em, 굵기는 cqw 로 환산(영상과 비례).
         <span key={i} style={{ display: "inline-block", width: `${r.s.length * 0.6}em`, height: cqw(config.logo_underline_weight ?? 2), borderRadius: 9999, background: logo.color, verticalAlign: "-0.1em" }} />

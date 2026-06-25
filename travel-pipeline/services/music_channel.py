@@ -156,6 +156,7 @@ def _num(v, lo: float, hi: float, dflt):
 def _norm_target(raw, dflt: dict) -> dict:
     out = dict(dflt)
     out["border"] = dict(dflt["border"])
+    out["letter_spacing"] = 0  # 글자 간격(px, 기본 0). 메인 로고에 적용.
     if isinstance(raw, dict):
         if raw.get("font_family") in PRESET_FONTS:
             out["font_family"] = raw["font_family"]
@@ -163,6 +164,7 @@ def _norm_target(raw, dflt: dict) -> dict:
         out["font_weight"] = _num(raw.get("font_weight"), 100, 900, dflt["font_weight"])
         out["color"] = _hex(raw.get("color"), dflt["color"])
         out["opacity"] = _num(raw.get("opacity"), 0.0, 1.0, dflt["opacity"])
+        out["letter_spacing"] = _num(raw.get("letter_spacing"), -50, 300, 0)
         if "italic" in dflt:  # #36 title/subtitle 만 italic 보유. 비bool 이면 기본값.
             iv = raw.get("italic", dflt["italic"])
             out["italic"] = iv if isinstance(iv, bool) else dflt["italic"]
