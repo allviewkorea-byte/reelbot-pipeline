@@ -22,6 +22,9 @@ import { loadFont as loadCormorant } from "@remotion/google-fonts/CormorantGaram
 import { loadFont as loadBodoni } from "@remotion/google-fonts/BodoniModa";
 import { loadFont as loadYoungSerif } from "@remotion/google-fonts/YoungSerif";
 import { loadFont as loadLiterata } from "@remotion/google-fonts/Literata";
+import { loadFont as loadNotoSerifKR } from "@remotion/google-fonts/NotoSerifKR";
+import { loadFont as loadBlackHanSans } from "@remotion/google-fonts/BlackHanSans";
+import { loadFont as loadNanumMyeongjo } from "@remotion/google-fonts/NanumMyeongjo";
 import { moodColors } from "./colors";
 import { currentTrack, Track } from "./tracks";
 
@@ -46,7 +49,20 @@ const PRESET_FONTS: Record<string, string> = {
   "Bodoni Moda": loadBodoni().fontFamily,
   "Young Serif": loadYoungSerif().fontFamily,
   Literata: loadLiterata().fontFamily,
+  // 한글 폰트(제목·부제 한글 글자 fallback용). 영어 폰트 뒤에 스택으로 붙는다.
+  "Noto Serif KR": loadNotoSerifKR().fontFamily,
+  "Black Han Sans": loadBlackHanSans().fontFamily,
+  "Nanum Myeongjo": loadNanumMyeongjo().fontFamily,
 };
+
+// 한글 폰트 기본값(제목·부제 미설정 시). 영어 폰트 스택의 두 번째 자리.
+const DEFAULT_KR_FONT = "Noto Serif KR";
+
+// 영어 폰트 + 한글 폰트 스택 — 영어 글자는 영어 폰트, 한글 글자는 한글 폰트로 자동 fallback.
+function fontStack(en: string, krName?: string): string {
+  const kr = PRESET_FONTS[krName ?? ""] ?? PRESET_FONTS[DEFAULT_KR_FONT];
+  return `"${en}", "${kr}"`;
+}
 
 // #35-A 디자인 설정(채널 설정 본부에서 저장). 비어 있으면 현재 하드코딩값으로 폴백(회귀 0).
 type TextStyleCfg = {
@@ -66,6 +82,8 @@ export type DesignConfig = {
   playlist_text?: string; // 인라인 편집 — 빈값이면 "PLAY LIST"
   where_text?: string; // 인라인 편집 — 빈값이면 "Where"
   where_label_hidden?: boolean; // Where 라벨 숨김(미지정=true=숨김)
+  title_font_kr?: string; // 제목 한글 폰트(미지정=Noto Serif KR)
+  subtitle_font_kr?: string; // 부제 한글 폰트(미지정=Noto Serif KR)
 } | null;
 
 // 테두리(외곽선) — border.enabled 일 때만 -webkit-text-stroke + paint-order(깔끔한 외곽).
@@ -154,14 +172,16 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
   // ── #36 제목·부제(좌하단 블록): title/subtitle 키 없으면 현재값으로 폴백(기울임 포함 회귀 0) ──
   const tCfg = designConfig?.title;
   const sCfg = designConfig?.subtitle;
-  const tFontFamily = tCfg ? (PRESET_FONTS[tCfg.font_family ?? ""] ?? SCRIPT) : SCRIPT;
+  const tFontEn = tCfg ? (PRESET_FONTS[tCfg.font_family ?? ""] ?? SCRIPT) : SCRIPT;
+  const tFontFamily = fontStack(tFontEn, designConfig?.title_font_kr); // 영어+한글 스택
   const tFontWeight = tCfg?.font_weight; // 미지정이면 undefined → 현재(미설정=400)
   const tColor = tCfg?.color ?? textColor;
   const tFontSize = tCfg?.font_size ?? width * 0.044;
   const tFontStyle = tCfg ? (tCfg.italic ? "italic" : "normal") : undefined; // 현재 미설정
   const tOpacityMul = tCfg?.opacity ?? 1;
   const tStroke = strokeStyle(tCfg?.border);
-  const sFontFamily = sCfg ? (PRESET_FONTS[sCfg.font_family ?? ""] ?? SERIF) : SERIF;
+  const sFontEn = sCfg ? (PRESET_FONTS[sCfg.font_family ?? ""] ?? SERIF) : SERIF;
+  const sFontFamily = fontStack(sFontEn, designConfig?.subtitle_font_kr); // 영어+한글 스택
   const sFontWeight = sCfg?.font_weight;
   const sColor = sCfg?.color ?? textColor;
   const sFontSize = sCfg?.font_size ?? width * 0.02;

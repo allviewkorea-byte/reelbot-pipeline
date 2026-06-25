@@ -7,6 +7,8 @@ import { ArrowLeft, Loader2, Save, Pencil } from "lucide-react"
 import {
   DEFAULT_DESIGN_CONFIG,
   DESIGN_PRESET_FONTS,
+  DESIGN_PRESET_FONTS_KR,
+  DESIGN_KR_FONT_DEFAULT,
   DESIGN_TEXT_DEFAULTS,
   type MusicDesignConfig,
   type TextStyleConfig,
@@ -19,7 +21,7 @@ type StyleKey = "play_list" | "where_label" | "title" | "subtitle"
 // 미리보기용 Google Fonts(프리셋 10종) — Remotion 렌더와 동일 패밀리. 가중치는 기본 로드(미리보기는 faux-bold 허용).
 const FONT_LINK =
   "https://fonts.googleapis.com/css2?" +
-  DESIGN_PRESET_FONTS.map((f) => "family=" + f.replace(/ /g, "+")).join("&") +
+  [...DESIGN_PRESET_FONTS, ...DESIGN_PRESET_FONTS_KR].map((f) => "family=" + f.replace(/ /g, "+")).join("&") +
   "&display=swap"
 
 const WEIGHTS = [100, 200, 300, 400, 500, 600, 700, 800, 900]
@@ -56,6 +58,8 @@ export default function MusicDesignPage() {
           playlist_text: config.playlist_text ?? "",
           where_text: config.where_text ?? "",
           where_label_hidden: config.where_label_hidden ?? true,
+          title_font_kr: config.title_font_kr ?? DESIGN_KR_FONT_DEFAULT,
+          subtitle_font_kr: config.subtitle_font_kr ?? DESIGN_KR_FONT_DEFAULT,
           preview_title: config.preview_title ?? "",
           preview_subtitle: config.preview_subtitle ?? "",
         }),
@@ -122,6 +126,8 @@ export default function MusicDesignPage() {
               value={config.title}
               sizeRange={[24, 160]}
               onChange={(p) => patchTarget("title", p)}
+              krFont={config.title_font_kr ?? DESIGN_KR_FONT_DEFAULT}
+              onKrFontChange={(v) => setConfig((c) => ({ ...c, title_font_kr: v }))}
             />
             <TargetPanel
               title="부제목 (미리보기 전용)"
@@ -133,6 +139,8 @@ export default function MusicDesignPage() {
               value={config.subtitle}
               sizeRange={[16, 120]}
               onChange={(p) => patchTarget("subtitle", p)}
+              krFont={config.subtitle_font_kr ?? DESIGN_KR_FONT_DEFAULT}
+              onKrFontChange={(v) => setConfig((c) => ({ ...c, subtitle_font_kr: v }))}
             />
           </div>
 
@@ -215,7 +223,7 @@ function EditableText({ value, placeholder, onCommit }: {
 function TargetPanel({
   title, textValue, textDefault, textSuffix = "", onTextChange,
   previewScale, value, sizeRange, onChange, withItalic = false,
-  hidden, onHiddenChange,
+  hidden, onHiddenChange, krFont, onKrFontChange,
 }: {
   title: string
   textValue: string
@@ -229,6 +237,8 @@ function TargetPanel({
   withItalic?: boolean
   hidden?: boolean
   onHiddenChange?: (value: boolean) => void
+  krFont?: string
+  onKrFontChange?: (value: string) => void
 }) {
   const stroke = value.border.enabled
     ? { WebkitTextStroke: `${value.border.width}px ${value.border.color}`, paintOrder: "stroke fill" as const }
@@ -247,7 +257,10 @@ function TargetPanel({
           style={{
             display: "inline-flex",
             alignItems: "baseline",
-            fontFamily: `"${value.font_family}", sans-serif`,
+            // 영어+한글 스택(한글 폰트 패널이 있으면 fallback 적용). 없으면 기존과 동일.
+            fontFamily: onKrFontChange
+              ? `"${value.font_family}", "${krFont ?? DESIGN_KR_FONT_DEFAULT}", sans-serif`
+              : `"${value.font_family}", sans-serif`,
             fontSize: value.font_size,
             fontWeight: value.font_weight,
             fontStyle: withItalic && value.italic ? "italic" : "normal",
@@ -276,8 +289,8 @@ function TargetPanel({
         </label>
       )}
 
-      {/* 폰트 패밀리 */}
-      <Field label="폰트">
+      {/* 폰트 패밀리(영어) */}
+      <Field label={onKrFontChange ? "영어 폰트" : "폰트"}>
         <select
           value={value.font_family}
           onChange={(e) => onChange({ font_family: e.target.value })}
@@ -286,6 +299,19 @@ function TargetPanel({
           {DESIGN_PRESET_FONTS.map((f) => <option key={f} value={f}>{f}</option>)}
         </select>
       </Field>
+
+      {/* 한글 폰트(제목·부제만) — 영어 폰트 뒤 스택. 한글 글자가 이 폰트로 렌더된다. */}
+      {onKrFontChange && (
+        <Field label="한글 폰트">
+          <select
+            value={krFont ?? DESIGN_KR_FONT_DEFAULT}
+            onChange={(e) => onKrFontChange(e.target.value)}
+            className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm text-foreground"
+          >
+            {DESIGN_PRESET_FONTS_KR.map((f) => <option key={f} value={f}>{f}</option>)}
+          </select>
+        </Field>
+      )}
 
       {/* 크기 */}
       <Field label={`크기 (${value.font_size}px)`}>

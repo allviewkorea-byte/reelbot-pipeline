@@ -409,6 +409,8 @@ class DesignConfigBody(BaseModel):
     playlist_text: str | None = None
     where_text: str | None = None
     where_label_hidden: bool | None = None  # Where 라벨 영상 숨김(기본 true)
+    title_font_kr: str | None = None  # 제목 한글 폰트(기본 Noto Serif KR)
+    subtitle_font_kr: str | None = None  # 부제 한글 폰트(기본 Noto Serif KR)
     preview_title: str | None = None
     preview_subtitle: str | None = None
 
