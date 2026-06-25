@@ -458,10 +458,19 @@ def _render_remotion(
         cmd += ["--frame-start", str(int(frame_start)), "--frame-end", str(int(frame_end))]
     if muted:
         cmd += ["--muted"]
+    logger.info(
+        "[video] _render_remotion: audio_url=%s bg_url=%s char_url=%s",
+        audio_url[:80] if audio_url else None,
+        bg_url[:80] if bg_url else None,
+        character_url[:80] if character_url else None,
+    )
     result = subprocess.run(
         cmd, cwd=str(_REMOTION_DIR), capture_output=True, text=True,
         timeout=_REMOTION_TIMEOUT,
     )
+    if result.stdout:
+        for line in result.stdout.strip().splitlines()[:20]:
+            logger.info("[render.mjs] %s", line)
     if result.returncode != 0:
         raise RuntimeError(f"Remotion 렌더 오류:\n{result.stderr[-2500:]}")
     return str(out_path)
