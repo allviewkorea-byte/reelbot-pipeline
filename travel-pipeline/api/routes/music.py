@@ -234,6 +234,13 @@ def manual_render_status(job_id: str):
     return st
 
 
+@router.post("/manual-render/{job_id}/cancel")
+def manual_render_cancel(job_id: str):
+    """수동 생성 취소(#26-C) — 현재 스텝 완료 후 큐 적재 없이 종료. {ok} 또는 {ok:False, error}."""
+    from services import music_manual
+    return music_manual.cancel(job_id)
+
+
 @router.get("/genre-prompt")
 def genre_prompt(genre: str = ""):
     """#49 — 장르(라벨 또는 id)에 맞는 이미지 프롬프트 1개(풀 15개 중 랜덤). 매번 새로 뽑는다.

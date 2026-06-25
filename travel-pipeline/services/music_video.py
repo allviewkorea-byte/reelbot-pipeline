@@ -516,11 +516,18 @@ def _render_chunks(
     bg: str, audio: str, out: str, chunks: list[dict], *, work: Path,
     tracks: list[dict], mood: str, duration: float, viz_spec: dict | None,
     design_config: dict | None, show_playlist: bool, character_path: str | None = None,
+    audio_url: str | None = None,
+    bg_url: str | None = None,
+    character_url: str | None = None,
 ) -> str:
     """청크별 muted 비디오 렌더(frameRange) → concat(-c copy) → 풀 믹스 오디오 mux.
 
     오디오는 단일 연속 믹스를 한 번에 mux → 청크 경계 오디오 이음새 0. 비디오는 동일 코덱·해상도라
     -c copy 무손실·고속 concat. 임시 청크 파일은 work 디렉터리에 만들어 make_video 의 finally 가 정리.
+
+    #43-L: audio_url/bg_url(+character_url) 이 주어지면 청크별로 Lambda 경로에 진입한다
+    (render.mjs 가 frameRange·muted 를 Lambda 로 위임 → 청크당 1~3분). 미지정이면 None →
+    _render_remotion 이 로컬 분할 렌더 그대로 수행(회귀 0).
     """
     chunk_files: list[Path] = []
     for ch in chunks:
@@ -535,6 +542,7 @@ def _render_chunks(
             design_config=design_config, show_playlist=show_playlist,
             character_path=character_path,
             frame_start=ch["start_frame"], frame_end=ch["end_frame"], muted=True,
+            audio_url=audio_url, bg_url=bg_url, character_url=character_url,
         )
         chunk_files.append(cf)
     # 1) 비디오 concat(-c copy). 절대경로 + -safe 0.
@@ -839,6 +847,7 @@ def make_video(
                         tracks=tracks, mood=mood_hint, duration=duration, viz_spec=viz_spec,
                         design_config=design_config, show_playlist=show_playlist,
                         character_path=char_local,
+                        audio_url=audio_url, bg_url=bg_url, character_url=char_url,
                     )
                     rendered = True
                     logger.info("[video] 분할 렌더 완료 slug=%s", slug)
