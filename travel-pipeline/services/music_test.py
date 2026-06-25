@@ -84,6 +84,36 @@ def _dummy_bg(work: Path) -> Path:
     return out
 
 
+def _real_bg(work: Path, slug: str) -> Path | None:
+    """운영 영상 배경(music_uploads.thumbnail_r2_key)을 R2 에서 받아 bg 로 사용.
+
+    같은 slug 우선, 없으면 최근 업로드/검토대기 중 thumbnail_r2_key 보유분 1개.
+    조회·다운로드 실패 시 None → 호출부가 더미 배경으로 폴백.
+    """
+    try:
+        from services import music_uploads
+        rows = music_uploads.list_uploaded(limit=20) + music_uploads.list_pending()
+        cand: str | None = None
+        for row in rows:
+            tk = (row.get("thumbnail_r2_key") or "").strip()
+            if not tk:
+                continue
+            if row.get("slug") == slug:  # slug 일치 우선
+                cand = tk
+                break
+            if cand is None:  # 폴백: 가장 최근 보유분
+                cand = tk
+        if not cand:
+            return None
+        dest = work / "bg.png"
+        r2_storage.download_music_object(cand, str(dest))
+        logger.info("[music-test] 실제 배경 사용(key=%s)", cand)
+        return dest
+    except Exception as e:  # noqa: BLE001 - 실패 시 더미 배경 폴백
+        logger.warning("[music-test] 실제 배경 로드 실패(더미 폴백): %s", e)
+        return None
+
+
 def render_test(mood: str | None = None, *, seconds: float = 10.0) -> dict:
     """임시 주제로 10초 영상 렌더 → R2 임시 업로드 → {video_url, engine, ...}.
 
@@ -113,7 +143,7 @@ def render_test(mood: str | None = None, *, seconds: float = 10.0) -> dict:
     work = Path(tempfile.mkdtemp(prefix="mtest_"))
     try:
         audio = _synth_audio(work, seconds)
-        bg = _dummy_bg(work)
+        bg = _real_bg(work, key) or _dummy_bg(work)  # 운영 썸네일 배경 우선, 없으면 더미
         out = work / "test.mp4"
 
         engine = "ffmpeg"
