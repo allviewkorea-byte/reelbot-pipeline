@@ -175,6 +175,8 @@ export interface MusicDesignConfig {
   title_scale?: number
   subtitle_scale?: number
   location_scale?: number
+  // 메인 로고 텍스트 중 밑줄('_') 문자에만 적용할 두께(미지정=로고 두께와 동일).
+  logo_underline_weight?: number
   // 이퀄라이저(오디오 반응, 로고 위) 설정.
   equalizer?: EqualizerConfig
 }

@@ -436,6 +436,7 @@ class DesignConfigBody(BaseModel):
     title_scale: float | None = None
     subtitle_scale: float | None = None
     location_scale: float | None = None
+    logo_underline_weight: float | None = None  # 로고 '_' 문자 두께(100~900)
     # 이퀄라이저(오디오 반응, 로고 위) 설정.
     equalizer: _EqualizerBody | None = None
 
