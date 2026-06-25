@@ -112,7 +112,12 @@ export type DesignConfig = {
   subtitle_y?: number;
   location_x?: number;
   location_y?: number;
-  equalizer?: EqualizerCfg; // 산 모양 이퀄(로고 위)
+  // 요소 크기(배율, 미지정=1.0 → 회귀 0). 0.5~2.0.
+  logo_scale?: number;
+  title_scale?: number;
+  subtitle_scale?: number;
+  location_scale?: number;
+  equalizer?: EqualizerCfg; // 오디오 반응 이퀄(로고 위, pill 막대)
 } | null;
 
 // 이퀄라이저(산 모양, 로고 위) 설정 — 미지정 시 기본값.
@@ -216,7 +221,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
   const plFontSize = plCfg.font_size ?? height * 0.3;
   const plStroke = strokeStyle(plCfg.border);
   const wlFontFamily = PRESET_FONTS[wlCfg.font_family ?? ""] ?? "sans-serif";
-  const wlFontSize = wlCfg.font_size ?? width * 0.012;
+  const wlFontSize = (wlCfg.font_size ?? width * 0.012) * (designConfig?.location_scale ?? 1);
   const wlFontWeight = wlCfg.font_weight ?? 600;
   const wlColor = wlCfg.color ?? "#FFFFFF";
   const wlOpacity = wlCfg.opacity ?? 0.9;
@@ -229,7 +234,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
   const tFontFamily = fontStack(tFontEn, designConfig?.title_font_kr); // 영어+한글 스택
   const tFontWeight = tCfg?.font_weight; // 미지정이면 undefined → 현재(미설정=400)
   const tColor = tCfg?.color ?? textColor;
-  const tFontSize = tCfg?.font_size ?? width * 0.044;
+  const tFontSize = (tCfg?.font_size ?? width * 0.044) * (designConfig?.title_scale ?? 1);
   const tFontStyle = tCfg ? (tCfg.italic ? "italic" : "normal") : undefined; // 현재 미설정
   const tOpacityMul = tCfg?.opacity ?? 1;
   const tStroke = strokeStyle(tCfg?.border);
@@ -237,7 +242,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
   const sFontFamily = fontStack(sFontEn, designConfig?.subtitle_font_kr); // 영어+한글 스택
   const sFontWeight = sCfg?.font_weight;
   const sColor = sCfg?.color ?? textColor;
-  const sFontSize = sCfg?.font_size ?? width * 0.02;
+  const sFontSize = (sCfg?.font_size ?? width * 0.02) * (designConfig?.subtitle_scale ?? 1);
   const sFontStyle = sCfg ? (sCfg.italic ? "italic" : "normal") : "italic"; // 현재 항상 italic
   const sOpacity = sCfg?.opacity ?? 1;
   const sStroke = strokeStyle(sCfg?.border);
@@ -282,7 +287,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
 
   // ── PLAY LIST(메인 로고): 위치는 logo_x/logo_y(기본 정중앙). 이동·축소 없음(페이드인만). ──
   const LARGE = plFontSize; // 폰트 높이 ~30%(기본) — #35-A 설정 시 그 px.
-  const plScale = 1; // 축소 없음 — 항상 원본 크기
+  const plScale = designConfig?.logo_scale ?? 1; // #크기 슬라이더(0.5~2.0, 기본 1)
   const plOpacity = interpolate(frame, [0, 0.5 * fps], [0, 1], clamp); // 등장 페이드인만(이후 1 유지)
 
   // ── 곡 제목(본 영상 구간별, 경계 페이드) ─────────────────────────
@@ -331,8 +336,8 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
   const eqColor1 = eq.color1 ?? "#FF00AA";
   const eqColor2 = eq.color2 ?? "#00AAFF";
   const eqGradient = eq.gradient ?? "center";
-  const eqMaxH = eq.max_height ?? 130;
-  const eqWidth = eq.width ?? 520;
+  const eqMaxH = eq.max_height ?? 65;
+  const eqWidth = eq.width ?? 260;
   const eqGap = eq.gap_above_logo ?? 40;
   const logoTop = logoY - LARGE / 2; // 로고(세로 중앙 기준) 윗변
   const eqBottom = logoTop - eqGap; // 이퀄 막대 바닥(= 로고 위 eqGap)
@@ -448,7 +453,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
         </div>
       )}
 
-      {/* 4) #C 새 이퀄(산 모양) — 로고 바로 위, 중앙 정렬. 가운데 높고 양끝 낮은 envelope. */}
+      {/* 4) #C 이퀄 — 로고 바로 위, 중앙 정렬. 오디오 진폭만으로 막대 높이(산 모양 고정 아님), pill 막대. */}
       <div
         style={{
           position: "absolute",
@@ -465,11 +470,10 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
         }}
       >
         {values.map((v, i) => {
-          // 산 모양 envelope(가운데 1 → 양끝 0, 코사인). 오디오 진폭으로 변조.
-          const env = Math.cos(((i / (EQ_BARS - 1)) - 0.5) * Math.PI);
+          // 오디오 진폭만으로 높이 결정(산 모양 envelope 제거 → 음악에 자유롭게 반응).
           const tilt = 1 + (i / (EQ_BARS - 1)) * 5.0; // 고역 롤오프 보정(기존 결 유지)
           const amp = Math.min(1, v * 2.4 * tilt);
-          const h = Math.max(6, (0.3 + 0.7 * amp) * env * eqMaxH); // 최소 높이 + envelope
+          const h = Math.max(eqBarW, amp * eqMaxH); // 최소 = 막대폭(pill 끝이 항상 둥글게)
           // 그라데이션: horizontal=좌→우 / center=가운데→바깥.
           const tCol = eqGradient === "center"
             ? Math.abs((i / (EQ_BARS - 1)) - 0.5) * 2
@@ -480,7 +484,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
               style={{
                 width: eqBarW,
                 height: h,
-                borderRadius: eqBarW,
+                borderRadius: 9999, // pill(위아래 둥근 끝)
                 background: mixHex(eqColor1, eqColor2, tCol),
               }}
             />

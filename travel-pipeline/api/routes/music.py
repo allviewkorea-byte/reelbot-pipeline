@@ -431,7 +431,12 @@ class DesignConfigBody(BaseModel):
     subtitle_y: float | None = None
     location_x: float | None = None
     location_y: float | None = None
-    # 이퀄라이저(산 모양, 로고 위) 설정.
+    # 요소 크기 배율(0.5~2.0).
+    logo_scale: float | None = None
+    title_scale: float | None = None
+    subtitle_scale: float | None = None
+    location_scale: float | None = None
+    # 이퀄라이저(오디오 반응, 로고 위) 설정.
     equalizer: _EqualizerBody | None = None
 
 

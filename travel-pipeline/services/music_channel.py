@@ -202,7 +202,10 @@ def normalize_design_config(raw, *, include_all: bool = False) -> dict:
     # 요소 위치(0~1 비율, 미지정=기존 기본값 → 렌더 회귀 0).
     for key, dflt in _POS_DEFAULTS.items():
         out[key] = _num(raw.get(key), 0.0, 1.0, dflt)
-    # 이퀄라이저(산 모양, 로고 위) 설정.
+    # 요소 크기 배율(0.5~2.0, 미지정=1.0 → 회귀 0).
+    for key in _SCALE_KEYS:
+        out[key] = _num(raw.get(key), 0.5, 2.0, 1.0)
+    # 이퀄라이저(오디오 반응, 로고 위) 설정.
     out["equalizer"] = _norm_equalizer(raw.get("equalizer"))
     return out
 
@@ -218,8 +221,11 @@ _POS_DEFAULTS = {
 # 이퀄라이저 기본값(1080p 기준 px) + 그라데이션 방향 화이트리스트.
 _EQ_DEFAULTS = {
     "color1": "#FF00AA", "color2": "#00AAFF", "gradient": "center",
-    "max_height": 130, "width": 520, "gap_above_logo": 40,
+    "max_height": 65, "width": 260, "gap_above_logo": 40,
 }
+
+# 요소 크기 배율(0.5~2.0, 미설정=1.0 → 회귀 0).
+_SCALE_KEYS = ("logo_scale", "title_scale", "subtitle_scale", "location_scale")
 _EQ_GRADIENTS = ("horizontal", "center")
 
 
