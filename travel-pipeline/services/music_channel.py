@@ -159,7 +159,7 @@ def _norm_target(raw, dflt: dict) -> dict:
     if isinstance(raw, dict):
         if raw.get("font_family") in PRESET_FONTS:
             out["font_family"] = raw["font_family"]
-        out["font_size"] = _num(raw.get("font_size"), 8, 600, dflt["font_size"])
+        out["font_size"] = _num(raw.get("font_size"), 8, 1200, dflt["font_size"])
         out["font_weight"] = _num(raw.get("font_weight"), 100, 900, dflt["font_weight"])
         out["color"] = _hex(raw.get("color"), dflt["color"])
         out["opacity"] = _num(raw.get("opacity"), 0.0, 1.0, dflt["opacity"])
@@ -204,7 +204,7 @@ def normalize_design_config(raw, *, include_all: bool = False) -> dict:
         out[key] = _num(raw.get(key), 0.0, 1.0, dflt)
     # 요소 크기 배율(0.5~2.0, 미지정=1.0 → 회귀 0).
     for key in _SCALE_KEYS:
-        out[key] = _num(raw.get(key), 0.5, 2.0, 1.0)
+        out[key] = _num(raw.get(key), 0.5, 5.0, 1.0)
     # 이퀄라이저(오디오 반응, 로고 위) 설정.
     out["equalizer"] = _norm_equalizer(raw.get("equalizer"))
     return out
