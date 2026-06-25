@@ -88,19 +88,29 @@ def _check_suno() -> dict:
     try:
         t0 = time.monotonic()
         with httpx.Client(timeout=10.0) as c:
+            # sunoapi.org 크레딧 조회: GET /api/v1/generate/credit
+            # 응답 봉투 {code, msg, data} 에서 data 가 남은 크레딧(정수) 그대로.
             r = c.get(
-                f"{SUNO_BASE}/account/info",
+                f"{SUNO_BASE}/generate/credit",
                 headers={"Authorization": f"Bearer {key}"},
             )
         ms = round((time.monotonic() - t0) * 1000)
         if r.status_code >= 400:
-            return {"status": "error", "message": f"HTTP {r.status_code}", "latency_ms": ms}
-        data = r.json().get("data") or {}
-        credits = data.get("totalCredits")
-        if credits is None:
-            credits = data.get("credits")
+            # 키 만료·엔드포인트 변경 등으로 조회만 실패해도 서비스 자체는 살아있을 수
+            # 있으므로 error 가 아닌 warn 으로 처리(대시보드 빨간불 오인 방지).
+            return {"status": "warn", "message": "크레딧 조회 불가", "latency_ms": ms}
+        data = r.json().get("data")
+        # data 가 정수면 그 자체가 크레딧, 객체면 totalCredits/credits 키에서 추출.
+        credits = None
+        if isinstance(data, (int, float)):
+            credits = int(data)
+        elif isinstance(data, dict):
+            raw = data.get("totalCredits")
+            if raw is None:
+                raw = data.get("credits")
+            if raw is not None:
+                credits = int(raw)
         if credits is not None:
-            credits = int(credits)
             if credits < _SUNO_CREDIT_ERROR:
                 return {"status": "error", "message": "크레딧 부족", "credits": credits, "latency_ms": ms}
             if credits < _SUNO_CREDIT_WARNING:
@@ -108,7 +118,8 @@ def _check_suno() -> dict:
             return {"status": "ok", "credits": credits, "latency_ms": ms}
         return {"status": "ok", "latency_ms": ms}
     except Exception as e:  # noqa: BLE001
-        return {"status": "error", "message": str(e)[:200]}
+        logger.warning("[system] Suno 크레딧 조회 실패: %s", e)
+        return {"status": "warn", "message": "크레딧 조회 불가"}
 
 
 def _check_anthropic() -> dict:
