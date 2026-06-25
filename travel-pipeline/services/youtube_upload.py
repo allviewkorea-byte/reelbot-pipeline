@@ -252,8 +252,11 @@ def build_music_metadata(theme: dict, mix: dict) -> tuple[str, str, list[str]]:
 
 
 def _verify_music_channel(youtube) -> None:
-    """업로드 토큰 채널이 YOUTUBE_CHANNEL_ID_MUSIC 과 일치하는지 검증(불일치 시 차단)."""
-    target = (os.getenv("YOUTUBE_CHANNEL_ID_MUSIC") or "").strip()
+    """업로드 토큰 채널이 음악 채널 ID 와 일치하는지 검증(불일치 시 차단).
+
+    음악 채널 ID 는 YOUTUBE_CHANNEL_ID_MUSIC 우선, 미설정 시 YOUTUBE_CHANNEL_ID 로 폴백.
+    """
+    target = (os.getenv("YOUTUBE_CHANNEL_ID_MUSIC") or os.getenv("YOUTUBE_CHANNEL_ID") or "").strip()
     try:
         resp = youtube.channels().list(part="id,snippet", mine=True).execute()
         items = resp.get("items", [])
