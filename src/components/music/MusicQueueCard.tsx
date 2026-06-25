@@ -1,8 +1,9 @@
 "use client"
 
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { Loader2, Music, Copy, Check, Upload, Globe, Trash2, MonitorPlay, Languages, ChevronDown, ChevronUp, RefreshCw, FileText, Maximize2, PictureInPicture2 } from "lucide-react"
+import { isPipSupported, togglePip } from "@/lib/pip"
 import { cn } from "@/lib/utils"
 
 export interface VizSpec {
@@ -176,17 +177,8 @@ export function MusicQueueCard({ item, onChanged, onOpenViewer }: { item: QueueI
   const [savingPl, setSavingPl] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
-  // PiP — 영상 재생 중 다른 앱/탭으로 이동해도 작은 창으로 계속 재생.
-  const togglePiP = useCallback(async () => {
-    const v = videoRef.current
-    if (!v) return
-    try {
-      if (document.pictureInPictureElement) await document.exitPictureInPicture()
-      else if (document.pictureInPictureEnabled) await v.requestPictureInPicture()
-    } catch {
-      /* 미지원/제스처 문제 → 무시 */
-    }
-  }, [])
+  const [pipOk, setPipOk] = useState(false)
+  useEffect(() => { setPipOk(isPipSupported(videoRef.current)) }, [])
   // #50 인물(투명 PNG) 업로드 상태.
   const [charUrl, setCharUrl] = useState<string | null>(item.character_url ?? null)
   const [charUploading, setCharUploading] = useState(false)
@@ -443,15 +435,17 @@ export function MusicQueueCard({ item, onChanged, onOpenViewer }: { item: QueueI
         {/* 영상 우상단 오버레이 — PiP(작은 창) + 확대(스와이프 뷰어). 카드 레이아웃 무영향. */}
         {item.mp4_url && (
           <div className="absolute right-2 top-2 flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={togglePiP}
-              aria-label="PiP(작은 화면) 전환"
-              title="다른 앱을 봐도 작은 창으로 계속 재생"
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-black/50 text-white/90 transition hover:bg-black/70"
-            >
-              <PictureInPicture2 className="h-4 w-4" />
-            </button>
+            {pipOk && (
+              <button
+                type="button"
+                onClick={() => videoRef.current && togglePip(videoRef.current)}
+                aria-label="PiP(작은 화면) 전환"
+                title="다른 앱을 봐도 작은 창으로 계속 재생"
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-black/50 text-white/90 transition hover:bg-black/70"
+              >
+                <PictureInPicture2 className="h-4 w-4" />
+              </button>
+            )}
             {onOpenViewer && (
               <button
                 type="button"

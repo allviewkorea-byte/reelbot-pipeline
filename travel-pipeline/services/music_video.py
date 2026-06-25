@@ -806,8 +806,13 @@ def make_video(
                     bg_url[:80] if bg_url else None,
                     char_url[:80] if char_url else None,
                 )
-                if lambda_ready and audio_url and bg_url:
-                    logger.info("[video] Lambda 렌더 경로 slug=%s (총 %.1f분)", slug, duration / 60)
+                boundaries = sorted(
+                    float(t.get("start_sec") or 0.0) for t in tracks if t.get("start_sec") is not None
+                )
+                chunks = _plan_chunks(duration, boundaries=boundaries or None)
+
+                if lambda_ready and audio_url and bg_url and len(chunks) <= 1:
+                    logger.info("[video] Lambda 단일샷 slug=%s (총 %.1f분)", slug, duration / 60)
                     _render_remotion(
                         str(bg), str(audio), str(out),
                         tracks=tracks, mood=mood_hint, duration=duration, viz_spec=viz_spec,
@@ -816,31 +821,27 @@ def make_video(
                         audio_url=audio_url, bg_url=bg_url, character_url=char_url,
                     )
                     rendered = True
-                    logger.info("[video] Lambda/로컬 렌더 완료 slug=%s", slug)
-                else:
-                    # #43 분할 계획 — ≤15분(약 3~4곡)이면 1청크(기존 단일 렌더, 회귀 0),
-                    # 그 이상이면 곡 경계 스냅 청크로 나눠 렌더 → concat → 풀 오디오 mux.
-                    boundaries = sorted(
-                        float(t.get("start_sec") or 0.0) for t in tracks if t.get("start_sec") is not None
+                    logger.info("[video] Lambda 단일샷 완료 slug=%s", slug)
+                elif len(chunks) <= 1:
+                    logger.info("[video] 로컬 단일 렌더 slug=%s (총 %.1f분)", slug, duration / 60)
+                    _render_remotion(
+                        str(bg), str(audio), str(out),
+                        tracks=tracks, mood=mood_hint, duration=duration, viz_spec=viz_spec,
+                        design_config=design_config, show_playlist=show_playlist,
+                        character_path=char_local,
                     )
-                    chunks = _plan_chunks(duration, boundaries=boundaries or None)
-                    if len(chunks) <= 1:
-                        _render_remotion(
-                            str(bg), str(audio), str(out),
-                            tracks=tracks, mood=mood_hint, duration=duration, viz_spec=viz_spec,
-                            design_config=design_config, show_playlist=show_playlist,
-                            character_path=char_local,
-                        )
-                    else:
-                        logger.info("[video] 분할 렌더 %d청크 (총 %.1f분) slug=%s", len(chunks), duration / 60, slug)
-                        _render_chunks(
-                            str(bg), str(audio), str(out), chunks, work=work,
-                            tracks=tracks, mood=mood_hint, duration=duration, viz_spec=viz_spec,
-                            design_config=design_config, show_playlist=show_playlist,
-                            character_path=char_local,
-                        )
                     rendered = True
-                    logger.info("[video] Remotion 렌더 완료 slug=%s", slug)
+                    logger.info("[video] 로컬 단일 렌더 완료 slug=%s", slug)
+                else:
+                    logger.info("[video] 분할 렌더 %d청크 (총 %.1f분) slug=%s", len(chunks), duration / 60, slug)
+                    _render_chunks(
+                        str(bg), str(audio), str(out), chunks, work=work,
+                        tracks=tracks, mood=mood_hint, duration=duration, viz_spec=viz_spec,
+                        design_config=design_config, show_playlist=show_playlist,
+                        character_path=char_local,
+                    )
+                    rendered = True
+                    logger.info("[video] 분할 렌더 완료 slug=%s", slug)
             except Exception as e:  # noqa: BLE001 - Remotion 불안정 대비 ffmpeg 폴백
                 logger.warning("[video] Remotion 실패 → ffmpeg 폴백: %s", e)
         if not rendered:
