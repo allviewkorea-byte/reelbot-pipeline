@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState, type TouchEvent as ReactTouchEvent } from "react"
 import { X, ChevronLeft, ChevronRight, PictureInPicture2 } from "lucide-react"
 import type { QueueItem } from "@/components/music/MusicQueueCard"
+import { isPipSupported, togglePip } from "@/lib/pip"
 
 const SWIPE_THRESHOLD = 50 // px — 이 이상 가로로 끌어야 전환
 
@@ -25,6 +26,7 @@ export function SwipeVideoViewer({
   const touchStartX = useRef<number | null>(null)
   const touchStartY = useRef<number | null>(null)
   const [pipActive, setPipActive] = useState(false)
+  const [pipOk, setPipOk] = useState(false)
 
   const current = items[index]
   const hasPrev = index > 0
@@ -58,6 +60,11 @@ export function SwipeVideoViewer({
     })
   }, [index])
 
+  // PiP 지원 감지 — video 엘리먼트 마운트 후 확인(표준 + iOS webkit).
+  useEffect(() => {
+    setPipOk(isPipSupported(videoRef.current))
+  }, [index])
+
   // PiP 상태 추적 — 시스템 PiP 창을 닫아도 버튼 상태가 맞도록.
   useEffect(() => {
     const v = videoRef.current
@@ -72,18 +79,9 @@ export function SwipeVideoViewer({
     }
   }, [])
 
-  const togglePiP = useCallback(async () => {
+  const handleTogglePip = useCallback(async () => {
     const v = videoRef.current
-    if (!v) return
-    try {
-      if (document.pictureInPictureElement) {
-        await document.exitPictureInPicture()
-      } else if (document.pictureInPictureEnabled) {
-        await v.requestPictureInPicture()
-      }
-    } catch {
-      /* 사용자 제스처/지원 문제로 실패 → 무시 */
-    }
+    if (v) await togglePip(v)
   }, [])
 
   const onTouchStart = (e: ReactTouchEvent) => {
@@ -104,9 +102,6 @@ export function SwipeVideoViewer({
   }
 
   if (!current) return null
-
-  const pipSupported =
-    typeof document !== "undefined" && Boolean(document.pictureInPictureEnabled)
 
   return (
     <div className="fixed inset-0 z-[60] flex flex-col bg-black/95 backdrop-blur-sm">
@@ -194,10 +189,10 @@ export function SwipeVideoViewer({
             {[current.genre, current.mood].filter(Boolean).join(" · ")}
           </p>
         </div>
-        {pipSupported && (
+        {pipOk && (
           <button
             type="button"
-            onClick={togglePiP}
+            onClick={handleTogglePip}
             aria-label="PiP(작은 화면) 전환"
             title="다른 앱을 봐도 작은 창으로 계속 재생"
             className={`flex h-10 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs font-medium transition ${
