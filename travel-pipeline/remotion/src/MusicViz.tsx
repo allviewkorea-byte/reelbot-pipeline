@@ -91,6 +91,7 @@ type TextStyleCfg = {
   color?: string;
   opacity?: number;
   italic?: boolean; // #36 title/subtitle 만 사용
+  letter_spacing?: number; // 글자 간격(px, 기본 0). 메인 로고에 적용.
   border?: { enabled?: boolean; width?: number; color?: string };
 };
 export type DesignConfig = {
@@ -391,7 +392,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
             color: plColor,
             fontSize: LARGE,
             lineHeight: 1,
-            letterSpacing: width * 0.012,
+            letterSpacing: plCfg.letter_spacing ?? 0, // #5 글자 간격(기본 0 → 미리보기와 일치)
             whiteSpace: "nowrap",
             textShadow: shadow,
             opacity: plOpacityMul,
@@ -450,8 +451,9 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
         {values.map((v, i) => {
           // 오디오 진폭만으로 높이 결정(산 모양 envelope 제거 → 음악에 자유롭게 반응).
           const tilt = 1 + (i / (EQ_BARS - 1)) * 5.0; // 고역 롤오프 보정(기존 결 유지)
-          const amp = Math.min(1, v * 2.4 * tilt);
-          const h = Math.max(eqBarW, amp * eqMaxH); // 최소 = 막대폭(pill 끝이 항상 둥글게)
+          // #8 파동 세기 강화: 진폭 배율 2.4→5.5(약 2.3배). 소리 없어도 최소 10% 유지(막대 안 사라짐).
+          const amp = Math.min(1, v * 5.5 * tilt);
+          const h = Math.max(eqMaxH * 0.1, amp * eqMaxH);
           // 그라데이션: horizontal=좌→우 / center=가운데→바깥.
           const tCol = eqGradient === "center"
             ? Math.abs((i / (EQ_BARS - 1)) - 0.5) * 2

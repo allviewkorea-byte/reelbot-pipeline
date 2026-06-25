@@ -397,6 +397,7 @@ class _DesignTarget(BaseModel):
     color: str | None = None
     opacity: float | None = None
     italic: bool | None = None  # #36 title/subtitle 만 사용(play_list/where_label 은 무시)
+    letter_spacing: float | None = None  # 글자 간격(px) — 메인 로고에 적용
     border: _DesignBorder | None = None
 
 
