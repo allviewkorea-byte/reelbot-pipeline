@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react"
 import { toast } from "sonner"
-import { Loader2, Music, Copy, Check, Upload, Globe, Trash2, MonitorPlay, Languages, ChevronDown, ChevronUp, RefreshCw } from "lucide-react"
+import { Loader2, Music, Copy, Check, Upload, Globe, Trash2, MonitorPlay, Languages, ChevronDown, ChevronUp, RefreshCw, FileText } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export interface VizSpec {
@@ -180,6 +180,9 @@ export function MusicQueueCard({ item, onChanged }: { item: QueueItem; onChanged
   const [charUploading, setCharUploading] = useState(false)
   const charFileRef = useRef<HTMLInputElement>(null)
   const viz = item.viz_spec || undefined
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [previewData, setPreviewData] = useState<{ title: string; description: string } | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
 
   const togglePlaylist = useCallback(async () => {
     const next = !showPlaylist
@@ -312,6 +315,29 @@ export function MusicQueueCard({ item, onChanged }: { item: QueueItem; onChanged
       toast.success("인물 제거됨 — [재렌더]로 기존(배경+PLAYLIST)으로 되돌립니다.")
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "인물 제거 실패")
+    }
+  }
+
+  const togglePreview = async () => {
+    if (previewOpen) { setPreviewOpen(false); return }
+    setPreviewOpen(true)
+    if (previewData) return
+    setPreviewLoading(true)
+    try {
+      const res = await fetch(`/api/music/queue/${encodeURIComponent(item.mix_id)}/localize`, { method: "POST" })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(d?.detail || "미리보기 생성 실패")
+      const loc = d?.localizations as Localizations | undefined
+      const meta = loc?.meta
+      const src = loc?.source_lang || "ko"
+      const entry = meta?.[src] || meta?.["ko"]
+      if (entry) {
+        setPreviewData({ title: entry.title || "", description: entry.description || "" })
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "미리보기 생성 실패")
+    } finally {
+      setPreviewLoading(false)
     }
   }
 
@@ -551,6 +577,39 @@ export function MusicQueueCard({ item, onChanged }: { item: QueueItem; onChanged
 
         {/* #32 다국어 검수 — 펼쳐서 언어별 제목·설명·가사 확인/수정 */}
         <MultilangPanel mixId={item.mix_id} />
+
+        {/* 업로드 미리보기 — 접이식, 제목+본문 확인 */}
+        <div className="rounded-md border border-border/50">
+          <button
+            type="button"
+            onClick={togglePreview}
+            className="flex w-full items-center gap-1.5 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+          >
+            <FileText className="h-3.5 w-3.5" />
+            업로드 미리보기
+            {previewOpen ? <ChevronUp className="ml-auto h-3.5 w-3.5" /> : <ChevronDown className="ml-auto h-3.5 w-3.5" />}
+          </button>
+          {previewOpen && (
+            <div className="border-t border-border/50 px-3 py-2.5">
+              {previewLoading ? (
+                <div className="flex items-center justify-center py-4"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
+              ) : previewData ? (
+                <div className="space-y-2">
+                  <div>
+                    <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">제목</span>
+                    <p className="mt-0.5 text-xs leading-relaxed text-foreground">{previewData.title}</p>
+                  </div>
+                  <div className="border-t border-border/30 pt-2">
+                    <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">본문</span>
+                    <pre className="mt-0.5 whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground">{previewData.description}</pre>
+                  </div>
+                </div>
+              ) : (
+                <p className="py-2 text-center text-xs text-muted-foreground">미리보기를 불러올 수 없습니다.</p>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* 공개 + 삭제 */}
         <div className="mt-auto flex items-center gap-2">
