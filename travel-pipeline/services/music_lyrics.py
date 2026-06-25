@@ -30,6 +30,24 @@ _DEFAULT_MODEL = CLAUDE_MODEL
 # 자기검토 통과 바(원칙 6): 4기준 모두 이 점수 이상이어야 채택.
 _REVIEW_BAR = 7
 
+# 곡 길이 목표(3분 50초~4분 20초)를 위한 가사 구조 — 섹션별 라인 수 명시.
+# Suno 는 가사 분량에 비례해 곡을 늘리므로, 충분한 섹션·라인을 채워야 2분대를 벗어난다.
+_SONG_STRUCTURE = (
+    "[Intro]\n"
+    "[Verse 1] (8줄)\n"
+    "[Pre-Chorus] (4줄)\n"
+    "[Chorus] (6줄)\n"
+    "[Verse 2] (8줄)\n"
+    "[Pre-Chorus] (4줄)\n"
+    "[Chorus] (6줄)\n"
+    "[Bridge] (4줄)\n"
+    "[Chorus] (6줄)\n"
+    "[Outro] (2줄)"
+)
+
+# Suno 스타일 길이 힌트 — 위 구조와 함께 곡을 3분 50초~4분 20초로 늘리도록.
+_LENGTH_STYLE_HINT = "extended, long song"
+
 # 기본 sub-주제 풀(다양성 가이드, 시티팝). 플랜이 참고하되 그대로 베끼지 않는다.
 DEFAULT_SUBTHEME_POOL = [
     "한밤 드라이브", "여름 바다", "금요일 밤", "첫눈에", "옥상 파티", "네온사인",
@@ -97,6 +115,15 @@ def pick_moods(genre_id: str | None, n: int = 2) -> list[str]:
 
 def _model() -> str:
     return (os.getenv("MUSIC_LYRICS_MODEL") or _DEFAULT_MODEL).strip()
+
+
+def _with_length_hint(style: str) -> str:
+    """Suno style 문자열에 길이 힌트(extended, long song)를 붙인다(중복 회피)."""
+    base = (style or "").strip()
+    low = base.lower()
+    if "extended" in low and "long song" in low:
+        return base
+    return f"{base}, {_LENGTH_STYLE_HINT}".strip(", ").strip() if base else _LENGTH_STYLE_HINT
 
 
 def is_available() -> bool:
@@ -262,11 +289,14 @@ def write_lyrics(
         "2. 가사 소재는 장르와 무관하게 자유롭게 — 카페 장르라도 커피·라떼 같은 장르 연상 소재 금지. "
         "분위기에 맞는 소재를 자유롭게 선택.\n"
         f"{hook_rule}"
-        "원칙 7 형식: [Verse]/[Pre-Chorus]/[Chorus]/[Bridge]/[Outro] 섹션 태그 포함. "
+        "원칙 7 형식: 아래 구조를 그대로 따라 섹션 태그와 각 섹션의 지정 라인 수를 채워라"
+        "(곡 길이 3분 50초~4분 20초 목표 — 분량 부족 금지). 후렴(Chorus)은 반복하되 "
+        "매번 똑같이 베끼지 말고 미세한 변주를 줘라.\n"
+        f"{_SONG_STRUCTURE}\n"
         "원칙 3: 끝에 잔상/전환을 남겨라.\n"
         "가사 본문만 출력(설명·해설 금지)."
     )
-    return _call(system, user, max_tokens=1600, model=model).strip()
+    return _call(system, user, max_tokens=2400, model=model).strip()
 
 
 # ── 스테이지 3: 자기검토 ─────────────────────────────────────────────────
@@ -290,7 +320,7 @@ def review_lyrics(
         "{\"scores\":{\"depth\":int,\"resonance\":int,\"monotony\":int,\"cliche\":int},"
         "\"revised\":true|false,\"issues\":\"미달 사유(있으면)\",\"lyrics\":\"최종 가사(섹션 태그 포함)\"}"
     )
-    data = _extract_json(_call(system, user, max_tokens=2000, model=model))
+    data = _extract_json(_call(system, user, max_tokens=3000, model=model))
     scores = data.get("scores") or {}
     passed = all(int(scores.get(k, 0)) >= _REVIEW_BAR for k in ("depth", "resonance", "monotony", "cliche")) if scores else False
     final_lyrics = (data.get("lyrics") or lyrics).strip()
@@ -353,7 +383,8 @@ def generate_lyrics(
                 "sub_theme": plan.get("sub_theme", ""),
                 "core_message": plan.get("core_message", ""),
                 "title": plan.get("title", ""),  # #52-A 빈값 허용 → 다운스트림이 Suno 자동 제목 사용(장르명+번호 방지)
-                "style": plan.get("style", "") or theme,
+                # Suno 스타일에 길이 힌트 추가(extended, long song) → 곡을 3분 50초~4분 20초로.
+                "style": _with_length_hint(plan.get("style", "") or theme),
                 "vocalGender": plan.get("vocalGender") or None,
                 "lyrics": review["lyrics"],
                 "scores": review["scores"],
