@@ -173,7 +173,7 @@ def _build_localizations(theme: dict, viz_spec: dict | None, mix: dict) -> dict:
     config = music_channel.get_channel_config()
     src = music_translate.detect_source_lang(lyrics or theme.get("title_kr", "") or "ko-")
     base_title = music_meta.build_title(theme, viz_spec)
-    base_body = music_meta.build_description(theme, viz_spec, tracks, config)  # [1]~[7], 해시태그 제외
+    base_body = music_meta.build_description(theme, viz_spec, tracks, config)  # 감성 멘트+트랙리스트+고정정보, 해시태그 제외
     hashtags = music_meta.build_hashtags(theme, viz_spec)
     hashtag_line = " ".join(hashtags)
     meta_raw = music_translate.generate_localizations(
