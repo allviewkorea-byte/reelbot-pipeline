@@ -121,7 +121,7 @@ export default function MusicDesignPage() {
           location_y: config.location_y ?? POS_DEFAULTS.location_y,
           // #크기 배율(0.5~2.0).
           logo_scale: config.logo_scale ?? SCALE_DEFAULTS.logo_scale,
-          logo_underline_weight: config.logo_underline_weight ?? config.play_list.font_weight,
+          logo_underline_weight: config.logo_underline_weight ?? 2,
           location_letter_spacing: config.location_letter_spacing ?? 0,
           title_scale: config.title_scale ?? SCALE_DEFAULTS.title_scale,
           subtitle_scale: config.subtitle_scale ?? SCALE_DEFAULTS.subtitle_scale,
@@ -183,7 +183,7 @@ export default function MusicDesignPage() {
                 value={config.play_list}
                 sizeRange={[80, 1200]}
                 onChange={(p) => patchTarget("play_list", p)}
-                underlineWeight={config.logo_underline_weight ?? config.play_list.font_weight}
+                underlineWeight={config.logo_underline_weight ?? 2}
                 onUnderlineWeight={(v) => setConfig((c) => ({ ...c, logo_underline_weight: v }))}
               />
               <TargetPanel
@@ -393,16 +393,14 @@ function TargetPanel({
         </select>
       </Field>
 
-      {/* 밑줄 두께(메인 로고만) — 텍스트 중 '_' 문자에만 적용. 기본=로고 두께. */}
+      {/* 밑줄 두께(메인 로고만) — '_' 문자를 실제 선으로 렌더, 선 굵기(px) 조절. */}
       {onUnderlineWeight && (
-        <Field label={`밑줄(_) 두께 (${underlineWeight ?? value.font_weight})`}>
-          <select
-            value={underlineWeight ?? value.font_weight}
+        <Field label={`밑줄 두께(px) (${underlineWeight ?? 2})`}>
+          <input
+            type="range" min={0.5} max={20} step={0.5} value={underlineWeight ?? 2}
             onChange={(e) => onUnderlineWeight(Number(e.target.value))}
-            className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm text-foreground"
-          >
-            {WEIGHTS.map((w) => <option key={w} value={w}>{w}</option>)}
-          </select>
+            className="w-full accent-[var(--color-primary,#a78bfa)]"
+          />
         </Field>
       )}
 
@@ -553,8 +551,14 @@ function UnifiedPreview({ config }: { config: MusicDesignConfig }) {
         transform: `translate(-50%, -50%) scale(${scl("logo_scale")})`,
         fontFamily: `"${logo.font_family}", sans-serif`, fontSize: cqw(logo.font_size), fontWeight: logo.font_weight,
         color: logo.color, opacity: logo.opacity, lineHeight: 1, whiteSpace: "nowrap", textShadow: shadow, ...strokeOf(logo.border),
-      }}>{logoRuns(config.playlist_text || DESIGN_TEXT_DEFAULTS.playlist_text).map((r, i) => (
-        <span key={i} style={r.underline ? { fontWeight: config.logo_underline_weight ?? logo.font_weight } : undefined}>{r.s}</span>
+      }}>{logoRuns(config.playlist_text || DESIGN_TEXT_DEFAULTS.playlist_text).map((r, i) => r.underline ? (
+        // '_' 런 → 실제 가로 선(굵기 px). 투명 언더스코어로 동일 너비 확보. 굵기는 cqw 로 환산(영상과 비례).
+        <span key={i} style={{ position: "relative", display: "inline-block", color: "transparent", whiteSpace: "pre" }}>
+          {r.s}
+          <span style={{ position: "absolute", left: 0, right: 0, bottom: "0.1em", height: cqw(config.logo_underline_weight ?? 2), borderRadius: 9999, background: logo.color }} />
+        </span>
+      ) : (
+        <span key={i}>{r.s}</span>
       ))}</div>
 
       {/* 제목(좌하단, 영어+한글 스택) */}
