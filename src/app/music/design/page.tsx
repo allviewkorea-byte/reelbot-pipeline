@@ -6,13 +6,28 @@ import { toast } from "sonner"
 import { ArrowLeft, Loader2, Save, Pencil } from "lucide-react"
 import {
   DEFAULT_DESIGN_CONFIG,
+  DEFAULT_EQUALIZER,
   DESIGN_PRESET_FONTS,
   DESIGN_PRESET_FONTS_KR,
+  DESIGN_FONT_LABELS,
   DESIGN_KR_FONT_DEFAULT,
   DESIGN_TEXT_DEFAULTS,
+  type EqualizerConfig,
   type MusicDesignConfig,
   type TextStyleConfig,
 } from "@/lib/music"
+
+// 요소 위치 기본값(MusicViz 하드코딩 비율과 동일 → 미설정 시 회귀 0).
+const POS_DEFAULTS = {
+  logo_x: 0.5, logo_y: 0.5,
+  title_x: 0.06, title_y: 0.67,
+  subtitle_x: 0.06, subtitle_y: 0.755,
+  location_x: 0.5, location_y: 0.04,
+} as const
+type PosKey = keyof typeof POS_DEFAULTS
+
+// 심경하체 미리보기 @font-face — Google Fonts 미존재라 /public/fonts 번들 TTF 로드(globals.css 무수정).
+const SIMGYEONGHA_FACE = `@font-face{font-family:"SimgyeongHa";src:url("/fonts/SimgyeongHa.ttf") format("truetype");font-display:swap;}`
 
 // 인라인 편집 텍스트 필드 키 / 스타일(TextStyleConfig) 대상 키.
 type TextKey = "playlist_text" | "where_text" | "preview_title" | "preview_subtitle"
@@ -45,6 +60,12 @@ export default function MusicDesignPage() {
   const patchText = (key: TextKey, value: string) =>
     setConfig((c) => ({ ...c, [key]: value }))
 
+  const patchPos = (key: PosKey, value: number) =>
+    setConfig((c) => ({ ...c, [key]: value }))
+
+  const patchEq = (patch: Partial<EqualizerConfig>) =>
+    setConfig((c) => ({ ...c, equalizer: { ...DEFAULT_EQUALIZER, ...c.equalizer, ...patch } }))
+
   const save = useCallback(async () => {
     setSaving(true)
     try {
@@ -62,6 +83,16 @@ export default function MusicDesignPage() {
           subtitle_font_kr: config.subtitle_font_kr ?? DESIGN_KR_FONT_DEFAULT,
           preview_title: config.preview_title ?? "",
           preview_subtitle: config.preview_subtitle ?? "",
+          // #E 요소 위치(0~1) + #C 이퀄라이저 설정.
+          logo_x: config.logo_x ?? POS_DEFAULTS.logo_x,
+          logo_y: config.logo_y ?? POS_DEFAULTS.logo_y,
+          title_x: config.title_x ?? POS_DEFAULTS.title_x,
+          title_y: config.title_y ?? POS_DEFAULTS.title_y,
+          subtitle_x: config.subtitle_x ?? POS_DEFAULTS.subtitle_x,
+          subtitle_y: config.subtitle_y ?? POS_DEFAULTS.subtitle_y,
+          location_x: config.location_x ?? POS_DEFAULTS.location_x,
+          location_y: config.location_y ?? POS_DEFAULTS.location_y,
+          equalizer: config.equalizer ?? DEFAULT_EQUALIZER,
         }),
       })
       const d = await res.json()
@@ -78,6 +109,8 @@ export default function MusicDesignPage() {
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-auto p-4 md:p-6">
       <link rel="stylesheet" href={FONT_LINK} />
+      {/* 심경하체 미리보기 폰트(번들 TTF) — globals.css 무수정, 컴포넌트 스코프 주입. */}
+      <style dangerouslySetInnerHTML={{ __html: SIMGYEONGHA_FACE }} />
       <header className="flex items-center gap-3 pl-10 md:pl-0">
         <Link href="/music" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-white/5 hover:text-foreground">
           <ArrowLeft className="h-4 w-4" /> 대시보드
@@ -143,6 +176,12 @@ export default function MusicDesignPage() {
               onKrFontChange={(v) => setConfig((c) => ({ ...c, subtitle_font_kr: v }))}
             />
           </div>
+
+          {/* #E 레이아웃(위치 조정) — 16:9 미리보기 + 요소별 X/Y 슬라이더 */}
+          <LayoutSection config={config} onPos={patchPos} />
+
+          {/* #C 이퀄라이저(산 모양, 로고 위) 설정 */}
+          <EqualizerSection eq={{ ...DEFAULT_EQUALIZER, ...config.equalizer }} onChange={patchEq} />
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <button
@@ -308,7 +347,7 @@ function TargetPanel({
             onChange={(e) => onKrFontChange(e.target.value)}
             className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm text-foreground"
           >
-            {DESIGN_PRESET_FONTS_KR.map((f) => <option key={f} value={f}>{f}</option>)}
+            {DESIGN_PRESET_FONTS_KR.map((f) => <option key={f} value={f}>{DESIGN_FONT_LABELS[f] ?? f}</option>)}
           </select>
         </Field>
       )}
@@ -393,6 +432,147 @@ function TargetPanel({
         </div>
       </Field>
     </div>
+  )
+}
+
+// 두 hex 색 선형 보간(미리보기 막대별 색) — Remotion mixHex 와 동일 규칙.
+function mixHex(a: string, b: string, t: number): string {
+  const p = (h: string) => {
+    const m = /^#?([0-9a-f]{6})$/i.exec(h.trim())
+    const n = m ? parseInt(m[1], 16) : 0
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+  }
+  const [r1, g1, b1] = p(a)
+  const [r2, g2, b2] = p(b)
+  const k = Math.max(0, Math.min(1, t))
+  const ch = (x: number, y: number) => Math.round(x + (y - x) * k)
+  return `rgb(${ch(r1, r2)}, ${ch(g1, g2)}, ${ch(b1, b2)})`
+}
+
+// #E 레이아웃 — 16:9 미리보기 + 요소별 X/Y 슬라이더(실시간 반영).
+function LayoutSection({ config, onPos }: {
+  config: MusicDesignConfig
+  onPos: (key: PosKey, value: number) => void
+}) {
+  const at = (k: PosKey) => config[k] ?? POS_DEFAULTS[k]
+  const eq = { ...DEFAULT_EQUALIZER, ...config.equalizer }
+  const elements: { label: string; xk: PosKey; yk: PosKey; center: boolean; cls: string }[] = [
+    { label: (config.playlist_text || "PLAY LIST"), xk: "logo_x", yk: "logo_y", center: true, cls: "text-base font-bold text-white" },
+    { label: (config.preview_title || "제목"), xk: "title_x", yk: "title_y", center: false, cls: "text-xs text-white/90" },
+    { label: (config.preview_subtitle || "부제목"), xk: "subtitle_x", yk: "subtitle_y", center: false, cls: "text-[10px] italic text-white/70" },
+    { label: "Tokyo", xk: "location_x", yk: "location_y", center: true, cls: "text-[10px] tracking-wide text-white/80" },
+  ]
+  // 미리보기 이퀄(로고 바로 위, 산 모양) — 1080 기준 px 를 미리보기 높이(상대)로 환산.
+  const eqBars = Array.from({ length: 20 }, (_, i) => Math.cos((i / 19 - 0.5) * Math.PI))
+  return (
+    <section className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
+      <h2 className="text-sm font-semibold text-foreground">레이아웃 (위치 조정) · 16:9 미리보기</h2>
+      <div className="relative w-full overflow-hidden rounded-lg" style={{ aspectRatio: "16 / 9", background: "#0c1020" }}>
+        {/* 로고 위 산 모양 이퀄 미리보기 */}
+        <div
+          className="absolute flex items-end justify-center"
+          style={{
+            left: `${at("logo_x") * 100}%`,
+            top: `${at("logo_y") * 100}%`,
+            transform: "translate(-50%, calc(-50% - 1.4em))",
+            width: `${(eq.width / 1920) * 100}%`,
+            height: `${(eq.max_height / 1080) * 100}%`,
+            gap: 2,
+          }}
+        >
+          {eqBars.map((env, i) => {
+            const tCol = eq.gradient === "center" ? Math.abs(i / 19 - 0.5) * 2 : i / 19
+            return <div key={i} style={{ flex: 1, height: `${Math.max(8, env * 100)}%`, borderRadius: 2, background: mixHex(eq.color1, eq.color2, tCol) }} />
+          })}
+        </div>
+        {elements.map((el) => (
+          <span
+            key={el.xk}
+            className={`absolute whitespace-nowrap ${el.cls}`}
+            style={{
+              left: `${at(el.xk) * 100}%`,
+              top: `${at(el.yk) * 100}%`,
+              transform: el.center ? "translate(-50%, -50%)" : "translateY(-50%)",
+            }}
+          >
+            {el.label}
+          </span>
+        ))}
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {elements.map((el) => (
+          <div key={el.xk} className="flex flex-col gap-1 rounded-lg border border-border/60 p-2">
+            <span className="text-xs font-medium text-foreground">{el.label}</span>
+            <Field label={`X (${Math.round(at(el.xk) * 100)}%)`}>
+              <input type="range" min={0} max={100} step={1} value={Math.round(at(el.xk) * 100)}
+                onChange={(e) => onPos(el.xk, Number(e.target.value) / 100)}
+                className="w-full accent-[var(--color-primary,#a78bfa)]" />
+            </Field>
+            <Field label={`Y (${Math.round(at(el.yk) * 100)}%)`}>
+              <input type="range" min={0} max={100} step={1} value={Math.round(at(el.yk) * 100)}
+                onChange={(e) => onPos(el.yk, Number(e.target.value) / 100)}
+                className="w-full accent-[var(--color-primary,#a78bfa)]" />
+            </Field>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+// #C 이퀄라이저 설정 — 색상·그라데이션·사이즈·로고 위 간격.
+function EqualizerSection({ eq, onChange }: {
+  eq: EqualizerConfig
+  onChange: (patch: Partial<EqualizerConfig>) => void
+}) {
+  const bars = Array.from({ length: 20 }, (_, i) => Math.cos((i / 19 - 0.5) * Math.PI))
+  return (
+    <section className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
+      <h2 className="text-sm font-semibold text-foreground">이퀄라이저 (산 모양 · 로고 위)</h2>
+      {/* 미리보기 막대 */}
+      <div className="flex h-24 items-end justify-center gap-1 overflow-hidden rounded-lg" style={{ background: "#0c1020" }}>
+        {bars.map((env, i) => {
+          const tCol = eq.gradient === "center" ? Math.abs(i / 19 - 0.5) * 2 : i / 19
+          return <div key={i} style={{ width: 8, height: `${Math.max(10, env * 90)}%`, borderRadius: 4, background: mixHex(eq.color1, eq.color2, tCol) }} />
+        })}
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Field label="색상 1 (시작)">
+          <div className="flex items-center gap-2">
+            <input type="color" value={eq.color1} onChange={(e) => onChange({ color1: e.target.value.toUpperCase() })} className="h-9 w-12 rounded border border-border bg-background" />
+            <input type="text" value={eq.color1} onChange={(e) => onChange({ color1: e.target.value })} className="h-9 w-28 rounded-md border border-border bg-background px-2 text-sm text-foreground" />
+          </div>
+        </Field>
+        <Field label="색상 2 (끝)">
+          <div className="flex items-center gap-2">
+            <input type="color" value={eq.color2} onChange={(e) => onChange({ color2: e.target.value.toUpperCase() })} className="h-9 w-12 rounded border border-border bg-background" />
+            <input type="text" value={eq.color2} onChange={(e) => onChange({ color2: e.target.value })} className="h-9 w-28 rounded-md border border-border bg-background px-2 text-sm text-foreground" />
+          </div>
+        </Field>
+        <Field label="그라데이션 방향">
+          <select value={eq.gradient} onChange={(e) => onChange({ gradient: e.target.value as EqualizerConfig["gradient"] })}
+            className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm text-foreground">
+            <option value="horizontal">좌 → 우</option>
+            <option value="center">가운데 → 바깥</option>
+          </select>
+        </Field>
+        <Field label={`높이 max (${eq.max_height}px)`}>
+          <input type="range" min={20} max={400} step={1} value={eq.max_height}
+            onChange={(e) => onChange({ max_height: Number(e.target.value) })}
+            className="w-full accent-[var(--color-primary,#a78bfa)]" />
+        </Field>
+        <Field label={`너비 (${eq.width}px)`}>
+          <input type="range" min={100} max={1920} step={10} value={eq.width}
+            onChange={(e) => onChange({ width: Number(e.target.value) })}
+            className="w-full accent-[var(--color-primary,#a78bfa)]" />
+        </Field>
+        <Field label={`로고 위 간격 (${eq.gap_above_logo}px)`}>
+          <input type="range" min={0} max={600} step={1} value={eq.gap_above_logo}
+            onChange={(e) => onChange({ gap_above_logo: Number(e.target.value) })}
+            className="w-full accent-[var(--color-primary,#a78bfa)]" />
+        </Field>
+      </div>
+    </section>
   )
 }
 

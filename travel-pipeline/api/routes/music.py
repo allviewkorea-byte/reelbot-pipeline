@@ -400,6 +400,15 @@ class _DesignTarget(BaseModel):
     border: _DesignBorder | None = None
 
 
+class _EqualizerBody(BaseModel):
+    color1: str | None = None
+    color2: str | None = None
+    gradient: str | None = None  # horizontal | center
+    max_height: float | None = None
+    width: float | None = None
+    gap_above_logo: float | None = None
+
+
 class DesignConfigBody(BaseModel):
     play_list: _DesignTarget | None = None
     where_label: _DesignTarget | None = None
@@ -413,6 +422,17 @@ class DesignConfigBody(BaseModel):
     subtitle_font_kr: str | None = None  # 부제 한글 폰트(기본 Noto Serif KR)
     preview_title: str | None = None
     preview_subtitle: str | None = None
+    # 요소 위치(0~1 비율) — 메인 로고·제목·부제·지역명.
+    logo_x: float | None = None
+    logo_y: float | None = None
+    title_x: float | None = None
+    title_y: float | None = None
+    subtitle_x: float | None = None
+    subtitle_y: float | None = None
+    location_x: float | None = None
+    location_y: float | None = None
+    # 이퀄라이저(산 모양, 로고 위) 설정.
+    equalizer: _EqualizerBody | None = None
 
 
 @router.post("/design-config")
