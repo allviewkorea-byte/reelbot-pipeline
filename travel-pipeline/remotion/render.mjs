@@ -164,6 +164,15 @@ async function renderWithLambda() {
 
 // ── 디스패처: Lambda 우선, 실패 시 로컬 폴백 ──────────────────────────────────
 const t0 = Date.now();
+console.log("[render] Lambda 조건:", JSON.stringify({
+  frameRange: frameRange ?? null,
+  muted: values.muted ?? false,
+  REMOTION_SERVE_URL: !!process.env.REMOTION_SERVE_URL,
+  REMOTION_LAMBDA_FUNCTION_NAME: !!process.env.REMOTION_LAMBDA_FUNCTION_NAME,
+  audioUrl: values["audio-url"] ? values["audio-url"].slice(0, 60) : null,
+  bgUrl: values["bg-url"] ? values["bg-url"].slice(0, 60) : null,
+  eligible: lambdaEligible(),
+}));
 try {
   if (lambdaEligible()) {
     try {
