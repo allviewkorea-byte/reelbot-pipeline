@@ -117,6 +117,7 @@ export type DesignConfig = {
   title_scale?: number;
   subtitle_scale?: number;
   location_scale?: number;
+  logo_underline_weight?: number; // 로고 텍스트의 '_' 문자에만 적용할 두께(미지정=로고 두께)
   equalizer?: EqualizerCfg; // 오디오 반응 이퀄(로고 위, pill 막대)
 } | null;
 
@@ -129,6 +130,18 @@ type EqualizerCfg = {
   width?: number;
   gap_above_logo?: number;
 };
+
+// 로고 텍스트를 '_'(밑줄) 런 단위로 분할 — '_' 문자에만 별도 두께 적용(나머지는 로고 두께).
+function logoRuns(text: string): { s: string; underline: boolean }[] {
+  const runs: { s: string; underline: boolean }[] = [];
+  for (const ch of text) {
+    const u = ch === "_";
+    const last = runs[runs.length - 1];
+    if (last && last.underline === u) last.s += ch;
+    else runs.push({ s: ch, underline: u });
+  }
+  return runs;
+}
 
 // 테두리(외곽선) — border.enabled 일 때만 -webkit-text-stroke + paint-order(깔끔한 외곽).
 function strokeStyle(b?: { enabled?: boolean; width?: number; color?: string }): React.CSSProperties {
@@ -216,6 +229,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
   const whereLabelHidden = designConfig?.where_label_hidden ?? true; // 기본 숨김
   const plFontFamily = PRESET_FONTS[plCfg.font_family ?? ""] ?? SERIF;
   const plFontWeight = plCfg.font_weight ?? 700;
+  const plUnderlineWeight = designConfig?.logo_underline_weight ?? plFontWeight; // '_' 문자 두께(기본=로고 두께)
   const plColor = plCfg.color ?? textColor;
   const plOpacityMul = plCfg.opacity ?? 1;
   const plFontSize = plCfg.font_size ?? height * 0.3;
@@ -424,7 +438,9 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
             ...plStroke,
           }}
         >
-          {playlistText}
+          {logoRuns(playlistText).map((r, i) => (
+            <span key={i} style={r.underline ? { fontWeight: plUnderlineWeight } : undefined}>{r.s}</span>
+          ))}
         </div>
       )}
 

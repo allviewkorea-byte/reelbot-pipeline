@@ -121,6 +121,7 @@ export default function MusicDesignPage() {
           location_y: config.location_y ?? POS_DEFAULTS.location_y,
           // #크기 배율(0.5~2.0).
           logo_scale: config.logo_scale ?? SCALE_DEFAULTS.logo_scale,
+          logo_underline_weight: config.logo_underline_weight ?? config.play_list.font_weight,
           title_scale: config.title_scale ?? SCALE_DEFAULTS.title_scale,
           subtitle_scale: config.subtitle_scale ?? SCALE_DEFAULTS.subtitle_scale,
           location_scale: config.location_scale ?? SCALE_DEFAULTS.location_scale,
@@ -181,9 +182,11 @@ export default function MusicDesignPage() {
                 value={config.play_list}
                 sizeRange={[80, 1200]}
                 onChange={(p) => patchTarget("play_list", p)}
+                underlineWeight={config.logo_underline_weight ?? config.play_list.font_weight}
+                onUnderlineWeight={(v) => setConfig((c) => ({ ...c, logo_underline_weight: v }))}
               />
               <TargetPanel
-                title="Where : ___ 라벨"
+                title="라벨"
                 textValue={config.where_text ?? ""}
                 textDefault={DESIGN_TEXT_DEFAULTS.where_text}
                 textSuffix=" : Tokyo"
@@ -300,6 +303,7 @@ function TargetPanel({
   title, textValue, textDefault, textSuffix = "", onTextChange,
   value, sizeRange, onChange, withItalic = false,
   hidden, onHiddenChange, krFont, onKrFontChange,
+  underlineWeight, onUnderlineWeight,
 }: {
   title: string
   textValue: string
@@ -314,6 +318,8 @@ function TargetPanel({
   onHiddenChange?: (value: boolean) => void
   krFont?: string
   onKrFontChange?: (value: string) => void
+  underlineWeight?: number
+  onUnderlineWeight?: (value: number) => void
 }) {
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3">
@@ -381,6 +387,19 @@ function TargetPanel({
           {WEIGHTS.map((w) => <option key={w} value={w}>{w}</option>)}
         </select>
       </Field>
+
+      {/* 밑줄 두께(메인 로고만) — 텍스트 중 '_' 문자에만 적용. 기본=로고 두께. */}
+      {onUnderlineWeight && (
+        <Field label={`밑줄(_) 두께 (${underlineWeight ?? value.font_weight})`}>
+          <select
+            value={underlineWeight ?? value.font_weight}
+            onChange={(e) => onUnderlineWeight(Number(e.target.value))}
+            className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm text-foreground"
+          >
+            {WEIGHTS.map((w) => <option key={w} value={w}>{w}</option>)}
+          </select>
+        </Field>
+      )}
 
       {/* 기울임(제목·부제만) */}
       {withItalic && (
@@ -464,6 +483,18 @@ function strokeOf(b: TextStyleConfig["border"]): React.CSSProperties {
   return b.enabled ? { WebkitTextStroke: `${b.width}px ${b.color}`, paintOrder: "stroke fill" } : {}
 }
 
+// 로고 텍스트를 '_'(밑줄) 런 단위로 분할 — '_' 문자에는 밑줄 두께를 따로 적용(나머지는 로고 두께).
+function logoRuns(text: string): { s: string; underline: boolean }[] {
+  const runs: { s: string; underline: boolean }[] = []
+  for (const ch of text) {
+    const u = ch === "_"
+    const last = runs[runs.length - 1]
+    if (last && last.underline === u) last.s += ch
+    else runs.push({ s: ch, underline: u })
+  }
+  return runs
+}
+
 // 상단 통합 16:9 미리보기 — 영상(MusicViz)과 같은 결로 모든 요소를 그린다.
 // 폰트는 cqw(컨테이너 너비 %) 로 1920px 캔버스 기준 크기를 비례 환산 → 박스 크기와 무관하게 정확.
 function UnifiedPreview({ config }: { config: MusicDesignConfig }) {
@@ -500,13 +531,15 @@ function UnifiedPreview({ config }: { config: MusicDesignConfig }) {
         })}
       </div>
 
-      {/* 메인 로고 */}
+      {/* 메인 로고 — '_'(밑줄) 문자만 별도 두께(logo_underline_weight) 적용. */}
       <div style={{
         position: "absolute", left: `${pos("logo_x") * 100}%`, top: `${pos("logo_y") * 100}%`,
         transform: `translate(-50%, -50%) scale(${scl("logo_scale")})`,
         fontFamily: `"${logo.font_family}", sans-serif`, fontSize: cqw(logo.font_size), fontWeight: logo.font_weight,
         color: logo.color, opacity: logo.opacity, lineHeight: 1, whiteSpace: "nowrap", textShadow: shadow, ...strokeOf(logo.border),
-      }}>{config.playlist_text || DESIGN_TEXT_DEFAULTS.playlist_text}</div>
+      }}>{logoRuns(config.playlist_text || DESIGN_TEXT_DEFAULTS.playlist_text).map((r, i) => (
+        <span key={i} style={r.underline ? { fontWeight: config.logo_underline_weight ?? logo.font_weight } : undefined}>{r.s}</span>
+      ))}</div>
 
       {/* 제목(좌하단, 영어+한글 스택) */}
       <div style={{

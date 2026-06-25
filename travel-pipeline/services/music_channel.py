@@ -205,6 +205,10 @@ def normalize_design_config(raw, *, include_all: bool = False) -> dict:
     # 요소 크기 배율(0.5~2.0, 미지정=1.0 → 회귀 0).
     for key in _SCALE_KEYS:
         out[key] = _num(raw.get(key), 0.5, 5.0, 1.0)
+    # 로고 텍스트의 '_'(밑줄) 문자 두께(100~900, 미지정=로고 두께 → 회귀 0).
+    out["logo_underline_weight"] = _num(
+        raw.get("logo_underline_weight"), 100, 900, out["play_list"]["font_weight"]
+    )
     # 이퀄라이저(오디오 반응, 로고 위) 설정.
     out["equalizer"] = _norm_equalizer(raw.get("equalizer"))
     return out
