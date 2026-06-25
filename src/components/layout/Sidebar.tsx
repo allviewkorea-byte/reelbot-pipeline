@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useEffect, useState } from "react"
-import { Settings, PlayCircle, Menu, Plus } from "lucide-react"
+import { Settings, PlayCircle, Menu, Plus, Activity } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Separator } from "@/components/ui/separator"
 import { HealthIndicator } from "@/components/video/HealthIndicator"
@@ -46,6 +46,31 @@ function useChannelActive(channelId: string): boolean {
     }
   }, [channelId])
   return active
+}
+
+// 시스템 상태 이상 감지(빨간 배지용). /api/system/status 에서 error/warn 유무.
+function useSystemIssue(): boolean {
+  const [hasIssue, setHasIssue] = useState(false)
+  useEffect(() => {
+    let alive = true
+    const load = () => {
+      fetch("/api/system/status")
+        .then((r) => r.json())
+        .then((d) => {
+          if (!alive) return
+          const keys = ["railway", "supabase", "r2", "aws_lambda", "suno", "anthropic", "youtube"]
+          setHasIssue(keys.some((k) => d?.[k]?.status === "error"))
+        })
+        .catch(() => {})
+    }
+    load()
+    const timer = setInterval(load, 60_000)
+    return () => {
+      alive = false
+      clearInterval(timer)
+    }
+  }, [])
+  return hasIssue
 }
 
 // 음악 채널 검토 대기 수(주황 배지). /api/music/queue 길이.
@@ -153,6 +178,7 @@ export function Sidebar() {
   const pathname = usePathname()
   const baekgomLive = useChannelActive(BAEKGOM_CHANNEL_ID)
   const musicQueue = useMusicQueueCount()
+  const systemIssue = useSystemIssue()
   const [mobileOpen, setMobileOpen] = useState(false)
 
   // 백곰 관제 대시보드 = /dashboard(루트 / 도 리다이렉트). 상단 '대시보드' 메뉴와
@@ -160,6 +186,7 @@ export function Sidebar() {
   const baekgomActive = pathname === "/dashboard" || pathname === "/"
   // 음악 채널 = /music (검토 대기 큐) + /music/guide.
   const musicActive = pathname === "/music" || pathname.startsWith("/music/")
+  const systemActive = pathname === "/system" || pathname.startsWith("/system/")
   const settingsActive =
     pathname === "/settings" || pathname.startsWith("/settings/")
 
@@ -251,9 +278,30 @@ export function Sidebar() {
           </nav>
         </div>
 
-        {/* 하단: 설정 + 헬스 인디케이터 */}
+        {/* 하단: 시스템 상태 + 설정 + 헬스 인디케이터 */}
         <div className="px-3 pb-4">
           <Separator className="mb-4" />
+          <Link
+            href="/system"
+            onClick={closeMobile}
+            className={cn(
+              "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150",
+              systemActive
+                ? "bg-primary/20 text-white border border-primary/30"
+                : "text-muted-foreground hover:bg-white/5 hover:text-foreground"
+            )}
+          >
+            <Activity
+              className={cn(
+                "h-4 w-4 shrink-0",
+                systemActive ? "text-primary" : "text-muted-foreground"
+              )}
+            />
+            <span>시스템 상태</span>
+            {systemIssue && (
+              <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-red-500" />
+            )}
+          </Link>
           <Link
             href="/settings"
             onClick={closeMobile}
