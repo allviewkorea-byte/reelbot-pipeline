@@ -209,6 +209,8 @@ def normalize_design_config(raw, *, include_all: bool = False) -> dict:
     out["logo_underline_weight"] = _num(
         raw.get("logo_underline_weight"), 100, 900, out["play_list"]["font_weight"]
     )
+    # 라벨(지역명) 글자 간격(-10~50px, 미지정=0).
+    out["location_letter_spacing"] = _num(raw.get("location_letter_spacing"), -10, 50, 0)
     # 이퀄라이저(오디오 반응, 로고 위) 설정.
     out["equalizer"] = _norm_equalizer(raw.get("equalizer"))
     return out
@@ -225,7 +227,7 @@ _POS_DEFAULTS = {
 # 이퀄라이저 기본값(1080p 기준 px) + 그라데이션 방향 화이트리스트.
 _EQ_DEFAULTS = {
     "color1": "#FF00AA", "color2": "#00AAFF", "gradient": "center",
-    "max_height": 65, "width": 260, "gap_above_logo": 40,
+    "max_height": 65, "width": 260, "gap_above_logo": 40, "x": 0.5,
 }
 
 # 요소 크기 배율(0.5~2.0, 미설정=1.0 → 회귀 0).
@@ -244,6 +246,7 @@ def _norm_equalizer(raw) -> dict:
         "max_height": _num(raw.get("max_height"), 20, 400, d["max_height"]),
         "width": _num(raw.get("width"), 100, 1920, d["width"]),
         "gap_above_logo": _num(raw.get("gap_above_logo"), -500, 500, d["gap_above_logo"]),
+        "x": _num(raw.get("x"), 0.0, 1.0, d["x"]),
     }
 
 

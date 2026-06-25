@@ -407,6 +407,7 @@ class _EqualizerBody(BaseModel):
     max_height: float | None = None
     width: float | None = None
     gap_above_logo: float | None = None
+    x: float | None = None  # 가로 위치(0~1)
 
 
 class DesignConfigBody(BaseModel):
@@ -437,6 +438,7 @@ class DesignConfigBody(BaseModel):
     subtitle_scale: float | None = None
     location_scale: float | None = None
     logo_underline_weight: float | None = None  # 로고 '_' 문자 두께(100~900)
+    location_letter_spacing: float | None = None  # 라벨 글자 간격(-10~50px)
     # 이퀄라이저(오디오 반응, 로고 위) 설정.
     equalizer: _EqualizerBody | None = None
 
