@@ -39,11 +39,29 @@ const SIMGYEONGHA_FACE = `@font-face{font-family:"SimgyeongHa";src:url("/fonts/S
 type TextKey = "playlist_text" | "where_text" | "preview_title" | "preview_subtitle"
 type StyleKey = "play_list" | "where_label" | "title" | "subtitle"
 
-// 미리보기용 Google Fonts(프리셋 10종) — Remotion 렌더와 동일 패밀리. 가중치는 기본 로드(미리보기는 faux-bold 허용).
-const FONT_LINK =
-  "https://fonts.googleapis.com/css2?" +
-  [...DESIGN_PRESET_FONTS, ...DESIGN_PRESET_FONTS_KR].map((f) => "family=" + f.replace(/ /g, "+")).join("&") +
-  "&display=swap"
+// 미리보기용 Google Fonts — 패밀리별 '지원 weight' 를 함께 요청해야 두께가 실제로 반영된다
+// (weight 축 없이 요청하면 400만 로드돼 두께 변경이 미반영). 단일 weight 폰트는 축 생략.
+// 잘못된 weight 가 섞이면 해당 패밀리 요청만 실패하도록 패밀리당 <link> 를 분리한다.
+const FONT_WGHT: Record<string, string> = {
+  Montserrat: "100;200;300;400;500;600;700;800;900",
+  Poppins: "100;200;300;400;500;600;700;800;900",
+  Oswald: "200;300;400;500;600;700",
+  Archivo: "100;200;300;400;500;600;700;800;900",
+  Inter: "100;200;300;400;500;600;700;800;900",
+  "DM Sans": "100;200;300;400;500;600;700;800;900",
+  "Playfair Display": "400;500;600;700;800;900",
+  "Cormorant Garamond": "300;400;500;600;700",
+  "Bodoni Moda": "400;500;600;700;800;900",
+  Literata: "200;300;400;500;600;700;800;900",
+  "Noto Serif KR": "200;300;400;500;600;700;900",
+  "Nanum Myeongjo": "400;700;800",
+  // 단일 weight(축 생략): Bebas Neue, Anton, Young Serif, Black Han Sans
+}
+const PREVIEW_FONT_LINKS = [...DESIGN_PRESET_FONTS, ...DESIGN_PRESET_FONTS_KR].map((f) => {
+  const fam = f.replace(/ /g, "+")
+  const w = FONT_WGHT[f]
+  return `https://fonts.googleapis.com/css2?family=${fam}${w ? `:wght@${w}` : ""}&display=swap`
+})
 
 const WEIGHTS = [100, 200, 300, 400, 500, 600, 700, 800, 900]
 
@@ -122,7 +140,7 @@ export default function MusicDesignPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-auto">
-      <link rel="stylesheet" href={FONT_LINK} />
+      {PREVIEW_FONT_LINKS.map((href) => <link key={href} rel="stylesheet" href={href} />)}
       {/* 심경하체 미리보기 폰트(번들 TTF) — globals.css 무수정, 컴포넌트 스코프 주입. */}
       <style dangerouslySetInnerHTML={{ __html: SIMGYEONGHA_FACE }} />
 
@@ -256,6 +274,9 @@ function EditableText({ value, placeholder, onCommit }: {
       suppressContentEditableWarning
       onClick={start}
       onFocus={start}
+      // 타이핑 즉시 상위 상태(→ 미리보기) 반영. editing 중엔 children=null 이라 DOM 텍스트
+      // 미초기화 → 커서 점프 없음. blur 시 commit() 가 최종 trim 값으로 마무리.
+      onInput={() => onCommit(ref.current?.textContent ?? "")}
       onBlur={() => { if (editing) commit() }}
       onKeyDown={(e) => {
         if (e.key === "Enter") { e.preventDefault(); ref.current?.blur() }
@@ -538,12 +559,12 @@ function LayoutControls({ config, onPos, onScale }: {
           <div key={el.xk} className="flex flex-col gap-1 rounded-lg border border-border/60 p-2">
             <span className="text-xs font-medium text-foreground">{el.label}</span>
             <Field label={`X (${Math.round(at(el.xk) * 100)}%)`}>
-              <input type="range" min={0} max={100} step={1} value={Math.round(at(el.xk) * 100)}
+              <input type="range" min={-20} max={120} step={1} value={Math.round(at(el.xk) * 100)}
                 onChange={(e) => onPos(el.xk, Number(e.target.value) / 100)}
                 className="w-full accent-[var(--color-primary,#a78bfa)]" />
             </Field>
             <Field label={`Y (${Math.round(at(el.yk) * 100)}%)`}>
-              <input type="range" min={0} max={100} step={1} value={Math.round(at(el.yk) * 100)}
+              <input type="range" min={-20} max={120} step={1} value={Math.round(at(el.yk) * 100)}
                 onChange={(e) => onPos(el.yk, Number(e.target.value) / 100)}
                 className="w-full accent-[var(--color-primary,#a78bfa)]" />
             </Field>
@@ -598,7 +619,7 @@ function EqualizerControls({ eq, onChange }: {
             className="w-full accent-[var(--color-primary,#a78bfa)]" />
         </Field>
         <Field label={`로고 위 간격 (${eq.gap_above_logo}px)`}>
-          <input type="range" min={0} max={600} step={1} value={eq.gap_above_logo}
+          <input type="range" min={-500} max={500} step={1} value={eq.gap_above_logo}
             onChange={(e) => onChange({ gap_above_logo: Number(e.target.value) })}
             className="w-full accent-[var(--color-primary,#a78bfa)]" />
         </Field>

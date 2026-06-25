@@ -199,9 +199,9 @@ def normalize_design_config(raw, *, include_all: bool = False) -> dict:
     for key in ("title_font_kr", "subtitle_font_kr"):
         v = raw.get(key)
         out[key] = v if v in KR_FONTS else DEFAULT_KR_FONT
-    # 요소 위치(0~1 비율, 미지정=기존 기본값 → 렌더 회귀 0).
+    # 요소 위치(-0.2~1.2 비율, 화면 밖 이동 허용. 미지정=기존 기본값 → 렌더 회귀 0).
     for key, dflt in _POS_DEFAULTS.items():
-        out[key] = _num(raw.get(key), 0.0, 1.0, dflt)
+        out[key] = _num(raw.get(key), -0.2, 1.2, dflt)
     # 요소 크기 배율(0.5~2.0, 미지정=1.0 → 회귀 0).
     for key in _SCALE_KEYS:
         out[key] = _num(raw.get(key), 0.5, 5.0, 1.0)
@@ -239,7 +239,7 @@ def _norm_equalizer(raw) -> dict:
         "gradient": g if g in _EQ_GRADIENTS else d["gradient"],
         "max_height": _num(raw.get("max_height"), 20, 400, d["max_height"]),
         "width": _num(raw.get("width"), 100, 1920, d["width"]),
-        "gap_above_logo": _num(raw.get("gap_above_logo"), 0, 600, d["gap_above_logo"]),
+        "gap_above_logo": _num(raw.get("gap_above_logo"), -500, 500, d["gap_above_logo"]),
     }
 
 
