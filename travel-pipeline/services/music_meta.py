@@ -1,9 +1,9 @@
-"""YouTube 메타데이터 풍부화(#37) — 제목·본문·해시태그 자동 생성(결정적, 비용 0).
+"""YouTube 메타데이터 풍부화(#37) — 제목·본문·해시태그 자동 생성.
 
-글로벌 음악 채널 SEO·시청자 경험: 𝐏𝐥𝐚𝐲𝐥𝐢𝐬𝐭 시그니처 제목, 8섹션 본문(위치·환영·
-AI 명시·플랫폼·소셜·트랙리스트·참여유도·저작권), 30~50개 해시태그. 모두 결정적
-조합(GPT 미사용) — 테스트 1곡/제작 비용 무변경. 다국어 번역은 music_translate 가
-이 결과를 입력으로 받아 처리(공개 업로드 단계에서만).
+글로벌 음악 채널 SEO·시청자 경험: 𝐏𝐥𝐚𝐲𝐥𝐢𝐬𝐭 시그니처 제목, 본문(감성 멘트 +
+트랙리스트 + 고정 정보), 30~50개 해시태그. 제목 후킹 카피와 감성 멘트는 LLM 생성
+(실패 시 결정적 풀 폴백). 다국어 번역은 music_translate 가 이 결과를 입력으로 받아
+처리(공개 업로드 단계에서만).
 
 빈 슬로건·소셜은 해당 줄/섹션을 출력하지 않는다(조건부 분기). viz_spec 이 없거나
 키가 비어도 안전 기본으로 동작한다.
@@ -162,6 +162,37 @@ _CARE_DEFAULT = ["편안한 시간 보내세요.\n좋은 음악이 당신의 하
 def _care(theme: dict, vs: dict) -> str:
     mood = str(vs.get("mood_category") or "").lower()
     return _pick(_CARE_POOL.get(mood, _CARE_DEFAULT), theme.get("slug") or "")
+
+
+# ── 감성 멘트(LLM, 폴백 결정적) ─────────────────────────────────────
+_VIBE_SYSTEM = (
+    "너는 유튜브 음악 채널의 감성 카피라이터다. "
+    "플레이리스트 본문 첫 줄에 들어갈 감성 멘트(3~4줄)를 쓴다. "
+    "규칙: 한국어, 줄바꿈으로 구분, 이모지 금지, 따옴표 금지, 해시태그 금지, "
+    "장르 영어명 금지, 청자에게 말을 건네는 톤(~해요/~세요), "
+    "분위기·장소·시간대를 녹여 감각적으로. 가사 내용이나 곡 제목은 언급하지 마. "
+    "멘트 본문만 출력(설명·부연 금지)."
+)
+
+
+def generate_vibe_intro(theme: dict, viz_spec: dict | None) -> str:
+    """LLM 감성 멘트(3~4줄). 실패 시 _care() 결정적 풀 폴백."""
+    vs = viz_spec or {}
+    try:
+        from services import music_lyrics
+        if music_lyrics.is_available():
+            gen = music_genres.label_kr(music_genres.classify_theme(theme) or "") or theme.get("genre", "")
+            mood = str(vs.get("dominant_emotion") or vs.get("mood_category") or theme.get("mood") or "")
+            where = str(vs.get("location_en") or "").strip() or "City View"
+            situ = str(theme.get("situation") or "")
+            user = f"장르: {gen} / 분위기: {mood} / 장소: {where} / 상황: {situ}"
+            raw = music_lyrics._call(_VIBE_SYSTEM, user, max_tokens=200)
+            lines = [ln.strip() for ln in (raw or "").strip().splitlines() if ln.strip()]
+            if lines:
+                return "\n".join(lines[:5])
+    except Exception as e:  # noqa: BLE001
+        logger.debug("[music-meta] 감성 멘트 LLM 실패(폴백): %s", e)
+    return _care(theme, vs)
 
 
 # ── 제목 ──────────────────────────────────────────────────────────────
@@ -334,7 +365,7 @@ def build_tracklist(tracks: list[dict]) -> list[str]:
     return lines
 
 
-# ── 본문(8섹션) ───────────────────────────────────────────────────────
+# ── 본문(감성 멘트 + 트랙리스트 + 고정 정보) ─────────────────────────
 def build_description(
     theme: dict,
     viz_spec: dict | None,
@@ -344,10 +375,10 @@ def build_description(
     hashtags: list[str] | None = None,
     channel_name: str | None = None,
 ) -> str:
-    """8개 섹션 본문. 빈 슬로건·소셜·Spotify 는 해당 줄/섹션 생략(조건부 분기).
+    """본문 3블록: 감성 멘트 → 트랙리스트 → 고정 정보. 빈 소셜·Spotify 는 생략.
 
-    hashtags 를 주면 [8] 해시태그 섹션까지 포함(독립 호출/검증용). 다국어 번역 경로는
-    본문(1~7)만 만들고 해시태그를 언어별로 별도 append 한다.
+    hashtags 를 주면 마지막에 해시태그 섹션 추가(독립 호출/검증용). 다국어 번역 경로는
+    본문만 만들고 해시태그를 언어별로 별도 append 한다.
     """
     vs = viz_spec or {}
     cfg = config or {}
@@ -356,27 +387,24 @@ def build_description(
     emoji = _emoji(theme, vs)
     blocks: list[str] = []
 
-    # [1] 위치 + 환영 멘트
-    s1 = [f"📍 {where} {flag} {emoji}", "", _care(theme, vs), "", "오늘도 좋은 음악과 함께하세요 🎧"]
-    slogan_en = (cfg.get("slogan_en") or "").strip()
-    if slogan_en:
-        s1 += ["", slogan_en]
-    blocks.append("\n".join(s1))
+    # [1] 감성 멘트(LLM, 폴백 결정적)
+    vibe = generate_vibe_intro(theme, viz_spec)
+    blocks.append(vibe)
 
-    # [2] AI 명시
+    # [2] Track list
+    tl = build_tracklist(tracks)
+    if tl:
+        blocks.append("🎵 Track list\n\n" + "\n".join(tl))
+
+    # [3] 고정 정보 블록
+    info: list[str] = []
+    info.append(f"📍 where;{where} {flag} {emoji}")
     ai = (cfg.get("ai_disclosure") or "").strip()
     if ai:
-        blocks.append(ai)
-
-    # [3] 외부 플랫폼 — Spotify URL 있을 때만
+        info.append(ai)
     spotify = (cfg.get("spotify_url") or "").strip()
     if spotify:
-        blocks.append(
-            "📀 Apple Music · Spotify · YouTube Music · iTunes 에서 감상하실 수 있습니다\n"
-            f"Spotify 🔗 {spotify}"
-        )
-
-    # [4] 소셜 — 입력된 것만
+        info.append(f"Spotify 🔗 {spotify}")
     social: list[str] = []
     if (cfg.get("email") or "").strip():
         social.append(f"📧 E-mail: {cfg['email'].strip()}")
@@ -385,24 +413,16 @@ def build_description(
     if (cfg.get("tiktok") or "").strip():
         social.append(f"🎵 TikTok: @{cfg['tiktok'].strip().lstrip('@')}")
     if social:
-        blocks.append("\n".join(social))
-
-    # [5] Track list — 자동 생성
-    tl = build_tracklist(tracks)
-    if tl:
-        blocks.append("🎵 Track list\n\n" + "\n".join(tl))
-
-    # [6] 참여 유도 — 고정
-    blocks.append(
-        "🎵 가장 마음에 드는 노래는 무엇인가요?\n"
+        info.extend(social)
+    info.append(
+        "\n🎵 가장 마음에 드는 노래는 무엇인가요?\n"
         "댓글로 알려주시면 다음 플리에 큰 도움이 됩니다 💚\n\n"
         "🔔 채널 구독하시면 매주 새로운 음악을 받아보실 수 있습니다 🔔"
     )
+    info.append(f"Copyright Ⓒ {channel_name or _channel_name()} All rights reserved.")
+    blocks.append("\n".join(info))
 
-    # [7] 저작권
-    blocks.append(f"Copyright Ⓒ {channel_name or _channel_name()} All rights reserved.")
-
-    # [8] 해시태그(옵션)
+    # [4] 해시태그(옵션)
     if hashtags:
         blocks.append(" ".join(hashtags))
 
