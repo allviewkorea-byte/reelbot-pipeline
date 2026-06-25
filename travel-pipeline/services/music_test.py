@@ -12,6 +12,7 @@ import logging
 import shutil
 import subprocess
 import tempfile
+import time
 import uuid
 from pathlib import Path
 
@@ -95,6 +96,8 @@ def _real_bg(work: Path, slug: str) -> Path | None:
         rows = music_uploads.list_uploaded(limit=20) + music_uploads.list_pending()
         cand: str | None = None
         for row in rows:
+            if str(row.get("slug") or "").startswith("test_"):
+                continue  # 테스트 카드(첫프레임=텍스트 포함)는 배경으로 쓰지 않음
             tk = (row.get("thumbnail_r2_key") or "").strip()
             if not tk:
                 continue
@@ -175,15 +178,42 @@ def render_test(mood: str | None = None, *, seconds: float = 10.0) -> dict:
 
         if not r2_storage.is_available():
             raise RuntimeError("R2 미설정 — 테스트 영상 업로드 불가")
-        name = f"{uuid.uuid4().hex}.mp4"
+        vid = uuid.uuid4().hex
+        name = f"{vid}.mp4"
         video_url = r2_storage.upload_music_video(str(out), "test", name, content_type="video/mp4")
-        logger.info("[music-test] 렌더 완료 engine=%s url=%s", engine, video_url)
+
+        # 첫프레임 썸네일 추출 → R2 업로드(검토대기 카드 썸네일). 실패해도 영상은 유효.
+        thumb_key: str | None = None
+        try:
+            thumb_png = work / f"{vid}_frame.png"
+            music_video._extract_first_frame(str(out), str(thumb_png))
+            frame_name = f"{vid}_frame.png"
+            r2_storage.upload_music_video(str(thumb_png), "test", frame_name, content_type="image/png")
+            thumb_key = r2_storage.music_video_key("test", frame_name)
+        except Exception as e:  # noqa: BLE001 - 썸네일 실패해도 진행
+            logger.warning("[music-test] 첫프레임 썸네일 실패(영상은 유효): %s", e)
+
+        # 검토 대기(pending)에 저장 → 검토대기 카드로 등록, 대표가 직접 삭제. slug=test_{timestamp}.
+        slug = f"test_{int(time.time())}"
+        try:
+            from services import music_uploads
+            music_uploads.record_pending(
+                slug, vid, mp4_url=video_url, title_kr=preset["title_kr"],
+                genre=preset.get("genre", ""), mood=key,
+                thumbnail_r2_key=thumb_key, viz_spec=viz_spec,
+            )
+        except Exception as e:  # noqa: BLE001 - 큐 저장 실패해도 영상 URL 은 반환
+            logger.warning("[music-test] 검토대기 저장 실패(영상은 유효): %s", e)
+
+        logger.info("[music-test] 렌더 완료 engine=%s url=%s slug=%s", engine, video_url, slug)
         return {
             "video_url": video_url,
             "engine": engine,
             "mood": key,
             "duration": seconds,
             "title_kr": preset["title_kr"],
+            "mix_id": vid,
+            "slug": slug,
         }
     finally:
         shutil.rmtree(work, ignore_errors=True)
