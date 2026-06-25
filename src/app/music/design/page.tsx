@@ -102,6 +102,9 @@ export default function MusicDesignPage() {
         body: JSON.stringify({
           play_list: config.play_list,
           where_label: config.where_label,
+          // #36 제목·부제 스타일(폰트·크기·두께·색·투명도·italic·테두리) — 누락 시 저장 안 됨.
+          title: config.title,
+          subtitle: config.subtitle,
           // 인라인 편집 텍스트(빈값=기본값). playlist/where 는 영상 반영, preview_* 는 미리보기 전용.
           playlist_text: config.playlist_text ?? "",
           where_text: config.where_text ?? "",
