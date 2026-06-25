@@ -2,7 +2,7 @@ import asyncio
 from pathlib import Path
 import anthropic
 import edge_tts
-from config import Config, BangkokSpot, BANGKOK_SPOTS
+from config import Config, BangkokSpot, BANGKOK_SPOTS, CLAUDE_MODEL
 
 def generate_script(spots: list[BangkokSpot], config: Config) -> dict[str, str]:
     """
@@ -32,7 +32,7 @@ def generate_script(spots: list[BangkokSpot], config: Config) -> dict[str, str]:
     print("  [narration] Claude로 나레이션 스크립트 생성 중...")
 
     message = client.messages.create(
-        model="claude-opus-4-7",
+        model=CLAUDE_MODEL,
         max_tokens=1024,
         messages=[{"role": "user", "content": user_prompt}],
         system=system_prompt,
@@ -80,7 +80,7 @@ def generate_intro_outro_script(config: Config) -> dict[str, str]:
     client = anthropic.Anthropic(api_key=config.anthropic_api_key)
 
     message = client.messages.create(
-        model="claude-opus-4-7",
+        model=CLAUDE_MODEL,
         max_tokens=512,
         messages=[{
             "role": "user",

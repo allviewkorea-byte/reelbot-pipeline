@@ -18,6 +18,8 @@ import logging
 import os
 import re
 
+from config import CLAUDE_MODEL
+
 logger = logging.getLogger(__name__)
 
 _HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -174,7 +176,7 @@ def _coerce(spec: dict, fallback: dict) -> dict:
 def _gpt_spec(theme: dict, fallback: dict, *, model: str | None = None) -> dict:
     from services import music_lyrics
 
-    mdl = (model or os.getenv("MUSIC_VIZ_MODEL") or "claude-haiku-4-5-20251001").strip()
+    mdl = (model or os.getenv("MUSIC_VIZ_MODEL") or CLAUDE_MODEL).strip()
     system = (
         "You are an art director for a music video channel with a landscape/city/nature "
         "visual identity (no people focus). Given a song's metadata, decide its visual "

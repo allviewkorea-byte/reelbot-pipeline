@@ -4,7 +4,7 @@
    넘는 게 확인된 뒤에야 --full 로 대량 자동화한다.
    --full       : 소량(기본 3곡)으로 가사→보컬→마스터→믹스 end-to-end. 풀은 --n 12.
 
-가사 모델은 기본 claude-opus-4-8, env MUSIC_LYRICS_MODEL 로 교체(검수 시 sonnet-4-6 비교):
+가사 모델은 기본 CLAUDE_MODEL(Haiku), env MUSIC_LYRICS_MODEL 로 교체(검수 시 sonnet-4-6 비교):
    MUSIC_LYRICS_MODEL=claude-sonnet-4-6 py spikes/verify_music_produce.py --lyrics-only --n 12
 
 실행 (로컬, py 사용):
@@ -76,7 +76,7 @@ def main() -> int:
     if not music_lyrics.is_available():
         print("✗ ANTHROPIC_API_KEY 미설정 — 가사 생성 불가", file=sys.stderr)
         return 1
-    print(f"▶ 가사 모델: {os.getenv('MUSIC_LYRICS_MODEL') or 'claude-opus-4-8'} | 주제: {args.genre_theme} | {args.n}곡")
+    print(f"▶ 가사 모델: {os.getenv('MUSIC_LYRICS_MODEL') or 'claude-haiku-4-5-20251001'} | 주제: {args.genre_theme} | {args.n}곡")
 
     songs = music_lyrics.generate_lyrics(
         args.genre_theme, args.n, language=args.language, progress=lambda m: print(f"  · {m}")
