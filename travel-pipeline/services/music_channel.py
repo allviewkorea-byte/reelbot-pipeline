@@ -225,7 +225,7 @@ _POS_DEFAULTS = {
 # 이퀄라이저 기본값(1080p 기준 px) + 그라데이션 방향 화이트리스트.
 _EQ_DEFAULTS = {
     "color1": "#FF00AA", "color2": "#00AAFF", "gradient": "center",
-    "max_height": 65, "width": 260, "gap_above_logo": 40, "x": 0.5,
+    "max_height": 65, "width": 260, "gap_above_logo": 120, "x": 0.5,
 }
 
 # 요소 크기 배율(0.5~2.0, 미설정=1.0 → 회귀 0).

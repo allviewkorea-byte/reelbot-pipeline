@@ -552,11 +552,8 @@ function UnifiedPreview({ config }: { config: MusicDesignConfig }) {
         fontFamily: `"${logo.font_family}", sans-serif`, fontSize: cqw(logo.font_size), fontWeight: logo.font_weight,
         color: logo.color, opacity: logo.opacity, lineHeight: 1, whiteSpace: "nowrap", textShadow: shadow, ...strokeOf(logo.border),
       }}>{logoRuns(config.playlist_text || DESIGN_TEXT_DEFAULTS.playlist_text).map((r, i) => r.underline ? (
-        // '_' 런 → 실제 가로 선(굵기 px). 투명 언더스코어로 동일 너비 확보. 굵기는 cqw 로 환산(영상과 비례).
-        <span key={i} style={{ position: "relative", display: "inline-block", color: "transparent", whiteSpace: "pre" }}>
-          {r.s}
-          <span style={{ position: "absolute", left: 0, right: 0, bottom: "0.1em", height: cqw(config.logo_underline_weight ?? 2), borderRadius: 9999, background: logo.color }} />
-        </span>
+        // '_' 런 → 토막 없는 단일 가로 선. 너비 ≈ 글자수 × 0.6em, 굵기는 cqw 로 환산(영상과 비례).
+        <span key={i} style={{ display: "inline-block", width: `${r.s.length * 0.6}em`, height: cqw(config.logo_underline_weight ?? 2), borderRadius: 9999, background: logo.color, verticalAlign: "-0.1em" }} />
       ) : (
         <span key={i}>{r.s}</span>
       ))}</div>

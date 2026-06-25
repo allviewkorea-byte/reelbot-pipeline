@@ -356,9 +356,9 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
   const eqGradient = eq.gradient ?? "center";
   const eqMaxH = eq.max_height ?? 65;
   const eqWidth = eq.width ?? 260;
-  const eqGap = eq.gap_above_logo ?? 40;
+  const eqGap = eq.gap_above_logo ?? 120;
   const eqX = width * (eq.x ?? 0.5); // 이퀄 가로 위치(0.5=중앙)
-  const logoTop = logoY - LARGE / 2; // 로고(세로 중앙 기준) 윗변
+  const logoTop = logoY - (LARGE * plScale) / 2; // 로고 윗변(크기 배율 반영 → 이퀄 겹침 방지)
   const eqBottom = logoTop - eqGap; // 이퀄 막대 바닥(= 로고 위 eqGap)
   const eqBarSlot = eqWidth / EQ_BARS;
   const eqBarW = eqBarSlot * 0.55;
@@ -444,11 +444,8 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
           }}
         >
           {logoRuns(playlistText).map((r, i) => r.underline ? (
-            // '_' 런 → 실제 가로 선(굵기 px 자유 조절). 투명 언더스코어로 동일 너비 확보.
-            <span key={i} style={{ position: "relative", display: "inline-block", color: "transparent", whiteSpace: "pre" }}>
-              {r.s}
-              <span style={{ position: "absolute", left: 0, right: 0, bottom: "0.1em", height: plUnderlineThickness, borderRadius: 9999, background: plColor }} />
-            </span>
+            // '_' 런 → 토막 없는 단일 가로 선(언더스코어 문자 제거). 너비 ≈ 글자수 × 0.6em.
+            <span key={i} style={{ display: "inline-block", width: `${r.s.length * 0.6}em`, height: plUnderlineThickness, borderRadius: 9999, background: plColor, verticalAlign: "-0.1em" }} />
           ) : (
             <span key={i}>{r.s}</span>
           ))}

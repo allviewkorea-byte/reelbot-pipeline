@@ -201,7 +201,7 @@ export const DEFAULT_EQUALIZER: EqualizerConfig = {
   gradient: "center",
   max_height: 65,
   width: 260,
-  gap_above_logo: 40,
+  gap_above_logo: 120,
   x: 0.5,
 }
 
