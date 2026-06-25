@@ -8,6 +8,7 @@ youtube 미경유) DB·유튜브에 전혀 영향이 없다. 임시 주제 + 합
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import subprocess
@@ -126,12 +127,8 @@ def render_test(mood: str | None = None, *, seconds: float = 10.0) -> dict:
     key = music_genres.normalize_mood_key(mood or _DEFAULT_MOOD)
     preset = _test_preset(key)
 
-    # 곡 2개: 전반부/후반부 → 곡 제목 전환 페이드 확인.
-    half = round(seconds / 2.0, 3)
-    tracks = [
-        {"title": preset["tracks"][0], "start_sec": 0.0},
-        {"title": preset["tracks"][1], "start_sec": half},
-    ]
+    # 단일 곡(전체 길이) — 제목 타이핑이 한 번만 진행되게(곡 전환 재타이핑 회피).
+    tracks = [{"title": preset["tracks"][0], "start_sec": 0.0}]
     mood_hint = " ".join(
         str(preset.get(k, "")) for k in ("mood", "genre", "situation")
     ).strip()
@@ -179,22 +176,32 @@ def render_test(mood: str | None = None, *, seconds: float = 10.0) -> dict:
         if not r2_storage.is_available():
             raise RuntimeError("R2 미설정 — 테스트 영상 업로드 불가")
         vid = uuid.uuid4().hex
+        slug = f"test_{int(time.time())}"
         name = f"{vid}.mp4"
         video_url = r2_storage.upload_music_video(str(out), "test", name, content_type="video/mp4")
 
-        # 첫프레임 썸네일 추출 → R2 업로드(검토대기 카드 썸네일). 실패해도 영상은 유효.
+        # 배경(깨끗한 bg) → 검토 카드 썸네일 + 재렌더 배경(첫프레임=텍스트 박힘 회피).
         thumb_key: str | None = None
         try:
-            thumb_png = work / f"{vid}_frame.png"
-            music_video._extract_first_frame(str(out), str(thumb_png))
-            frame_name = f"{vid}_frame.png"
-            r2_storage.upload_music_video(str(thumb_png), "test", frame_name, content_type="image/png")
-            thumb_key = r2_storage.music_video_key("test", frame_name)
-        except Exception as e:  # noqa: BLE001 - 썸네일 실패해도 진행
-            logger.warning("[music-test] 첫프레임 썸네일 실패(영상은 유효): %s", e)
+            bg_name = f"{vid}_bg.png"
+            r2_storage.upload_music_video(str(bg), "test", bg_name, content_type="image/png")
+            thumb_key = r2_storage.music_video_key("test", bg_name)
+        except Exception as e:  # noqa: BLE001 - 배경 업로드 실패해도 진행
+            logger.warning("[music-test] 배경 업로드 실패(영상은 유효): %s", e)
+
+        # 재렌더용: 테스트 오디오(mp3) + 트랙 메타(json)를 R2 믹스 경로에 업로드.
+        # (music_rerender._load_mix 가 music_mix_key(slug, mix_id, mp3/json) 를 읽는다.)
+        try:
+            r2_storage.upload_music_mix(str(audio), slug, vid, ext="mp3")
+            meta_path = work / "mix.json"
+            meta_path.write_text(json.dumps({"tracks": tracks}, ensure_ascii=False), encoding="utf-8")
+            r2_storage.upload_music_mix(
+                str(meta_path), slug, vid, ext="json", content_type="application/json"
+            )
+        except Exception as e:  # noqa: BLE001 - 믹스 업로드 실패 시 재렌더만 불가(영상은 유효)
+            logger.warning("[music-test] 믹스 오디오/메타 업로드 실패(재렌더 불가 가능): %s", e)
 
         # 검토 대기(pending)에 저장 → 검토대기 카드로 등록, 대표가 직접 삭제. slug=test_{timestamp}.
-        slug = f"test_{int(time.time())}"
         try:
             from services import music_uploads
             music_uploads.record_pending(
