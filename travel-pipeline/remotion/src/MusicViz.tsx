@@ -371,7 +371,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
             position: "absolute", left: locX, top: locY, transform: "translateX(-50%)", textAlign: "center",
             fontFamily: wlFontFamily, fontSize: wlFontSize, fontWeight: wlFontWeight,
             letterSpacing: locLetterSpacing, color: wlColor, opacity: wlOpacity * labelFade,
-            textShadow: "0 2px 12px rgba(0,0,0,0.8)", whiteSpace: "nowrap", ...wlStroke,
+            textShadow: wlCfg.border?.enabled ? "0 2px 12px rgba(0,0,0,0.8)" : "none", whiteSpace: "nowrap", ...wlStroke,
           }}
         >
           {labelText}
@@ -394,7 +394,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
             lineHeight: 1,
             letterSpacing: plCfg.letter_spacing ?? 0, // #5 글자 간격(기본 0 → 미리보기와 일치)
             whiteSpace: "nowrap",
-            textShadow: shadow,
+            textShadow: plCfg.border?.enabled ? shadow : "none",
             opacity: plOpacityMul,
             ...plStroke,
           }}
@@ -415,7 +415,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
             position: "absolute", left: subLeft, top: subTop,
             fontFamily: sFontFamily, fontStyle: sFontStyle, fontWeight: sFontWeight,
             color: sColor, opacity: sOpacity,
-            fontSize: sFontSize, textShadow: shadow, maxWidth: width * 0.6, ...sStroke,
+            fontSize: sFontSize, textShadow: sCfg?.border?.enabled ? shadow : "none", maxWidth: width * 0.6, ...sStroke,
           }}
         >
           {typedSpans(subtitleEn, subStartF)}
@@ -426,7 +426,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
           style={{
             position: "absolute", left: titleLeft, top: titleTop, opacity: tOpacityMul,
             fontFamily: tFontFamily, fontStyle: tFontStyle, fontWeight: tFontWeight, color: tColor,
-            fontSize: tFontSize, textShadow: shadow, maxWidth: width * 0.7, ...tStroke,
+            fontSize: tFontSize, textShadow: tCfg?.border?.enabled ? shadow : "none", maxWidth: width * 0.7, ...tStroke,
           }}
         >
           {typedSpans(curTitle, typeStartF)}
@@ -464,7 +464,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
               style={{
                 width: eqBarW,
                 height: h,
-                borderRadius: 9999, // pill(위아래 둥근 끝)
+                borderRadius: "9999px 9999px 0 0", // 위만 둥글게, 아래 직각(선에서 솟는 느낌)
                 background: mixHex(eqColor1, eqColor2, tCol),
               }}
             />
