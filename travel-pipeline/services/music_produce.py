@@ -264,7 +264,7 @@ def produce(
         # ① 가사(헌법 3-스테이지) — 주어지면 재사용(검수본), lyric_tone 반영.
         songs = lyrics if lyrics is not None else music_lyrics.generate_lyrics(
             genre_theme, n, sub_theme_pool=sub_theme_pool, language=language,
-            model=model, tone=lyric_tone,
+            model=model, tone=lyric_tone, genre_id=genre_id,
         )
         # 고정 태그 보컬 장르: 곡별 style 을 고정 태그로 통일(일관성). 없으면 기존대로.
         if cfg:
