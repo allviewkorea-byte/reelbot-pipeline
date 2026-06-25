@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import { ArrowLeft, Loader2, Music, Music2, Clapperboard } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { MusicQueueCard, TestCard, type QueueItem } from "@/components/music/MusicQueueCard"
+import { SwipeVideoViewer } from "@/components/music/SwipeVideoViewer"
 import { MusicJobCard } from "@/components/music/MusicJobCard"
 import type { MusicJob } from "@/lib/music-jobs"
 import { estimateProductionTime, fmtMinutes } from "@/lib/music"
@@ -36,6 +37,8 @@ export default function MusicQueueGridPage() {
   const [items, setItems] = useState<QueueItem[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState("all")
+  // PiP·스와이프 전체화면 뷰어 — 열린 영상의 (필터된 목록 기준) 인덱스. null=닫힘.
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null)
 
   const [testMood, setTestMood] = useState("citypop")
   const [testLoading, setTestLoading] = useState(false)
@@ -318,13 +321,28 @@ export default function MusicQueueGridPage() {
           ) : (
             <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
               {showTestCard && <TestCard loading={testLoading} video={testVideo} />}
-              {filtered.map((it) => (
-                <MusicQueueCard key={it.mix_id} item={it} onChanged={load} />
+              {filtered.map((it, idx) => (
+                <MusicQueueCard
+                  key={it.mix_id}
+                  item={it}
+                  onChanged={load}
+                  onOpenViewer={it.mp4_url ? () => setViewerIndex(idx) : undefined}
+                />
               ))}
             </div>
           )}
         </div>
       </div>
+
+      {/* PiP·스와이프 전체화면 뷰어 — 별도 레이어. 필터된 목록을 좌우로 탐색. */}
+      {viewerIndex !== null && filtered[viewerIndex] && (
+        <SwipeVideoViewer
+          items={filtered}
+          index={viewerIndex}
+          onIndexChange={setViewerIndex}
+          onClose={() => setViewerIndex(null)}
+        />
+      )}
     </div>
   )
 }

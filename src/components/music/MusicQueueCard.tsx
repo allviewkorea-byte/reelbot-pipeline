@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react"
 import { toast } from "sonner"
-import { Loader2, Music, Copy, Check, Upload, Globe, Trash2, MonitorPlay, Languages, ChevronDown, ChevronUp, RefreshCw, FileText } from "lucide-react"
+import { Loader2, Music, Copy, Check, Upload, Globe, Trash2, MonitorPlay, Languages, ChevronDown, ChevronUp, RefreshCw, FileText, Maximize2, PictureInPicture2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export interface VizSpec {
@@ -161,7 +161,7 @@ export function ManualProgressCard({ step }: { step: string }) {
   )
 }
 
-export function MusicQueueCard({ item, onChanged }: { item: QueueItem; onChanged: (keep?: string) => void }) {
+export function MusicQueueCard({ item, onChanged, onOpenViewer }: { item: QueueItem; onChanged: (keep?: string) => void; onOpenViewer?: () => void }) {
   const [copied, setCopied] = useState(false)
   const [thumbUrl, setThumbUrl] = useState<string | null>(item.thumbnail_url ?? null)
   const [needsRerender, setNeedsRerender] = useState(false)
@@ -175,6 +175,18 @@ export function MusicQueueCard({ item, onChanged }: { item: QueueItem; onChanged
   const [showPlaylist, setShowPlaylist] = useState(item.show_playlist ?? true)
   const [savingPl, setSavingPl] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  // PiP — 영상 재생 중 다른 앱/탭으로 이동해도 작은 창으로 계속 재생.
+  const togglePiP = useCallback(async () => {
+    const v = videoRef.current
+    if (!v) return
+    try {
+      if (document.pictureInPictureElement) await document.exitPictureInPicture()
+      else if (document.pictureInPictureEnabled) await v.requestPictureInPicture()
+    } catch {
+      /* 미지원/제스처 문제 → 무시 */
+    }
+  }, [])
   // #50 인물(투명 PNG) 업로드 상태.
   const [charUrl, setCharUrl] = useState<string | null>(item.character_url ?? null)
   const [charUploading, setCharUploading] = useState(false)
@@ -424,9 +436,34 @@ export function MusicQueueCard({ item, onChanged }: { item: QueueItem; onChanged
       {/* 영상 인라인(16:9, 컨트롤·풀스크린 기본) */}
       <div className="relative aspect-video w-full bg-black">
         {item.mp4_url ? (
-          <video src={item.mp4_url} controls preload="metadata" className="h-full w-full" />
+          <video ref={videoRef} src={item.mp4_url} controls playsInline preload="metadata" className="h-full w-full" />
         ) : (
           <div className="flex h-full items-center justify-center text-muted-foreground"><Music className="h-7 w-7" /></div>
+        )}
+        {/* 영상 우상단 오버레이 — PiP(작은 창) + 확대(스와이프 뷰어). 카드 레이아웃 무영향. */}
+        {item.mp4_url && (
+          <div className="absolute right-2 top-2 flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={togglePiP}
+              aria-label="PiP(작은 화면) 전환"
+              title="다른 앱을 봐도 작은 창으로 계속 재생"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-black/50 text-white/90 transition hover:bg-black/70"
+            >
+              <PictureInPicture2 className="h-4 w-4" />
+            </button>
+            {onOpenViewer && (
+              <button
+                type="button"
+                onClick={onOpenViewer}
+                aria-label="전체화면 뷰어 열기"
+                title="전체화면에서 좌우로 넘겨 보기"
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-black/50 text-white/90 transition hover:bg-black/70"
+              >
+                <Maximize2 className="h-4 w-4" />
+              </button>
+            )}
+          </div>
         )}
         {/* #33 A: 재렌더 진행 오버레이(실제 영상으로 갱신 중) */}
         {rerendering && (
