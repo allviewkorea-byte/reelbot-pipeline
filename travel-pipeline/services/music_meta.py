@@ -191,7 +191,7 @@ def generate_vibe_intro(theme: dict, viz_spec: dict | None) -> str:
             if lines:
                 return "\n".join(lines[:5])
     except Exception as e:  # noqa: BLE001
-        logger.debug("[music-meta] 감성 멘트 LLM 실패(폴백): %s", e)
+        logger.warning("[music-meta] 감성 멘트 LLM 실패(폴백): %s", e)
     return _care(theme, vs)
 
 
@@ -220,14 +220,21 @@ def _generate_title_copy(theme: dict, vs: dict) -> tuple[str, str]:
     try:
         from services import music_lyrics
         if music_lyrics.is_available():
-            gen_kr = music_genres.label_kr(music_genres.classify_theme(theme) or "") or theme.get("genre", "")
+            gid = music_genres.classify_theme(theme) or ""
+            gen_kr = music_genres.label_kr(gid) or theme.get("genre", "")
             gen_en = _title_genre_en(theme, vs)
             mood = str(vs.get("dominant_emotion") or vs.get("mood_category") or theme.get("mood") or "")
             situ = str(theme.get("situation") or "")
+            moods = ", ".join(music_lyrics.MOOD_POOLS.get(gid, []))
+            g_style = music_lyrics.GENRE_STYLES.get(gid, "")
             user = (
                 f"장르(한국어): {gen_kr}\n장르(영어): {gen_en}\n"
                 f"분위기: {mood}\n상황: {situ}\n제목: {theme.get('title_kr', '')}"
             )
+            if moods:
+                user += f"\n무드 키워드: {moods}"
+            if g_style:
+                user += f"\n장르 스타일: {g_style}"
             raw = music_lyrics._call(_TITLE_SYSTEM, user, max_tokens=100)
             line = (raw or "").strip().splitlines()[0].strip().strip('"').strip("'").strip()
             if "|" in line:
@@ -235,7 +242,7 @@ def _generate_title_copy(theme: dict, vs: dict) -> tuple[str, str]:
                 if len(parts) == 2 and parts[0] and parts[1]:
                     return parts[0][:40], parts[1][:50]
     except Exception as e:  # noqa: BLE001
-        logger.debug("[music-meta] 제목 카피 LLM 실패(폴백): %s", e)
+        logger.warning("[music-meta] 제목 카피 LLM 실패(폴백): %s", e)
     return _copy(theme, vs), _title_genre_en(theme, vs)
 
 
