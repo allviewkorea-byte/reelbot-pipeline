@@ -548,7 +548,7 @@ function UnifiedPreview({ config }: { config: MusicDesignConfig }) {
       >
         {eqBars.map((v, i) => {
           const tCol = eq.gradient === "center" ? Math.abs(i / 19 - 0.5) * 2 : i / 19
-          return <div key={i} style={{ flex: 1, height: `${Math.max(12, v * 100)}%`, borderRadius: 9999, background: mixHex(eq.color1, eq.color2, tCol) }} />
+          return <div key={i} style={{ flex: 1, height: `${Math.max(12, v * 100)}%`, borderRadius: "9999px 9999px 0 0", background: mixHex(eq.color1, eq.color2, tCol) }} />
         })}
       </div>
 
@@ -557,7 +557,7 @@ function UnifiedPreview({ config }: { config: MusicDesignConfig }) {
         position: "absolute", left: `${pos("logo_x") * 100}%`, top: `${pos("logo_y") * 100}%`,
         transform: `translate(-50%, -50%) scale(${scl("logo_scale")})`,
         fontFamily: `"${logo.font_family}", sans-serif`, fontSize: cqw(logo.font_size), fontWeight: logo.font_weight,
-        color: logo.color, opacity: logo.opacity, lineHeight: 1, letterSpacing: cqw(logo.letter_spacing ?? 0), whiteSpace: "nowrap", textShadow: shadow, ...strokeOf(logo.border),
+        color: logo.color, opacity: logo.opacity, lineHeight: 1, letterSpacing: cqw(logo.letter_spacing ?? 0), whiteSpace: "nowrap", textShadow: logo.border.enabled ? shadow : "none", ...strokeOf(logo.border),
       }}>{logoRuns(config.playlist_text || DESIGN_TEXT_DEFAULTS.playlist_text).map((r, i) => r.underline ? (
         // '_' 런 → 토막 없는 단일 가로 선. 너비 ≈ 글자수 × 0.6em, 굵기는 cqw 로 환산(영상과 비례).
         <span key={i} style={{ display: "inline-block", width: `${r.s.length * 0.6}em`, height: cqw(config.logo_underline_weight ?? 2), borderRadius: 9999, background: logo.color, verticalAlign: "-0.1em" }} />
@@ -570,7 +570,7 @@ function UnifiedPreview({ config }: { config: MusicDesignConfig }) {
         position: "absolute", left: `${pos("title_x") * 100}%`, top: `${pos("title_y") * 100}%`,
         transform: `scale(${scl("title_scale")})`, transformOrigin: "left top",
         fontFamily: `"${ti.font_family}", "${krTitle}", sans-serif`, fontSize: cqw(ti.font_size), fontWeight: ti.font_weight,
-        fontStyle: ti.italic ? "italic" : "normal", color: ti.color, opacity: ti.opacity, whiteSpace: "nowrap", textShadow: shadow, ...strokeOf(ti.border),
+        fontStyle: ti.italic ? "italic" : "normal", color: ti.color, opacity: ti.opacity, whiteSpace: "nowrap", textShadow: ti.border.enabled ? shadow : "none", ...strokeOf(ti.border),
       }}>{config.preview_title || DESIGN_TEXT_DEFAULTS.preview_title}</div>
 
       {/* 부제목(좌하단, 영어+한글 스택) */}
@@ -578,7 +578,7 @@ function UnifiedPreview({ config }: { config: MusicDesignConfig }) {
         position: "absolute", left: `${pos("subtitle_x") * 100}%`, top: `${pos("subtitle_y") * 100}%`,
         transform: `scale(${scl("subtitle_scale")})`, transformOrigin: "left top",
         fontFamily: `"${su.font_family}", "${krSub}", sans-serif`, fontSize: cqw(su.font_size), fontWeight: su.font_weight,
-        fontStyle: su.italic ? "italic" : "normal", color: su.color, opacity: su.opacity, whiteSpace: "nowrap", textShadow: shadow, ...strokeOf(su.border),
+        fontStyle: su.italic ? "italic" : "normal", color: su.color, opacity: su.opacity, whiteSpace: "nowrap", textShadow: su.border.enabled ? shadow : "none", ...strokeOf(su.border),
       }}>{config.preview_subtitle || DESIGN_TEXT_DEFAULTS.preview_subtitle}</div>
 
       {/* 라벨(숨김이 아닐 때만) — 입력값 그대로 표시(접두사 없음). */}
@@ -587,7 +587,7 @@ function UnifiedPreview({ config }: { config: MusicDesignConfig }) {
           position: "absolute", left: `${pos("location_x") * 100}%`, top: `${pos("location_y") * 100}%`,
           transform: `translateX(-50%) scale(${scl("location_scale")})`, transformOrigin: "center top",
           fontFamily: `"${wl.font_family}", sans-serif`, fontSize: cqw(wl.font_size), fontWeight: wl.font_weight,
-          color: wl.color, opacity: wl.opacity, letterSpacing: `${config.location_letter_spacing ?? 0}px`, whiteSpace: "nowrap", textShadow: "0 2px 12px rgba(0,0,0,0.8)", ...strokeOf(wl.border),
+          color: wl.color, opacity: wl.opacity, letterSpacing: `${config.location_letter_spacing ?? 0}px`, whiteSpace: "nowrap", textShadow: wl.border.enabled ? "0 2px 12px rgba(0,0,0,0.8)" : "none", ...strokeOf(wl.border),
         }}>{(config.where_text || "").trim() || DESIGN_TEXT_DEFAULTS.where_text}</div>
       )}
     </div>
