@@ -412,13 +412,17 @@ def _render_remotion(
     frame_start: int | None = None,
     frame_end: int | None = None,
     muted: bool = False,
+    audio_url: str | None = None,
+    bg_url: str | None = None,
+    character_url: str | None = None,
 ) -> str:
     """Remotion(둥근 바 + 인트로 + 텍스트) 렌더 → mp4. 실패 시 예외(호출부가 ffmpeg 폴백).
 
     #43 분할: frame_start/frame_end 를 주면 renderMedia frameRange 로 그 구간만 렌더한다
     (props.durationSec 는 전체 길이 그대로 → 인트로·곡제목·이퀄 절대 프레임 기준 유지).
     muted=True 면 오디오 없이 렌더(분할 시 비디오만 → 나중에 풀 오디오 mux, 이음새 0).
-    인자 미지정 시 기존 단일 렌더와 100% 동일(회귀 0).
+    audio_url/bg_url/character_url: 에셋 공개 URL(있으면 render.mjs 가 Lambda 경로에서 사용).
+    미지정 시 로컬 경로만으로 기존 단일 렌더와 100% 동일(회귀 0).
     """
     props = {
         "tracks": [
@@ -444,6 +448,12 @@ def _render_remotion(
     ]
     if character_path:
         cmd += ["--character", os.path.abspath(str(character_path))]
+    if audio_url:
+        cmd += ["--audio-url", audio_url]
+    if bg_url:
+        cmd += ["--bg-url", bg_url]
+    if character_url:
+        cmd += ["--character-url", character_url]
     if frame_start is not None and frame_end is not None:
         cmd += ["--frame-start", str(int(frame_start)), "--frame-end", str(int(frame_end))]
     if muted:
@@ -531,6 +541,23 @@ def _render_chunks(
     ])
     logger.info("[video] 분할 %d청크 concat+mux 완료 → %s", len(chunks), out)
     return str(out)
+
+
+def _asset_public_url(src: str | None, local_path: str, slug: str, name: str) -> str | None:
+    """에셋 공개 URL — Lambda(AWS)가 HTTPS 로 fetch 할 수 있어야 함.
+
+    src 가 http(s) 면 그대로(이미 공개), 아니면 로컬 파일을 R2 music-videos/{slug}/{name}
+    에 올려 공개 URL 반환. R2 미설정/업로드 실패 시 None(→ 호출부가 Lambda 비활성, 로컬 렌더).
+    """
+    if isinstance(src, str) and src.startswith(("http://", "https://")):
+        return src
+    if not r2_storage.is_available():
+        return None
+    try:
+        return r2_storage.upload_music_video(str(local_path), slug, name, content_type="image/png")
+    except Exception as e:  # noqa: BLE001 - 업로드 실패는 Lambda 만 비활성(로컬 렌더로 진행)
+        logger.warning("[video] 에셋 R2 업로드 실패(Lambda 비활성, 로컬 렌더): %s", e)
+        return None
 
 
 def _extract_first_frame(mp4_path: str, out_png: str) -> str:
@@ -752,29 +779,52 @@ def make_video(
             except Exception as e:  # noqa: BLE001 - 조회 실패해도 렌더는 진행(현재값)
                 logger.warning("[video] design_config 조회 실패(현재값 진행): %s", e)
             try:
-                # #43 분할 계획 — ≤15분(약 3~4곡)이면 1청크(기존 단일 렌더, 회귀 0),
-                # 그 이상이면 곡 경계 스냅 청크로 나눠 렌더 → concat → 풀 오디오 mux.
-                boundaries = sorted(
-                    float(t.get("start_sec") or 0.0) for t in tracks if t.get("start_sec") is not None
+                # Lambda 단일샷 — 함수·serve URL 이 설정되고 에셋 공개 URL 을 확보하면 분할 없이
+                # Lambda 가 전체를 고속 렌더(20~25분→1~3분). render.mjs 내부에서 실패 시 로컬 폴백.
+                lambda_ready = bool(
+                    os.getenv("REMOTION_SERVE_URL") and os.getenv("REMOTION_LAMBDA_FUNCTION_NAME")
                 )
-                chunks = _plan_chunks(duration, boundaries=boundaries or None)
-                if len(chunks) <= 1:
+                audio_url = mp3_url if isinstance(mp3_url, str) and mp3_url.startswith(("http://", "https://")) else None
+                bg_url = _asset_public_url(background_path, str(bg), slug, f"{video_id}_bg.png") if lambda_ready else None
+                char_url = (
+                    _asset_public_url(character_path, char_local, slug, f"{video_id}_char.png")
+                    if (lambda_ready and char_local) else None
+                )
+                if lambda_ready and audio_url and bg_url:
+                    logger.info("[video] Lambda 렌더 경로 slug=%s (총 %.1f분)", slug, duration / 60)
                     _render_remotion(
                         str(bg), str(audio), str(out),
                         tracks=tracks, mood=mood_hint, duration=duration, viz_spec=viz_spec,
                         design_config=design_config, show_playlist=show_playlist,
                         character_path=char_local,
+                        audio_url=audio_url, bg_url=bg_url, character_url=char_url,
                     )
+                    rendered = True
+                    logger.info("[video] Lambda/로컬 렌더 완료 slug=%s", slug)
                 else:
-                    logger.info("[video] 분할 렌더 %d청크 (총 %.1f분) slug=%s", len(chunks), duration / 60, slug)
-                    _render_chunks(
-                        str(bg), str(audio), str(out), chunks, work=work,
-                        tracks=tracks, mood=mood_hint, duration=duration, viz_spec=viz_spec,
-                        design_config=design_config, show_playlist=show_playlist,
-                        character_path=char_local,
+                    # #43 분할 계획 — ≤15분(약 3~4곡)이면 1청크(기존 단일 렌더, 회귀 0),
+                    # 그 이상이면 곡 경계 스냅 청크로 나눠 렌더 → concat → 풀 오디오 mux.
+                    boundaries = sorted(
+                        float(t.get("start_sec") or 0.0) for t in tracks if t.get("start_sec") is not None
                     )
-                rendered = True
-                logger.info("[video] Remotion 렌더 완료 slug=%s", slug)
+                    chunks = _plan_chunks(duration, boundaries=boundaries or None)
+                    if len(chunks) <= 1:
+                        _render_remotion(
+                            str(bg), str(audio), str(out),
+                            tracks=tracks, mood=mood_hint, duration=duration, viz_spec=viz_spec,
+                            design_config=design_config, show_playlist=show_playlist,
+                            character_path=char_local,
+                        )
+                    else:
+                        logger.info("[video] 분할 렌더 %d청크 (총 %.1f분) slug=%s", len(chunks), duration / 60, slug)
+                        _render_chunks(
+                            str(bg), str(audio), str(out), chunks, work=work,
+                            tracks=tracks, mood=mood_hint, duration=duration, viz_spec=viz_spec,
+                            design_config=design_config, show_playlist=show_playlist,
+                            character_path=char_local,
+                        )
+                    rendered = True
+                    logger.info("[video] Remotion 렌더 완료 slug=%s", slug)
             except Exception as e:  # noqa: BLE001 - Remotion 불안정 대비 ffmpeg 폴백
                 logger.warning("[video] Remotion 실패 → ffmpeg 폴백: %s", e)
         if not rendered:
