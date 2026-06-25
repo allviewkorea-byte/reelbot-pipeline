@@ -145,6 +145,7 @@ export interface MusicDesignConfig {
   // 인라인 편집 텍스트(빈값=기본값 폴백). playlist_text/where_text=영상 반영, preview_*=미리보기 전용.
   playlist_text?: string
   where_text?: string
+  where_label_hidden?: boolean // Where 라벨 영상 숨김(기본 true=숨김)
   preview_title?: string
   preview_subtitle?: string
 }
