@@ -202,6 +202,66 @@ def upload_video(
     return {"video_id": video_id, "video_url": f"https://www.youtube.com/watch?v={video_id}"}
 
 
+# ── 음악 채널(Revezen) 재생목록 자동 분류 — 장르 → 재생목록 매핑 ──────────────
+# 5개 묶음(드라이브·카페·늦은밤·에너지·휴식). 재생목록 ID 가 바뀔 때를 대비해
+# Railway 환경변수(PLAYLIST_DRIVE/CAFE/LATENIGHT/ENERGY/REST)로 오버라이드 가능.
+def _pl(env_key: str, default: str) -> str:
+    return (os.getenv(env_key) or default).strip()
+
+
+def _playlist_map() -> dict[str, str]:
+    drive = _pl("PLAYLIST_DRIVE", "PLZrNOKwpF4k0")
+    cafe = _pl("PLAYLIST_CAFE", "PLcNZY43Ms0_E")
+    latenight = _pl("PLAYLIST_LATENIGHT", "PLJ4wcfQLMbKQ")
+    energy = _pl("PLAYLIST_ENERGY", "PLT7NryPLY43s")
+    rest = _pl("PLAYLIST_REST", "PLTjRC7ZWEzhs")
+    return {
+        # 드라이브
+        "citypop": drive, "sunset_drive": drive, "morning_drive": drive,
+        # 카페
+        "cafe": cafe, "cafe_bgm": cafe, "lofi": cafe,
+        # 늦은 밤
+        "jazz": latenight, "rnb_soul": latenight, "ballad": latenight,
+        "breakup": latenight, "bar_lounge": latenight,
+        # 에너지
+        "workout": energy, "kpop": energy, "pop": energy, "hiphop": energy,
+        # 휴식
+        "sleep_study": rest, "spa_meditation": rest, "library_study": rest,
+        "hotel_lobby": rest,
+    }
+
+
+def add_to_playlist(youtube, video_id: str, playlist_id: str) -> bool:
+    """업로드된 영상을 재생목록에 추가(playlistItems.insert). 실패해도 업로드는 성공으로 처리."""
+    try:
+        youtube.playlistItems().insert(
+            part="snippet",
+            body={
+                "snippet": {
+                    "playlistId": playlist_id,
+                    "resourceId": {
+                        "kind": "youtube#video",
+                        "videoId": video_id,
+                    },
+                }
+            },
+        ).execute()
+        return True
+    except Exception as e:  # noqa: BLE001 - 재생목록 추가 실패는 업로드를 막지 않음
+        logger.warning(
+            "[playlist] 재생목록 추가 실패 (video=%s, playlist=%s): %s",
+            video_id, playlist_id, e,
+        )
+        return False
+
+
+def _genre_playlist_id(theme: dict) -> str | None:
+    """주제 → 장르 id → 재생목록 id. genre_id 우선, 없으면 분류(best-effort). 매핑 없으면 None."""
+    from services import music_genres
+    genre_id = (theme.get("genre_id") or music_genres.classify_theme(theme) or "").strip().lower()
+    return _playlist_map().get(genre_id)
+
+
 # ── 음악 채널(Revezen) 업로드 — 백곰과 분리, additive ──────────────────────
 def build_music_metadata(theme: dict, mix: dict) -> tuple[str, str, list[str]]:
     """음악 영상 메타데이터 (제목, 설명, 태그).
@@ -351,6 +411,17 @@ def upload_music_video(
                 logger.warning("[music-youtube] 썸네일 첨부 완료: video_id=%s", video_id)
             except Exception as e:  # noqa: BLE001
                 logger.warning("[music-youtube] 썸네일 첨부 실패(영상은 업로드됨): %s", e)
+
+        # 재생목록 자동 분류 — 장르 매핑이 있으면 해당 재생목록에 추가(best-effort).
+        # 매핑 없는 장르 → 추가 없이 그냥 업로드. 어떤 실패도 업로드를 막지 않음.
+        try:
+            playlist_id = _genre_playlist_id(theme)
+            if playlist_id and add_to_playlist(youtube, video_id, playlist_id):
+                logger.warning(
+                    "[playlist] 재생목록 추가 완료: video=%s playlist=%s", video_id, playlist_id
+                )
+        except Exception as e:  # noqa: BLE001 - 재생목록 분류 실패는 업로드를 막지 않음
+            logger.warning("[playlist] 재생목록 분류 단계 실패(영상은 업로드됨): %s", e)
 
     # 기록(best-effort).
     try:
