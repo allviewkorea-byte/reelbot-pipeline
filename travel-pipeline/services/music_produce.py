@@ -11,13 +11,25 @@
 from __future__ import annotations
 
 import logging
+import os
 import random
 import re
+import shutil
+import subprocess
+import tempfile
+
+import httpx
 
 from adapters import r2_storage
 from services import music_genres, music_lyrics, music_master, music_mix, music_store, music_suno
 
 logger = logging.getLogger(__name__)
+
+# ── 곡 길이 자동 체크 + 재생성 ─────────────────────────────────────────────
+# Suno 가 가끔 2분대 짧은 곡을 내놓는다 → 첫 클립이 이 길이 미만이면 자동 재생성.
+# (가사 구조 확장 + V4_5ALL 로 대부분 충분하지만, 안전망으로 둔다.)
+_MIN_DURATION_SEC = float(os.getenv("MUSIC_MIN_DURATION_SEC", "150"))  # 2분 30초
+_MAX_DURATION_RETRIES = int(os.getenv("MUSIC_DURATION_RETRIES", "2"))  # 최대 2번 재시도
 
 # 시티팝 기본 베이스 스타일(플랜이 곡별 변주를 주면 그쪽 우선).
 DEFAULT_BASE_STYLE = "city pop, 80s Japanese citypop, warm analog, lush chords, nostalgic"
@@ -48,6 +60,81 @@ def _vocal_style(base: str, gender: str) -> str:
     return f"{base}, {gender} vocals, {_VOCAL_CLARITY}"
 
 
+def _measure_mp3_duration(url: str) -> float | None:
+    """mp3 URL 을 임시 다운로드 후 ffprobe 로 길이(초) 측정. 실패 시 None.
+
+    Suno 응답에 duration 이 없을 때만 쓰는 폴백(정상 경로는 응답값 사용 → 다운로드 0).
+    """
+    if not url or shutil.which("ffprobe") is None:
+        return None
+    fd, tmp = tempfile.mkstemp(suffix=".mp3")
+    os.close(fd)
+    try:
+        with httpx.Client(timeout=120.0, follow_redirects=True) as c, c.stream("GET", url) as resp:
+            resp.raise_for_status()
+            with open(tmp, "wb") as f:
+                for chunk in resp.iter_bytes(chunk_size=1024 * 64):
+                    f.write(chunk)
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=nokey=1:noprint_wrappers=1", tmp],
+            check=True, capture_output=True, text=True,
+        )
+        return float(out.stdout.strip())
+    except Exception as e:  # noqa: BLE001 - 측정 실패는 길이 미상(재시도 안 함)으로 처리
+        logger.warning("[produce] 곡 길이 측정 실패(%s): %s", url[:80], e)
+        return None
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
+def _track_duration(rec: dict) -> float | None:
+    """트랙 record 의 길이(초). Suno 응답 duration 우선, 없으면 mp3 측정 폴백."""
+    d = rec.get("duration")
+    try:
+        if d is not None and float(d) > 0:
+            return float(d)
+    except (TypeError, ValueError):
+        pass
+    return _measure_mp3_duration(rec.get("audio_url") or "")
+
+
+def _generate_with_retry(theme: dict, log) -> dict:
+    """generate_and_store 를 호출하되, 사용될 첫 클립이 너무 짧으면 자동 재생성.
+
+    150초 미만이면 최대 2번까지 재시도. 끝까지 짧으면 마지막 결과를 그대로 사용(경고).
+    재시도는 Suno 정상 호출과 동일 → 무한루프 없음(고정 횟수), 길이 정상이면 재시도 0.
+    """
+    last = music_suno.generate_and_store(theme)
+    for attempt in range(_MAX_DURATION_RETRIES):
+        tracks = last.get("tracks") or []
+        if not tracks:
+            return last  # 생성 실패/빈 결과는 호출부가 처리(여기선 재시도 안 함)
+        dur = _track_duration(tracks[0])
+        if dur is None or dur >= _MIN_DURATION_SEC:
+            return last  # 정상 길이(또는 길이 미상) → 그대로 통과
+        logger.warning(
+            "[produce] 곡 길이 부족 %.0f초 < %.0f초 (시도 %d/%d) — 재생성",
+            dur, _MIN_DURATION_SEC, attempt + 1, _MAX_DURATION_RETRIES + 1,
+        )
+        log(f"⚠️ 곡 길이 부족 {dur:.0f}초 — 재생성 ({attempt + 1}/{_MAX_DURATION_RETRIES})")
+        last = music_suno.generate_and_store(theme)
+    # 최종 점검 — 마지막 결과도 짧으면 경고만 남기고 그대로 사용.
+    final_tracks = last.get("tracks") or []
+    if final_tracks:
+        fdur = _track_duration(final_tracks[0])
+        if fdur is not None and fdur < _MIN_DURATION_SEC:
+            logger.warning(
+                "[produce] 최대 재시도(%d) 초과 — 짧은 곡 %.0f초 그대로 사용",
+                _MAX_DURATION_RETRIES, fdur,
+            )
+            log(f"⚠️ 재시도 후에도 짧음 {fdur:.0f}초 — 그대로 사용")
+    return last
+
+
 # ── Suno 재활용(#46) ───────────────────────────────────────────────────
 # 모델: Suno 1회 호출=2클립이지만 믹스엔 1클립만 쓴다(#34-B). 나머지 1클립은
 # used=false 로 DB(music_tracks)에 쌓여 "재활용 풀"이 된다. 다음 같은 장르 제작 때
@@ -74,6 +161,20 @@ def _recycle_track(genre_id: str | None, seen: set[str], log) -> dict | None:
         r2_key = row.get("r2_key")
         if not audio_id or not r2_key:
             return None
+        # 길이 가드 — 재시도로 걸러졌어야 할 짧은 트랙이 풀에 남아 무음처럼 재사용되는 것 방지.
+        # 길이가 알려져 있고 미달이면 used=true 로 '은퇴'시키고 Suno 정상 호출로 폴백.
+        rdur = row.get("duration")
+        try:
+            if rdur is not None and 0 < float(rdur) < _MIN_DURATION_SEC:
+                seen.add(audio_id)
+                music_store.mark_track_used(audio_id)
+                logger.warning(
+                    "[produce] 재활용 풀 짧은 트랙 은퇴 %.0f초 (id=%s) — Suno 폴백",
+                    float(rdur), audio_id,
+                )
+                return None
+        except (TypeError, ValueError):
+            pass
         seen.add(audio_id)
         if not music_store.mark_track_used(audio_id):
             # 마킹 실패해도 진행(다음에 중복 사용될 수 있으나 렌더 실패보단 낫다).
@@ -139,7 +240,7 @@ def _gen_vocal(
         }
         try:
             log(f"보컬 생성 {i}/{len(valid)} [{gender}]: {s.get('title')}")
-            res = music_suno.generate_and_store(theme)
+            res = _generate_with_retry(theme, log)
         except Exception as e:  # noqa: BLE001 - 1곡 실패가 전체를 막지 않게
             logger.warning("[produce] 곡 %d 보컬 생성 실패: %s", i, e)
             continue
@@ -193,7 +294,7 @@ def _gen_instrumental(
         }
         try:
             log(f"연주 생성 {i}/{n}")
-            res = music_suno.generate_and_store(theme)
+            res = _generate_with_retry(theme, log)
         except Exception as e:  # noqa: BLE001 - 1곡 실패가 전체를 막지 않게
             logger.warning("[produce] 연주 %d 생성 실패: %s", i, e)
             continue
