@@ -148,11 +148,19 @@ def render_test(mood: str | None = None, *, seconds: float = 10.0) -> dict:
 
         engine = "ffmpeg"
         rendered = False
+        # 채널 디자인 본부 설정(where;____·이퀄·폰트 등)을 테스트에도 반영. 미설정/오류 시 None → 현재값 폴백.
+        design_config = None
+        try:
+            from services import music_channel
+            design_config = music_channel.get_design_config()
+        except Exception as e:  # noqa: BLE001 - 조회 실패 시 기본값으로 진행
+            logger.warning("[music-test] design_config 조회 실패(기본값 진행): %s", e)
         if music_video.remotion_enabled():
             try:
                 music_video._render_remotion(
                     str(bg), str(audio), str(out),
                     tracks=tracks, mood=mood_hint, duration=seconds, viz_spec=viz_spec,
+                    design_config=design_config,
                 )
                 rendered = True
                 engine = "remotion"
