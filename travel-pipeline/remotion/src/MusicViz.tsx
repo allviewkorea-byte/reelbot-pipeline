@@ -199,15 +199,15 @@ const EQ_BARS = 20; // 새 이퀄(산 모양) 막대 수
 const NUM_SAMPLES = 256; // visualizeAudio 는 2의 거듭제곱 필요.
 const SMOOTH_FRAMES = 2; // #34 활발한 반응 — 평균 윈도우 4→2(빠른 감쇠). 진폭·tilt·캡 불변.
 
-// 인트로 타임라인(초).
-const STATIC_END = 3.5; // 0~3.5 정지(거대 PLAY LIST + 부제 + 곡제목)
-const FADE_END = 4.7; // 3.5~4.7 이퀄 등장
-const TYPE_START = 4.9; // 4.9~ 타이프라이터(손글씨) 재등장
-
-// 타이핑 속도(손글씨 느낌) — 글자당 프레임 간격(기존: 전체를 1.2s=36f 에 채움 → 길이별 ~1~3.6f/자).
-// 5f/자(=6자/초) 로 느리게. 제목 다 쓴 뒤 PAUSE → 부제 시작(순서 유지).
-const TITLE_CHAR_INTERVAL_FRAMES = 5;
-const TITLE_TO_SUBTITLE_PAUSE_FRAMES = 15;
+// 모션 타임라인(초·프레임). 기준 FPS=30 이나 실제 fps 는 useVideoConfig 에서 읽는다.
+// A: where;____·이퀄은 프레임 0부터 고정(페이드 없음). B: 라벨 3초 후 페이드인.
+// C: 제목 4초부터 좌→우 타이핑. D: 부제는 제목 완료 + PAUSE 후. E: 곡 전환 시 재타이핑.
+const LABEL_FADE_START_SEC = 3; // 라벨 페이드 시작(3초)
+const LABEL_FADE_DUR_SEC = 1; // 라벨 페이드 길이(1초 → 4초에 완전 등장)
+const TITLE_START_SEC = 4; // 첫 곡 제목 타이핑 시작(4초, 라벨 페이드 완료 후)
+const CHAR_INTERVAL = 5; // 글자당 5프레임(손글씨 느낌, 느리게)
+const TITLE_SUBTITLE_PAUSE = 15; // 제목 마지막 글자 → 부제 시작 사이 pause(프레임)
+const CHAR_FADE_FRAMES = 2; // 글자 등장 시 opacity 0→1 페이드(프레임)
 
 const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp" } as const;
 
@@ -220,7 +220,6 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
   const textColor = "#FFFFFF";
   const subtitleEn = (vizSpec?.subtitle_en || "").trim();
   const locationEn = (vizSpec?.location_en || "").trim() || "City View"; // #33: 항상 WHERE 표시(폴백)
-  const firstTitle = (tracks[0]?.title || "").trim();
 
   // ── #35-A 디자인 설정: 미지정 필드는 현재 하드코딩값으로 폴백(designConfig 비면 100% 동일) ──
   const plCfg = designConfig?.play_list ?? {};
@@ -287,11 +286,13 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
     }
   }
 
-  // ── 인트로: 부제/곡제목 정지 표시 페이드(0~4.7) ───────────────────
-  const introOpacity = interpolate(frame, [STATIC_END * fps, FADE_END * fps], [1, 0], clamp);
-
-  // ── 이퀄 등장(3.5초부터 페이드인, 4.7초 완전 등장 후 유지) ──────────
-  const eqIn = interpolate(frame, [STATIC_END * fps, FADE_END * fps], [0, 1], clamp);
+  // ── B. 라벨 페이드: 0~3초 0 → 3~4초 0→1 → 이후 1 고정. 절대 프레임 기준(곡 전환에도 유지). ──
+  const labelFade = interpolate(
+    frame,
+    [LABEL_FADE_START_SEC * fps, (LABEL_FADE_START_SEC + LABEL_FADE_DUR_SEC) * fps],
+    [0, 1],
+    clamp,
+  );
 
   // ── 요소 위치(0~1 비율 → px). 미지정 시 기존 기본값(회귀 0). #E 위치 슬라이더 ──
   const logoX = width * (designConfig?.logo_x ?? 0.5); // 기본 가로 중앙
@@ -303,51 +304,33 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
   const locX = width * (designConfig?.location_x ?? 0.5);
   const locY = height * (designConfig?.location_y ?? 0.04);
 
-  // ── PLAY LIST(메인 로고): 위치는 logo_x/logo_y(기본 정중앙). 이동·축소 없음(페이드인만). ──
+  // ── A. PLAY LIST(메인 로고): 프레임 0부터 끝까지 고정. 페이드·이동·축소 없음(opacity 1). ──
   const LARGE = plFontSize; // 폰트 높이 ~30%(기본) — #35-A 설정 시 그 px.
   const plScale = designConfig?.logo_scale ?? 1; // #크기 슬라이더(0.5~2.0, 기본 1)
-  const plOpacity = interpolate(frame, [0, 0.5 * fps], [0, 1], clamp); // 등장 페이드인만(이후 1 유지)
 
-  // ── 곡 제목(본 영상 구간별, 경계 페이드) ─────────────────────────
+  // ── C·D·E. 제목·부제 타이핑(좌→우, 글자당 CHAR_INTERVAL). 곡 전환 시 그 곡 시작에서 재타이핑. ──
   const t = frame / fps;
   const active = currentTrack(tracks, t, durationSec);
-  let titleOpacity = 0;
-  if (active) {
-    const fadeFrames = Math.round(fps * 0.6);
-    const sf = active.start * fps;
-    const ef = active.end * fps;
-    titleOpacity = Math.min(
-      interpolate(frame, [sf, sf + fadeFrames], [0, 1], clamp),
-      interpolate(frame, [ef - fadeFrames, ef], [1, 0], clamp),
-    );
-  }
+  const curTitle = active ? (active.title || "").trim() : "";
+  const curTitleLen = curTitle.length;
+  // 타이핑 시작: 첫 곡은 4초(라벨 등장 후), 이후 곡은 그 곡 시작 프레임.
+  const isFirstSong = !active || active.start <= 1e-3;
+  const typeStartF = isFirstSong ? TITLE_START_SEC * fps : active!.start * fps;
+  // 제목 마지막 글자 등장 프레임 → +PAUSE 후 부제 시작(제목 글자수에 따라 동적).
+  const titleLastCharF = typeStartF + Math.max(0, curTitleLen - 1) * CHAR_INTERVAL;
+  const subStartF = (curTitleLen > 0 ? titleLastCharF : typeStartF) + TITLE_SUBTITLE_PAUSE;
 
-  // ── 좌하단 블록 타이핑(손글씨): 제목 먼저(글자당 5f) → PAUSE → 부제. 끝나면 본영상 모드. ──
-  const titleStartF = TYPE_START * fps;
-  const titleLen = firstTitle.length;
-  const subLen = subtitleEn.length;
-  const titleEndF = titleStartF + titleLen * TITLE_CHAR_INTERVAL_FRAMES;
-  const subStartF = titleEndF + TITLE_TO_SUBTITLE_PAUSE_FRAMES;
-  const subEndF = subStartF + subLen * TITLE_CHAR_INTERVAL_FRAMES;
-  const inIntroType = frame < subEndF;
-  let blSub = "";
-  let blTitle = "";
-  let blTitleOpacity = 0;
-  if (frame >= titleStartF) {
-    if (inIntroType) {
-      const titleChars = Math.max(0, Math.min(titleLen, Math.floor((frame - titleStartF) / TITLE_CHAR_INTERVAL_FRAMES)));
-      blTitle = firstTitle.slice(0, titleChars);
-      const subChars = frame >= subStartF
-        ? Math.max(0, Math.min(subLen, Math.floor((frame - subStartF) / TITLE_CHAR_INTERVAL_FRAMES)))
-        : 0;
-      blSub = subtitleEn.slice(0, subChars);
-      blTitleOpacity = 1;
-    } else {
-      blSub = subtitleEn;
-      blTitle = active ? active.title : "";
-      blTitleOpacity = titleOpacity; // 곡 전환 페이드
-    }
-  }
+  // 한 글자씩 좌→우로 나타나는 span 배열(글자별 2프레임 fade). startF = 첫 글자 등장 프레임.
+  const typedSpans = (text: string, startF: number) =>
+    Array.from(text).map((ch, i) => {
+      const cf = startF + i * CHAR_INTERVAL;
+      const op = interpolate(frame, [cf, cf + CHAR_FADE_FRAMES], [0, 1], clamp);
+      return (
+        <span key={i} style={{ opacity: op, whiteSpace: "pre" }}>
+          {ch}
+        </span>
+      );
+    });
 
   // ── 이퀄(산 모양) 설정 + 위치(로고 바로 위, 중앙 정렬) ──────────────
   const eq = designConfig?.equalizer ?? {};
@@ -386,7 +369,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
           style={{
             position: "absolute", left: locX, top: locY, transform: "translateX(-50%)", textAlign: "center",
             fontFamily: wlFontFamily, fontSize: wlFontSize, fontWeight: wlFontWeight,
-            letterSpacing: locLetterSpacing, color: wlColor, opacity: wlOpacity,
+            letterSpacing: locLetterSpacing, color: wlColor, opacity: wlOpacity * labelFade,
             textShadow: "0 2px 12px rgba(0,0,0,0.8)", whiteSpace: "nowrap", ...wlStroke,
           }}
         >
@@ -394,36 +377,8 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
         </div>
       )}
 
-      {/* 2) 인트로 정지 보조 텍스트(부제 좌중 / 곡제목 우중하단) — 0~4.7 페이드 */}
-      {introOpacity > 0.001 && (
-        <div style={{ position: "absolute", inset: 0, opacity: introOpacity }}>
-          {subtitleEn && (
-            <div
-              style={{
-                position: "absolute", left: width * 0.08, top: height * 0.46,
-                fontFamily: SERIF, fontStyle: "italic", color: textColor,
-                fontSize: width * 0.026, textShadow: shadow, maxWidth: width * 0.5,
-              }}
-            >
-              {subtitleEn}
-            </div>
-          )}
-          {firstTitle && (
-            <div
-              style={{
-                position: "absolute", right: width * 0.08, bottom: height * 0.2,
-                fontFamily: SCRIPT, color: textColor,
-                fontSize: width * 0.05, textShadow: shadow, textAlign: "right", maxWidth: width * 0.55,
-              }}
-            >
-              {firstTitle}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* 2b) PLAY LIST(메인 로고) — logo_x/logo_y 위치(기본 정중앙). #39 영상별 표시. */}
-      {showPlaylist !== false && plOpacity > 0.001 && (
+      {/* 2) PLAY LIST(메인 로고) — A: 프레임 0부터 고정. logo_x/logo_y 위치. #39 영상별 표시. */}
+      {showPlaylist !== false && (
         <div
           style={{
             position: "absolute",
@@ -439,7 +394,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
             letterSpacing: width * 0.012,
             whiteSpace: "nowrap",
             textShadow: shadow,
-            opacity: plOpacity * plOpacityMul,
+            opacity: plOpacityMul,
             ...plStroke,
           }}
         >
@@ -452,8 +407,8 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
         </div>
       )}
 
-      {/* 3) 제목·부제 블록(타이핑 후 본 영상): 위치는 title_x/y, subtitle_x/y(기본값=기존). */}
-      {blSub && (
+      {/* 3) 제목·부제 — C·D·E: 좌→우 글자별 타이핑(곡마다 재타이핑). 위치는 title_x/y, subtitle_x/y. */}
+      {subtitleEn && (
         <div
           style={{
             position: "absolute", left: subLeft, top: subTop,
@@ -462,22 +417,22 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
             fontSize: sFontSize, textShadow: shadow, maxWidth: width * 0.6, ...sStroke,
           }}
         >
-          {blSub}
+          {typedSpans(subtitleEn, subStartF)}
         </div>
       )}
-      {blTitle && (
+      {curTitle && (
         <div
           style={{
-            position: "absolute", left: titleLeft, top: titleTop, opacity: blTitleOpacity * tOpacityMul,
+            position: "absolute", left: titleLeft, top: titleTop, opacity: tOpacityMul,
             fontFamily: tFontFamily, fontStyle: tFontStyle, fontWeight: tFontWeight, color: tColor,
             fontSize: tFontSize, textShadow: shadow, maxWidth: width * 0.7, ...tStroke,
           }}
         >
-          {blTitle}
+          {typedSpans(curTitle, typeStartF)}
         </div>
       )}
 
-      {/* 4) #C 이퀄 — 로고 바로 위, 가로 위치 eq.x. 오디오 진폭만으로 막대 높이(산 모양 고정 아님), pill 막대. */}
+      {/* 4) 이퀄 — A: 프레임 0부터 고정(페이드 없음). 로고 바로 위, 가로 위치 eq.x. 오디오 반응 pill 막대. */}
       <div
         style={{
           position: "absolute",
@@ -486,7 +441,6 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
           width: eqWidth,
           height: eqMaxH,
           transform: "translateX(-50%)",
-          opacity: eqIn,
           display: "flex",
           alignItems: "flex-end",
           justifyContent: "center",
