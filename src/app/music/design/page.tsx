@@ -147,7 +147,7 @@ export default function MusicDesignPage() {
               onTextChange={(v) => patchText("playlist_text", v)}
               previewScale={0.18}
               value={config.play_list}
-              sizeRange={[80, 480]}
+              sizeRange={[80, 1200]}
               onChange={(p) => patchTarget("play_list", p)}
             />
             <TargetPanel
@@ -158,7 +158,7 @@ export default function MusicDesignPage() {
               onTextChange={(v) => patchText("where_text", v)}
               previewScale={1}
               value={config.where_label}
-              sizeRange={[12, 80]}
+              sizeRange={[12, 240]}
               onChange={(p) => patchTarget("where_label", p)}
               hidden={config.where_label_hidden ?? true}
               onHiddenChange={(v) => setConfig((c) => ({ ...c, where_label_hidden: v }))}
@@ -171,7 +171,7 @@ export default function MusicDesignPage() {
               previewScale={0.6}
               withItalic
               value={config.title}
-              sizeRange={[24, 160]}
+              sizeRange={[24, 480]}
               onChange={(p) => patchTarget("title", p)}
               krFont={config.title_font_kr ?? DESIGN_KR_FONT_DEFAULT}
               onKrFontChange={(v) => setConfig((c) => ({ ...c, title_font_kr: v }))}
@@ -184,7 +184,7 @@ export default function MusicDesignPage() {
               previewScale={0.7}
               withItalic
               value={config.subtitle}
-              sizeRange={[16, 120]}
+              sizeRange={[16, 360]}
               onChange={(p) => patchTarget("subtitle", p)}
               krFont={config.subtitle_font_kr ?? DESIGN_KR_FONT_DEFAULT}
               onKrFontChange={(v) => setConfig((c) => ({ ...c, subtitle_font_kr: v }))}
@@ -483,7 +483,7 @@ function LayoutSection({ config, onPos, onScale }: {
   return (
     <section className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
       <h2 className="text-sm font-semibold text-foreground">레이아웃 (위치·크기 조정) · 16:9 미리보기</h2>
-      <div className="relative w-full overflow-hidden rounded-lg" style={{ aspectRatio: "16 / 9", background: "#0c1020" }}>
+      <div className="relative w-full overflow-hidden rounded-lg" style={{ aspectRatio: "16 / 9", maxHeight: 360, maxWidth: 640, background: "#0c1020" }}>
         {/* 로고 위 이퀄 미리보기(오디오 반응형 · pill) */}
         <div
           className="absolute flex items-end justify-center"
@@ -531,7 +531,7 @@ function LayoutSection({ config, onPos, onScale }: {
                 className="w-full accent-[var(--color-primary,#a78bfa)]" />
             </Field>
             <Field label={`크기 (${Math.round(sc(el.sk) * 100)}%)`}>
-              <input type="range" min={50} max={200} step={1} value={Math.round(sc(el.sk) * 100)}
+              <input type="range" min={50} max={500} step={1} value={Math.round(sc(el.sk) * 100)}
                 onChange={(e) => onScale(el.sk, Number(e.target.value) / 100)}
                 className="w-full accent-[var(--color-primary,#a78bfa)]" />
             </Field>
@@ -552,7 +552,7 @@ function EqualizerSection({ eq, onChange }: {
     <section className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
       <h2 className="text-sm font-semibold text-foreground">이퀄라이저 (오디오 반응 · pill · 로고 위)</h2>
       {/* 미리보기 막대(오디오 반응형 · pill 끝) */}
-      <div className="flex h-24 items-end justify-center gap-1 overflow-hidden rounded-lg" style={{ background: "#0c1020" }}>
+      <div className="flex h-40 items-end justify-center gap-1 overflow-hidden rounded-lg" style={{ maxHeight: 160, background: "#0c1020" }}>
         {bars.map((v, i) => {
           const tCol = eq.gradient === "center" ? Math.abs(i / 19 - 0.5) * 2 : i / 19
           return <div key={i} style={{ width: 8, height: `${Math.max(11, v * 90)}%`, borderRadius: 9999, background: mixHex(eq.color1, eq.color2, tCol) }} />
