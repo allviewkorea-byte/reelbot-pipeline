@@ -85,14 +85,18 @@ export default function MusicQueueGridPage() {
       })
       const data = await res.json()
       if (!res.ok || !data?.video_url) throw new Error(data?.detail || "테스트 렌더 실패")
-      setTestVideo({ url: data.video_url, engine: data.engine })
+      // 테스트 영상도 검토 대기(pending)에 저장됨 → 큐 새로고침하면 정식 카드(MusicQueueCard)로
+      // 표시되어 이미지·인물·PLAY LIST 토글·다국어 등 모든 기능을 동일하게 사용할 수 있다.
+      setShowTestCard(false)
+      load()
+      toast.success("테스트 영상이 검토 대기에 추가되었습니다.")
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "테스트 렌더 실패")
       setShowTestCard(false)
     } finally {
       setTestLoading(false)
     }
-  }, [testMood])
+  }, [testMood, load])
 
   const runManual = useCallback(async () => {
     setManualLoading(true)
