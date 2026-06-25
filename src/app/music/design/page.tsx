@@ -122,6 +122,7 @@ export default function MusicDesignPage() {
           // #크기 배율(0.5~2.0).
           logo_scale: config.logo_scale ?? SCALE_DEFAULTS.logo_scale,
           logo_underline_weight: config.logo_underline_weight ?? config.play_list.font_weight,
+          location_letter_spacing: config.location_letter_spacing ?? 0,
           title_scale: config.title_scale ?? SCALE_DEFAULTS.title_scale,
           subtitle_scale: config.subtitle_scale ?? SCALE_DEFAULTS.subtitle_scale,
           location_scale: config.location_scale ?? SCALE_DEFAULTS.location_scale,
@@ -189,13 +190,14 @@ export default function MusicDesignPage() {
                 title="라벨"
                 textValue={config.where_text ?? ""}
                 textDefault={DESIGN_TEXT_DEFAULTS.where_text}
-                textSuffix=" : Tokyo"
                 onTextChange={(v) => patchText("where_text", v)}
                 value={config.where_label}
                 sizeRange={[12, 240]}
                 onChange={(p) => patchTarget("where_label", p)}
                 hidden={config.where_label_hidden ?? true}
                 onHiddenChange={(v) => setConfig((c) => ({ ...c, where_label_hidden: v }))}
+                letterSpacing={config.location_letter_spacing ?? 0}
+                onLetterSpacing={(v) => setConfig((c) => ({ ...c, location_letter_spacing: v }))}
               />
               <TargetPanel
                 title="제목 (곡 제목 · 미리보기 전용)"
@@ -304,6 +306,7 @@ function TargetPanel({
   value, sizeRange, onChange, withItalic = false,
   hidden, onHiddenChange, krFont, onKrFontChange,
   underlineWeight, onUnderlineWeight,
+  letterSpacing, onLetterSpacing,
 }: {
   title: string
   textValue: string
@@ -320,6 +323,8 @@ function TargetPanel({
   onKrFontChange?: (value: string) => void
   underlineWeight?: number
   onUnderlineWeight?: (value: number) => void
+  letterSpacing?: number
+  onLetterSpacing?: (value: number) => void
 }) {
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3">
@@ -398,6 +403,17 @@ function TargetPanel({
           >
             {WEIGHTS.map((w) => <option key={w} value={w}>{w}</option>)}
           </select>
+        </Field>
+      )}
+
+      {/* 글자 간격(라벨만) */}
+      {onLetterSpacing && (
+        <Field label={`글자 간격 (${letterSpacing ?? 0}px)`}>
+          <input
+            type="range" min={-10} max={50} step={1} value={letterSpacing ?? 0}
+            onChange={(e) => onLetterSpacing(Number(e.target.value))}
+            className="w-full accent-[var(--color-primary,#a78bfa)]"
+          />
         </Field>
       )}
 
@@ -523,7 +539,7 @@ function UnifiedPreview({ config }: { config: MusicDesignConfig }) {
       {/* 이퀄(로고 위, pill · 오디오 반응형 표현) */}
       <div
         className="absolute flex items-end justify-center"
-        style={{ left: `${pos("logo_x") * 100}%`, top: `${eqTopFrac * 100}%`, width: `${(eq.width / W) * 100}%`, height: `${eqHFrac * 100}%`, transform: "translateX(-50%)", gap: 2 }}
+        style={{ left: `${(eq.x ?? 0.5) * 100}%`, top: `${eqTopFrac * 100}%`, width: `${(eq.width / W) * 100}%`, height: `${eqHFrac * 100}%`, transform: "translateX(-50%)", gap: 2 }}
       >
         {eqBars.map((v, i) => {
           const tCol = eq.gradient === "center" ? Math.abs(i / 19 - 0.5) * 2 : i / 19
@@ -557,14 +573,14 @@ function UnifiedPreview({ config }: { config: MusicDesignConfig }) {
         fontStyle: su.italic ? "italic" : "normal", color: su.color, opacity: su.opacity, whiteSpace: "nowrap", textShadow: shadow, ...strokeOf(su.border),
       }}>{config.preview_subtitle || DESIGN_TEXT_DEFAULTS.preview_subtitle}</div>
 
-      {/* 지역명(Where 라벨 숨김이 아닐 때만) */}
+      {/* 라벨(숨김이 아닐 때만) — 입력값 그대로 표시(접두사 없음). */}
       {showLoc && (
         <div style={{
           position: "absolute", left: `${pos("location_x") * 100}%`, top: `${pos("location_y") * 100}%`,
           transform: `translateX(-50%) scale(${scl("location_scale")})`, transformOrigin: "center top",
           fontFamily: `"${wl.font_family}", sans-serif`, fontSize: cqw(wl.font_size), fontWeight: wl.font_weight,
-          color: wl.color, opacity: wl.opacity, letterSpacing: "0.05em", whiteSpace: "nowrap", textShadow: "0 2px 12px rgba(0,0,0,0.8)", ...strokeOf(wl.border),
-        }}>Tokyo</div>
+          color: wl.color, opacity: wl.opacity, letterSpacing: `${config.location_letter_spacing ?? 0}px`, whiteSpace: "nowrap", textShadow: "0 2px 12px rgba(0,0,0,0.8)", ...strokeOf(wl.border),
+        }}>{(config.where_text || "").trim() || DESIGN_TEXT_DEFAULTS.where_text}</div>
       )}
     </div>
   )
@@ -654,6 +670,11 @@ function EqualizerControls({ eq, onChange }: {
         <Field label={`로고 위 간격 (${eq.gap_above_logo}px)`}>
           <input type="range" min={-500} max={500} step={1} value={eq.gap_above_logo}
             onChange={(e) => onChange({ gap_above_logo: Number(e.target.value) })}
+            className="w-full accent-[var(--color-primary,#a78bfa)]" />
+        </Field>
+        <Field label={`가로 위치 (${Math.round((eq.x ?? 0.5) * 100)}%)`}>
+          <input type="range" min={0} max={100} step={1} value={Math.round((eq.x ?? 0.5) * 100)}
+            onChange={(e) => onChange({ x: Number(e.target.value) / 100 })}
             className="w-full accent-[var(--color-primary,#a78bfa)]" />
         </Field>
       </div>

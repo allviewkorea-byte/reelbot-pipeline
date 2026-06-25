@@ -177,11 +177,13 @@ export interface MusicDesignConfig {
   location_scale?: number
   // 메인 로고 텍스트 중 밑줄('_') 문자에만 적용할 두께(미지정=로고 두께와 동일).
   logo_underline_weight?: number
+  // 라벨(지역명) 글자 간격(px, 기본 0).
+  location_letter_spacing?: number
   // 이퀄라이저(오디오 반응, 로고 위) 설정.
   equalizer?: EqualizerConfig
 }
 
-// 이퀄라이저 설정 — 산 모양 막대(로고 바로 위, 중앙 정렬).
+// 이퀄라이저 설정 — 오디오 반응 막대(로고 위, X 위치 조절).
 export interface EqualizerConfig {
   color1: string // 시작색(기본 핑크 #FF00AA)
   color2: string // 끝색(기본 파랑 #00AAFF)
@@ -189,6 +191,7 @@ export interface EqualizerConfig {
   max_height: number // 막대 최대 높이(px, 1080 기준)
   width: number // 이퀄 전체 너비(px)
   gap_above_logo: number // 로고 위 간격(px)
+  x: number // 가로 위치(0~1, 기본 0.5=중앙)
 }
 
 // 이퀄라이저 기본값(1080p 기준 px).
@@ -199,12 +202,13 @@ export const DEFAULT_EQUALIZER: EqualizerConfig = {
   max_height: 65,
   width: 260,
   gap_above_logo: 40,
+  x: 0.5,
 }
 
 // 미리보기 기본 텍스트(빈 값일 때 표시). playlist/where 는 Remotion 도 같은 기본값으로 폴백.
 export const DESIGN_TEXT_DEFAULTS = {
   playlist_text: "PLAY LIST",
-  where_text: "Where",
+  where_text: "Tokyo",
   preview_title: "시티팝 드라이브",
   preview_subtitle: "morning light on endless urban roads",
 } as const

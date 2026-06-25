@@ -118,6 +118,7 @@ export type DesignConfig = {
   subtitle_scale?: number;
   location_scale?: number;
   logo_underline_weight?: number; // 로고 텍스트의 '_' 문자에만 적용할 두께(미지정=로고 두께)
+  location_letter_spacing?: number; // 라벨 글자 간격(px, 기본 0)
   equalizer?: EqualizerCfg; // 오디오 반응 이퀄(로고 위, pill 막대)
 } | null;
 
@@ -129,6 +130,7 @@ type EqualizerCfg = {
   max_height?: number;
   width?: number;
   gap_above_logo?: number;
+  x?: number; // 가로 위치(0~1, 기본 0.5=중앙)
 };
 
 // 로고 텍스트를 '_'(밑줄) 런 단위로 분할 — '_' 문자에만 별도 두께 적용(나머지는 로고 두께).
@@ -225,7 +227,9 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
   const wlCfg = designConfig?.where_label ?? {};
   // 인라인 편집 텍스트(빈값=기본값 폴백). 영상 반영.
   const playlistText = (designConfig?.playlist_text || "").trim() || "PLAY LIST";
-  // where_text(#D 이전 'Where :' 접두어)는 더 이상 영상에 안 쓰임 — 지역명만 표시.
+  // 라벨 텍스트 = 입력값(where_text) 그대로. 비었으면 자동 지역명(vizSpec) 폴백. 접두사 없음.
+  const labelText = (designConfig?.where_text || "").trim() || locationEn;
+  const locLetterSpacing = designConfig?.location_letter_spacing ?? 0;
   const whereLabelHidden = designConfig?.where_label_hidden ?? true; // 기본 숨김
   const plFontFamily = PRESET_FONTS[plCfg.font_family ?? ""] ?? SERIF;
   const plFontWeight = plCfg.font_weight ?? 700;
@@ -353,6 +357,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
   const eqMaxH = eq.max_height ?? 65;
   const eqWidth = eq.width ?? 260;
   const eqGap = eq.gap_above_logo ?? 40;
+  const eqX = width * (eq.x ?? 0.5); // 이퀄 가로 위치(0.5=중앙)
   const logoTop = logoY - LARGE / 2; // 로고(세로 중앙 기준) 윗변
   const eqBottom = logoTop - eqGap; // 이퀄 막대 바닥(= 로고 위 eqGap)
   const eqBarSlot = eqWidth / EQ_BARS;
@@ -374,18 +379,18 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
         }}
       />
 
-      {/* #D 지역명 라벨 — 'Where :' 제거, 지역명만 표시. 위치는 location_x/location_y(기본 상단 중앙).
-          where_label_hidden(기본 true)이면 렌더 안 함(조건부 렌더). */}
-      {locationEn && !whereLabelHidden && (
+      {/* 라벨 — 'Where :' 접두사 없이 입력값(where_text) 그대로 표시. 위치는 location_x/location_y.
+          글자 간격은 location_letter_spacing. where_label_hidden(기본 true)이면 렌더 안 함. */}
+      {labelText && !whereLabelHidden && (
         <div
           style={{
             position: "absolute", left: locX, top: locY, transform: "translateX(-50%)", textAlign: "center",
             fontFamily: wlFontFamily, fontSize: wlFontSize, fontWeight: wlFontWeight,
-            letterSpacing: "0.05em", color: wlColor, opacity: wlOpacity,
+            letterSpacing: locLetterSpacing, color: wlColor, opacity: wlOpacity,
             textShadow: "0 2px 12px rgba(0,0,0,0.8)", whiteSpace: "nowrap", ...wlStroke,
           }}
         >
-          {locationEn}
+          {labelText}
         </div>
       )}
 
@@ -469,11 +474,11 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
         </div>
       )}
 
-      {/* 4) #C 이퀄 — 로고 바로 위, 중앙 정렬. 오디오 진폭만으로 막대 높이(산 모양 고정 아님), pill 막대. */}
+      {/* 4) #C 이퀄 — 로고 바로 위, 가로 위치 eq.x. 오디오 진폭만으로 막대 높이(산 모양 고정 아님), pill 막대. */}
       <div
         style={{
           position: "absolute",
-          left: logoX,
+          left: eqX,
           top: eqBottom - eqMaxH,
           width: eqWidth,
           height: eqMaxH,
