@@ -96,8 +96,9 @@ def get_channel_config() -> dict:
 
 # #35-A 디자인 설정(PLAY LIST·Where 폰트·크기·두께·색·투명도·테두리) — channel_status.design_config jsonb.
 # 프리셋 폰트 10종(프론트/Remotion 공통). UI 드롭다운·렌더 매핑이 같은 이름을 쓴다.
-# 한글 폰트 3종(제목·부제 한글 글자 fallback). 영어 폰트 뒤 스택으로 적용.
-KR_FONTS = ("Noto Serif KR", "Black Han Sans", "Nanum Myeongjo")
+# 한글 폰트(제목·부제 한글 글자 fallback). 영어 폰트 뒤 스택으로 적용.
+# SimgyeongHa(심경하체)는 R2/Google Fonts 가 아니라 레포 번들 TTF(Remotion staticFile + 프론트 @font-face).
+KR_FONTS = ("Noto Serif KR", "Black Han Sans", "Nanum Myeongjo", "SimgyeongHa")
 DEFAULT_KR_FONT = "Noto Serif KR"
 PRESET_FONTS = (
     "Montserrat", "Poppins", "Bebas Neue", "Oswald", "Anton",
@@ -198,7 +199,42 @@ def normalize_design_config(raw, *, include_all: bool = False) -> dict:
     for key in ("title_font_kr", "subtitle_font_kr"):
         v = raw.get(key)
         out[key] = v if v in KR_FONTS else DEFAULT_KR_FONT
+    # 요소 위치(0~1 비율, 미지정=기존 기본값 → 렌더 회귀 0).
+    for key, dflt in _POS_DEFAULTS.items():
+        out[key] = _num(raw.get(key), 0.0, 1.0, dflt)
+    # 이퀄라이저(산 모양, 로고 위) 설정.
+    out["equalizer"] = _norm_equalizer(raw.get("equalizer"))
     return out
+
+
+# 요소 위치 기본값(MusicViz 하드코딩 비율과 일치 → 미설정 시 회귀 0).
+_POS_DEFAULTS = {
+    "logo_x": 0.5, "logo_y": 0.5,
+    "title_x": 0.06, "title_y": 0.67,
+    "subtitle_x": 0.06, "subtitle_y": 0.755,
+    "location_x": 0.5, "location_y": 0.04,
+}
+
+# 이퀄라이저 기본값(1080p 기준 px) + 그라데이션 방향 화이트리스트.
+_EQ_DEFAULTS = {
+    "color1": "#FF00AA", "color2": "#00AAFF", "gradient": "center",
+    "max_height": 130, "width": 520, "gap_above_logo": 40,
+}
+_EQ_GRADIENTS = ("horizontal", "center")
+
+
+def _norm_equalizer(raw) -> dict:
+    d = _EQ_DEFAULTS
+    raw = raw if isinstance(raw, dict) else {}
+    g = raw.get("gradient")
+    return {
+        "color1": _hex(raw.get("color1"), d["color1"]),
+        "color2": _hex(raw.get("color2"), d["color2"]),
+        "gradient": g if g in _EQ_GRADIENTS else d["gradient"],
+        "max_height": _num(raw.get("max_height"), 20, 400, d["max_height"]),
+        "width": _num(raw.get("width"), 100, 1920, d["width"]),
+        "gap_above_logo": _num(raw.get("gap_above_logo"), 0, 600, d["gap_above_logo"]),
+    }
 
 
 # 인라인 편집 텍스트 필드 → 최대 길이(빈 문자열이면 렌더가 기본값 폴백).

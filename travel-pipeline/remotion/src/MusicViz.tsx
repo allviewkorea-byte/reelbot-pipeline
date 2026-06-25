@@ -1,6 +1,9 @@
 import {
   AbsoluteFill,
   Audio,
+  cancelRender,
+  continueRender,
+  delayRender,
   Img,
   interpolate,
   staticFile,
@@ -25,7 +28,6 @@ import { loadFont as loadLiterata } from "@remotion/google-fonts/Literata";
 import { loadFont as loadNotoSerifKR } from "@remotion/google-fonts/NotoSerifKR";
 import { loadFont as loadBlackHanSans } from "@remotion/google-fonts/BlackHanSans";
 import { loadFont as loadNanumMyeongjo } from "@remotion/google-fonts/NanumMyeongjo";
-import { moodColors } from "./colors";
 import { currentTrack, Track } from "./tracks";
 
 // Google Fonts(무료, OFL) — Playfair Display(세리프: PLAY LIST·부제), Dancing Script(필기: 곡 제목).
@@ -33,6 +35,21 @@ const playfair = loadPlayfair();
 const dancing = loadDancing();
 const SERIF = playfair.fontFamily;
 const SCRIPT = dancing.fontFamily;
+
+// 심경하체(SimgyeongHa) — Google Fonts 미존재. 레포 번들 TTF 를 render.mjs 가 publicDir 로 복사 →
+// staticFile + FontFace 로 로드(R2/신규 의존성 불필요). delayRender 로 렌더가 폰트 로드를 기다린다.
+const SIMGYEONGHA = "SimgyeongHa";
+if (typeof window !== "undefined" && typeof FontFace !== "undefined") {
+  const handle = delayRender("SimgyeongHa 폰트 로드");
+  const face = new FontFace(SIMGYEONGHA, `url(${staticFile("SimgyeongHa.ttf")}) format("truetype")`);
+  face
+    .load()
+    .then((loaded) => {
+      (document.fonts as unknown as { add(f: FontFace): void }).add(loaded);
+      continueRender(handle);
+    })
+    .catch((err) => cancelRender(err));
+}
 
 // #35-A 디자인 본부 프리셋 폰트 10종 — UI 드롭다운 이름 → 실제 fontFamily 매핑.
 const PRESET_FONTS: Record<string, string> = {
@@ -53,6 +70,8 @@ const PRESET_FONTS: Record<string, string> = {
   "Noto Serif KR": loadNotoSerifKR().fontFamily,
   "Black Han Sans": loadBlackHanSans().fontFamily,
   "Nanum Myeongjo": loadNanumMyeongjo().fontFamily,
+  // 심경하체(번들 TTF, FontFace 로 등록한 family 명 그대로).
+  SimgyeongHa: SIMGYEONGHA,
 };
 
 // 한글 폰트 기본값(제목·부제 미설정 시). 영어 폰트 스택의 두 번째 자리.
@@ -84,12 +103,46 @@ export type DesignConfig = {
   where_label_hidden?: boolean; // Where 라벨 숨김(미지정=true=숨김)
   title_font_kr?: string; // 제목 한글 폰트(미지정=Noto Serif KR)
   subtitle_font_kr?: string; // 부제 한글 폰트(미지정=Noto Serif KR)
+  // 요소 위치(0~1 비율, 미지정=기존 기본값 → 회귀 0).
+  logo_x?: number;
+  logo_y?: number;
+  title_x?: number;
+  title_y?: number;
+  subtitle_x?: number;
+  subtitle_y?: number;
+  location_x?: number;
+  location_y?: number;
+  equalizer?: EqualizerCfg; // 산 모양 이퀄(로고 위)
 } | null;
+
+// 이퀄라이저(산 모양, 로고 위) 설정 — 미지정 시 기본값.
+type EqualizerCfg = {
+  color1?: string;
+  color2?: string;
+  gradient?: "horizontal" | "center";
+  max_height?: number;
+  width?: number;
+  gap_above_logo?: number;
+};
 
 // 테두리(외곽선) — border.enabled 일 때만 -webkit-text-stroke + paint-order(깔끔한 외곽).
 function strokeStyle(b?: { enabled?: boolean; width?: number; color?: string }): React.CSSProperties {
   if (!b?.enabled) return {};
   return { WebkitTextStroke: `${b.width ?? 1}px ${b.color ?? "#000000"}`, paintOrder: "stroke fill" };
+}
+
+// 두 hex 색을 t(0~1)로 선형 보간(이퀄 그라데이션 막대별 색).
+function mixHex(a: string, b: string, t: number): string {
+  const p = (h: string) => {
+    const m = /^#?([0-9a-f]{6})$/i.exec(h.trim());
+    const n = m ? parseInt(m[1], 16) : 0;
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  };
+  const [r1, g1, b1] = p(a);
+  const [r2, g2, b2] = p(b);
+  const k = Math.max(0, Math.min(1, t));
+  const ch = (x: number, y: number) => Math.round(x + (y - x) * k);
+  return `rgb(${ch(r1, r2)}, ${ch(g1, g2)}, ${ch(b1, b2)})`;
 }
 
 // 곡 분석 결과(#20·#27). null 이면 mood 기반 색상으로 폴백.
@@ -122,15 +175,19 @@ const AUDIO = "audio.mp3";
 const BG = "bg.png";
 const CHARACTER = "character.png"; // #50 인물 투명 PNG(hasCharacter 일 때만 staticFile 로 존재)
 
-const BARS = 48;
+const EQ_BARS = 20; // 새 이퀄(산 모양) 막대 수
 const NUM_SAMPLES = 256; // visualizeAudio 는 2의 거듭제곱 필요.
 const SMOOTH_FRAMES = 2; // #34 활발한 반응 — 평균 윈도우 4→2(빠른 감쇠). 진폭·tilt·캡 불변.
 
-// 인트로 타임라인(초) — A 옵션 확정.
+// 인트로 타임라인(초).
 const STATIC_END = 3.5; // 0~3.5 정지(거대 PLAY LIST + 부제 + 곡제목)
-const FADE_END = 4.7; // 3.5~4.7 PLAY LIST 좌하단 이동·축소·페이드 + 이퀄 등장
-const TYPE_START = 4.9; // 4.9~6.1 타이프라이터 재등장
-const TYPE_END = 6.1; // 6.1~ 본 영상
+const FADE_END = 4.7; // 3.5~4.7 이퀄 등장
+const TYPE_START = 4.9; // 4.9~ 타이프라이터(손글씨) 재등장
+
+// 타이핑 속도(손글씨 느낌) — 글자당 프레임 간격(기존: 전체를 1.2s=36f 에 채움 → 길이별 ~1~3.6f/자).
+// 5f/자(=6자/초) 로 느리게. 제목 다 쓴 뒤 PAUSE → 부제 시작(순서 유지).
+const TITLE_CHAR_INTERVAL_FRAMES = 5;
+const TITLE_TO_SUBTITLE_PAUSE_FRAMES = 15;
 
 const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp" } as const;
 
@@ -139,11 +196,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
   const { width, height, fps } = useVideoConfig();
   const audioData = useAudioData(staticFile(AUDIO));
 
-  // ── 색상: vizSpec 우선, 없으면 mood 매핑 ──────────────────────────
-  const [mc1, mc2] = moodColors(mood);
-  const c1 = vizSpec?.primary_color || mc1;
-  const c2 = vizSpec?.secondary_color || mc2;
-  // #27: 모든 텍스트 순백 고정(vizSpec.text_color 무시). 이퀄·배경 색감만 mood 별 유지.
+  // #27: 모든 텍스트 순백 고정(vizSpec.text_color 무시). 이퀄 색은 design_config 가 결정.
   const textColor = "#FFFFFF";
   const subtitleEn = (vizSpec?.subtitle_en || "").trim();
   const locationEn = (vizSpec?.location_en || "").trim() || "City View"; // #33: 항상 WHERE 표시(폴백)
@@ -154,7 +207,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
   const wlCfg = designConfig?.where_label ?? {};
   // 인라인 편집 텍스트(빈값=기본값 폴백). 영상 반영.
   const playlistText = (designConfig?.playlist_text || "").trim() || "PLAY LIST";
-  const whereText = (designConfig?.where_text || "").trim() || "Where";
+  // where_text(#D 이전 'Where :' 접두어)는 더 이상 영상에 안 쓰임 — 지역명만 표시.
   const whereLabelHidden = designConfig?.where_label_hidden ?? true; // 기본 숨김
   const plFontFamily = PRESET_FONTS[plCfg.font_family ?? ""] ?? SERIF;
   const plFontWeight = plCfg.font_weight ?? 700;
@@ -189,9 +242,9 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
   const sOpacity = sCfg?.opacity ?? 1;
   const sStroke = strokeStyle(sCfg?.border);
 
-  // ── 이퀄 막대 진폭(최근 프레임 평균으로 감쇠) ──────────────────────
+  // ── 이퀄 막대 진폭(최근 프레임 평균으로 감쇠) — EQ_BARS 개 ──────────
   // 오디오 디코드가 안 되는 경우에도 막대가 보이도록 idle 사인으로 폴백(가시성 보장).
-  const values: number[] = new Array(BARS).fill(0);
+  const values: number[] = new Array(EQ_BARS).fill(0);
   if (audioData) {
     const windows = [];
     for (let d = 0; d < SMOOTH_FRAMES; d++) {
@@ -199,38 +252,37 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
         visualizeAudio({ audioData, frame: Math.max(0, frame - d), fps, numberOfSamples: NUM_SAMPLES }),
       );
     }
-    for (let i = 0; i < BARS; i++) {
-      const idx = 1 + Math.round((i / (BARS - 1)) * (NUM_SAMPLES * 0.45));
+    for (let i = 0; i < EQ_BARS; i++) {
+      const idx = 1 + Math.round((i / (EQ_BARS - 1)) * (NUM_SAMPLES * 0.45));
       let sum = 0;
       for (const w of windows) sum += w[idx] || 0;
       values[i] = sum / windows.length;
     }
   } else {
-    for (let i = 0; i < BARS; i++) {
+    for (let i = 0; i < EQ_BARS; i++) {
       values[i] = 0.22 + 0.16 * (0.5 + 0.5 * Math.sin(frame / 6 + i * 0.5));
     }
   }
 
-  // ── 레이아웃 ──────────────────────────────────────────────────────
-  const bandWidth = width * 0.66;
-  const left = (width - bandWidth) / 2;
-  const slot = bandWidth / BARS;
-  const barW = slot * 0.5;
-  const maxBarH = height * 0.12;
-  const baseBottom = height * 0.035;
-
   // ── 인트로: 부제/곡제목 정지 표시 페이드(0~4.7) ───────────────────
   const introOpacity = interpolate(frame, [STATIC_END * fps, FADE_END * fps], [1, 0], clamp);
 
-  // ── 이퀄 등장(3.5초부터 아래에서 상승, 4.7초 완전 등장 후 유지) ────
+  // ── 이퀄 등장(3.5초부터 페이드인, 4.7초 완전 등장 후 유지) ──────────
   const eqIn = interpolate(frame, [STATIC_END * fps, FADE_END * fps], [0, 1], clamp);
-  const eqTranslateY = (1 - eqIn) * (maxBarH + baseBottom + 60);
 
-  // ── PLAY LIST(메인 로고): 항상 화면 정중앙 고정. 이동·축소·페이드아웃 제거(페이드인만 유지). ──
+  // ── 요소 위치(0~1 비율 → px). 미지정 시 기존 기본값(회귀 0). #E 위치 슬라이더 ──
+  const logoX = width * (designConfig?.logo_x ?? 0.5); // 기본 가로 중앙
+  const logoY = height * (designConfig?.logo_y ?? 0.5); // 기본 세로 중앙
+  const titleLeft = width * (designConfig?.title_x ?? 0.06);
+  const titleTop = height * (designConfig?.title_y ?? 0.67);
+  const subLeft = width * (designConfig?.subtitle_x ?? 0.06);
+  const subTop = height * (designConfig?.subtitle_y ?? 0.755);
+  const locX = width * (designConfig?.location_x ?? 0.5);
+  const locY = height * (designConfig?.location_y ?? 0.04);
+
+  // ── PLAY LIST(메인 로고): 위치는 logo_x/logo_y(기본 정중앙). 이동·축소 없음(페이드인만). ──
   const LARGE = plFontSize; // 폰트 높이 ~30%(기본) — #35-A 설정 시 그 px.
   const plScale = 1; // 축소 없음 — 항상 원본 크기
-  const plX = width * 0.5; // 항상 가로 중앙
-  const plY = height * 0.5; // 항상 세로 중앙
   const plOpacity = interpolate(frame, [0, 0.5 * fps], [0, 1], clamp); // 등장 페이드인만(이후 1 유지)
 
   // ── 곡 제목(본 영상 구간별, 경계 페이드) ─────────────────────────
@@ -247,19 +299,25 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
     );
   }
 
-  // ── 좌하단 블록(부제 위 / 곡 제목 아래, 명확히 분리): 4.9~6.1 타이핑, 6.1~ 본영상 ──
-  const typeProgress = interpolate(frame, [TYPE_START * fps, TYPE_END * fps], [0, 1], clamp);
-  const inIntroType = frame < TYPE_END * fps;
-  const blLeft = width * 0.06;
-  const blTitleTop = height * 0.67; // #37 곡 제목(위)로 순서 뒤집기 + 6%p 위로(이퀄 간격 확보)
-  const blSubTop = height * 0.755; // #37 부제(아래) — 간격 8.5%p 유지(0.755-0.67), 6%p 위로
+  // ── 좌하단 블록 타이핑(손글씨): 제목 먼저(글자당 5f) → PAUSE → 부제. 끝나면 본영상 모드. ──
+  const titleStartF = TYPE_START * fps;
+  const titleLen = firstTitle.length;
+  const subLen = subtitleEn.length;
+  const titleEndF = titleStartF + titleLen * TITLE_CHAR_INTERVAL_FRAMES;
+  const subStartF = titleEndF + TITLE_TO_SUBTITLE_PAUSE_FRAMES;
+  const subEndF = subStartF + subLen * TITLE_CHAR_INTERVAL_FRAMES;
+  const inIntroType = frame < subEndF;
   let blSub = "";
   let blTitle = "";
   let blTitleOpacity = 0;
-  if (frame >= TYPE_START * fps) {
+  if (frame >= titleStartF) {
     if (inIntroType) {
-      blSub = subtitleEn.slice(0, Math.floor(typeProgress * subtitleEn.length));
-      blTitle = firstTitle.slice(0, Math.floor(typeProgress * firstTitle.length));
+      const titleChars = Math.max(0, Math.min(titleLen, Math.floor((frame - titleStartF) / TITLE_CHAR_INTERVAL_FRAMES)));
+      blTitle = firstTitle.slice(0, titleChars);
+      const subChars = frame >= subStartF
+        ? Math.max(0, Math.min(subLen, Math.floor((frame - subStartF) / TITLE_CHAR_INTERVAL_FRAMES)))
+        : 0;
+      blSub = subtitleEn.slice(0, subChars);
       blTitleOpacity = 1;
     } else {
       blSub = subtitleEn;
@@ -267,6 +325,19 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
       blTitleOpacity = titleOpacity; // 곡 전환 페이드
     }
   }
+
+  // ── 이퀄(산 모양) 설정 + 위치(로고 바로 위, 중앙 정렬) ──────────────
+  const eq = designConfig?.equalizer ?? {};
+  const eqColor1 = eq.color1 ?? "#FF00AA";
+  const eqColor2 = eq.color2 ?? "#00AAFF";
+  const eqGradient = eq.gradient ?? "center";
+  const eqMaxH = eq.max_height ?? 130;
+  const eqWidth = eq.width ?? 520;
+  const eqGap = eq.gap_above_logo ?? 40;
+  const logoTop = logoY - LARGE / 2; // 로고(세로 중앙 기준) 윗변
+  const eqBottom = logoTop - eqGap; // 이퀄 막대 바닥(= 로고 위 eqGap)
+  const eqBarSlot = eqWidth / EQ_BARS;
+  const eqBarW = eqBarSlot * 0.55;
 
   const shadow = "0 2px 14px rgba(0,0,0,0.78)";
 
@@ -284,18 +355,18 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
         }}
       />
 
-      {/* #37-B WHERE 라벨(상단 중앙, 'Where :' 표기) — #35-A 디자인 설정 적용(미설정 시 현재값).
-          where_label_hidden(기본 true)이면 렌더 안 함(완전 삭제 아님 — 조건부 렌더). */}
+      {/* #D 지역명 라벨 — 'Where :' 제거, 지역명만 표시. 위치는 location_x/location_y(기본 상단 중앙).
+          where_label_hidden(기본 true)이면 렌더 안 함(조건부 렌더). */}
       {locationEn && !whereLabelHidden && (
         <div
           style={{
-            position: "absolute", top: height * 0.04, width: "100%", textAlign: "center",
+            position: "absolute", left: locX, top: locY, transform: "translateX(-50%)", textAlign: "center",
             fontFamily: wlFontFamily, fontSize: wlFontSize, fontWeight: wlFontWeight,
             letterSpacing: "0.05em", color: wlColor, opacity: wlOpacity,
-            textShadow: "0 2px 12px rgba(0,0,0,0.8)", ...wlStroke,
+            textShadow: "0 2px 12px rgba(0,0,0,0.8)", whiteSpace: "nowrap", ...wlStroke,
           }}
         >
-          {whereText} : {locationEn}
+          {locationEn}
         </div>
       )}
 
@@ -327,13 +398,13 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
         </div>
       )}
 
-      {/* 2b) PLAY LIST — 거대 → 좌하단 이동·축소·페이드. #39 영상별 표시(showPlaylist=false 면 숨김, 기본 표시). */}
+      {/* 2b) PLAY LIST(메인 로고) — logo_x/logo_y 위치(기본 정중앙). #39 영상별 표시. */}
       {showPlaylist !== false && plOpacity > 0.001 && (
         <div
           style={{
             position: "absolute",
-            left: plX,
-            top: plY,
+            left: logoX,
+            top: logoY,
             transform: `translate(-50%, -50%) scale(${plScale})`,
             transformOrigin: "center",
             fontFamily: plFontFamily,
@@ -352,11 +423,11 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
         </div>
       )}
 
-      {/* 3) 좌하단 블록(타이핑 후 본 영상): 곡 제목(위) + 부제(아래). #37 순서 뒤집기. #36 디자인 설정 적용(미설정 시 현재값). */}
+      {/* 3) 제목·부제 블록(타이핑 후 본 영상): 위치는 title_x/y, subtitle_x/y(기본값=기존). */}
       {blSub && (
         <div
           style={{
-            position: "absolute", left: blLeft, top: blSubTop,
+            position: "absolute", left: subLeft, top: subTop,
             fontFamily: sFontFamily, fontStyle: sFontStyle, fontWeight: sFontWeight,
             color: sColor, opacity: sOpacity,
             fontSize: sFontSize, textShadow: shadow, maxWidth: width * 0.6, ...sStroke,
@@ -368,7 +439,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
       {blTitle && (
         <div
           style={{
-            position: "absolute", left: blLeft, top: blTitleTop, opacity: blTitleOpacity * tOpacityMul,
+            position: "absolute", left: titleLeft, top: titleTop, opacity: blTitleOpacity * tOpacityMul,
             fontFamily: tFontFamily, fontStyle: tFontStyle, fontWeight: tFontWeight, color: tColor,
             fontSize: tFontSize, textShadow: shadow, maxWidth: width * 0.7, ...tStroke,
           }}
@@ -377,28 +448,40 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
         </div>
       )}
 
-      {/* 4) 맨 아래 굵은 둥근 바 이퀄(3.5초부터 등장, 반투명·감쇠) */}
+      {/* 4) #C 새 이퀄(산 모양) — 로고 바로 위, 중앙 정렬. 가운데 높고 양끝 낮은 envelope. */}
       <div
-        style={{ position: "absolute", inset: 0, opacity: eqIn, transform: `translateY(${eqTranslateY}px)` }}
+        style={{
+          position: "absolute",
+          left: logoX,
+          top: eqBottom - eqMaxH,
+          width: eqWidth,
+          height: eqMaxH,
+          transform: "translateX(-50%)",
+          opacity: eqIn,
+          display: "flex",
+          alignItems: "flex-end",
+          justifyContent: "center",
+          gap: eqBarSlot - eqBarW,
+        }}
       >
         {values.map((v, i) => {
-          // #31 고역 롤오프 보정 5배 강화(1.6→5.0) — 진짜 음원에서도 우측 막대 활발히 움직임.
-          // amp 는 Math.min(1, …) 으로 1에 캡 → 최대 높이(12+maxBarH≈화면 13%)는 그대로(폭주 방지).
-          const tilt = 1 + (i / (BARS - 1)) * 5.0;
+          // 산 모양 envelope(가운데 1 → 양끝 0, 코사인). 오디오 진폭으로 변조.
+          const env = Math.cos(((i / (EQ_BARS - 1)) - 0.5) * Math.PI);
+          const tilt = 1 + (i / (EQ_BARS - 1)) * 5.0; // 고역 롤오프 보정(기존 결 유지)
           const amp = Math.min(1, v * 2.4 * tilt);
-          const h = Math.min(maxBarH + 12, Math.max(16, 12 + amp * maxBarH)); // 캡 + 최소 높이
+          const h = Math.max(6, (0.3 + 0.7 * amp) * env * eqMaxH); // 최소 높이 + envelope
+          // 그라데이션: horizontal=좌→우 / center=가운데→바깥.
+          const tCol = eqGradient === "center"
+            ? Math.abs((i / (EQ_BARS - 1)) - 0.5) * 2
+            : i / (EQ_BARS - 1);
           return (
             <div
               key={i}
               style={{
-                position: "absolute",
-                bottom: baseBottom,
-                left: left + i * slot + (slot - barW) / 2,
-                width: barW,
+                width: eqBarW,
                 height: h,
-                borderRadius: barW,
-                opacity: 0.82,
-                background: `linear-gradient(to top, ${c1}, ${c2})`,
+                borderRadius: eqBarW,
+                background: mixHex(eqColor1, eqColor2, tCol),
               }}
             />
           );

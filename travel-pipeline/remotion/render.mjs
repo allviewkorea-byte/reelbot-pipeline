@@ -48,6 +48,8 @@ const browserExecutable =
 const publicDir = mkdtempSync(path.join(tmpdir(), "rmpub-"));
 copyFileSync(values.audio, path.join(publicDir, "audio.mp3"));
 copyFileSync(values.bg, path.join(publicDir, "bg.png"));
+// 심경하체(번들 TTF) — staticFile("SimgyeongHa.ttf")로 FontFace 로드. 레포 assets 에서 복사.
+copyFileSync(path.join(root, "assets", "SimgyeongHa.ttf"), path.join(publicDir, "SimgyeongHa.ttf"));
 // #50 인물 PNG(투명) — 주어졌을 때만 staticFile("character.png")로 스테이징(없으면 기존 동작).
 if (values.character) {
   copyFileSync(values.character, path.join(publicDir, "character.png"));

@@ -125,9 +125,14 @@ export const DESIGN_PRESET_FONTS = [
 
 // 한글 폰트 프리셋(제목·부제 한글 글자 fallback). 영어 폰트 뒤 스택으로 적용.
 export const DESIGN_PRESET_FONTS_KR = [
-  "Noto Serif KR", "Black Han Sans", "Nanum Myeongjo",
+  "Noto Serif KR", "Black Han Sans", "Nanum Myeongjo", "SimgyeongHa",
 ] as const
 export const DESIGN_KR_FONT_DEFAULT = "Noto Serif KR"
+
+// 폰트 표시 라벨(값과 다른 한글 라벨이 필요한 경우만). 미지정이면 값 그대로 표시.
+export const DESIGN_FONT_LABELS: Record<string, string> = {
+  SimgyeongHa: "심경하체",
+}
 
 export interface TextBorder {
   enabled: boolean
@@ -156,6 +161,37 @@ export interface MusicDesignConfig {
   subtitle_font_kr?: string // 부제 한글 폰트(기본 Noto Serif KR)
   preview_title?: string
   preview_subtitle?: string
+  // 요소 위치(0~1 비율, 미지정=기존 기본값 → 회귀 0). 로고는 중앙(0.5,0.5).
+  logo_x?: number
+  logo_y?: number
+  title_x?: number
+  title_y?: number
+  subtitle_x?: number
+  subtitle_y?: number
+  location_x?: number
+  location_y?: number
+  // 이퀄라이저(산 모양, 로고 위) 설정.
+  equalizer?: EqualizerConfig
+}
+
+// 이퀄라이저 설정 — 산 모양 막대(로고 바로 위, 중앙 정렬).
+export interface EqualizerConfig {
+  color1: string // 시작색(기본 핑크 #FF00AA)
+  color2: string // 끝색(기본 파랑 #00AAFF)
+  gradient: "horizontal" | "center" // 좌→우 / 가운데→바깥
+  max_height: number // 막대 최대 높이(px, 1080 기준)
+  width: number // 이퀄 전체 너비(px)
+  gap_above_logo: number // 로고 위 간격(px)
+}
+
+// 이퀄라이저 기본값(1080p 기준 px).
+export const DEFAULT_EQUALIZER: EqualizerConfig = {
+  color1: "#FF00AA",
+  color2: "#00AAFF",
+  gradient: "center",
+  max_height: 130,
+  width: 520,
+  gap_above_logo: 40,
 }
 
 // 미리보기 기본 텍스트(빈 값일 때 표시). playlist/where 는 Remotion 도 같은 기본값으로 폴백.
