@@ -196,31 +196,47 @@ def generate_vibe_intro(theme: dict, viz_spec: dict | None) -> str:
 
 
 # ── 제목 ──────────────────────────────────────────────────────────────
-# #52-E 자극적 후킹 카피 — LLM 으로 매번 다른 클릭 유도 카피 생성. 실패 시 기존 풀 폴백.
-_HOOK_SYSTEM = (
-    "너는 유튜브 음악 플레이리스트 썸네일용 한국어 후킹 카피라이터다. "
-    "도파민·중독·미쳤다·취하다·한계돌파·홀린다 같은 강한 클릭 유도 표현을 쓴다. "
-    "장르 분위기에 맞춰라(힙합=강렬, 발라드·R&B=감성, BGM=편안/고급). "
-    "규칙: 한국어 한 줄, 18자 이내, 따옴표·이모지·해시태그·장르 영어명 없이 카피 문구만 출력. "
-    "예: 이 리듬감에 중독됩니다 / 도입부부터 미쳤다 진짜 / 새벽 감성에 취하는 밤 / 카페에서 틀어놓기만 하세요"
+# LLM 으로 한국어 감성 카피 + 영어 장르·분위기 카피를 한 번에 생성.
+# 형식: playlist🎧 {한국어} | {영어} | 광고없음
+_TITLE_SYSTEM = (
+    "너는 유튜브 음악 플레이리스트 제목 카피라이터다. "
+    "한국어 카피와 영어 카피를 | 로 구분해 한 줄로 출력한다. "
+    "규칙:\n"
+    "1. 출력 형식: 한국어 카피 | 영어 카피  (이것만 출력, 따옴표·설명 금지)\n"
+    "2. 한국어 카피: 시청자의 지금 이 순간 상황을 묘사하거나 궁금증·FOMO 유발. "
+    "감성적이고 자극적으로. 장르 영어명 금지. 20자 이내.\n"
+    "3. 영어 카피: 직역이 아닌 자연스러운 의역. 장르·분위기 키워드 포함(글로벌 SEO). "
+    "짧고 강하게. 30자 이내.\n"
+    "4. 예:\n"
+    "   첫 곡부터 심장 건드림 | cafe vibes that hit different\n"
+    "   식어가는 라떼처럼 너도 그렇게 | soft late night cafe pop\n"
+    "   틀자마자 기분이 달라지는 | breezy morning drive city pop\n"
+    "   도입부부터 미쳤다 진짜 | hiphop beats that go hard"
 )
 
 
-def _hook_copy(theme: dict, vs: dict) -> str:
-    """LLM 후킹 카피 1개(매번 다름). 실패/미설정 시 _COPY_POOL(결정적) 폴백."""
+def _generate_title_copy(theme: dict, vs: dict) -> tuple[str, str]:
+    """LLM 으로 한국어+영어 카피 생성. 실패 시 결정적 폴백."""
     try:
         from services import music_lyrics
         if music_lyrics.is_available():
-            gen = music_genres.label_kr(music_genres.classify_theme(theme) or "") or theme.get("genre", "")
+            gen_kr = music_genres.label_kr(music_genres.classify_theme(theme) or "") or theme.get("genre", "")
+            gen_en = _title_genre_en(theme, vs)
             mood = str(vs.get("dominant_emotion") or vs.get("mood_category") or theme.get("mood") or "")
-            user = f"장르: {gen} / 분위기: {mood} / 제목: {theme.get('title_kr', '')}"
-            raw = music_lyrics._call(_HOOK_SYSTEM, user, max_tokens=80)
-            copy = (raw or "").strip().splitlines()[0].strip().strip('"').strip("'").strip()
-            if copy and len(copy) <= 30 and "|" not in copy:
-                return copy
-    except Exception as e:  # noqa: BLE001 - 카피 생성 실패는 폴백
-        logger.debug("[music-meta] 후킹 카피 LLM 실패(폴백): %s", e)
-    return _copy(theme, vs)
+            situ = str(theme.get("situation") or "")
+            user = (
+                f"장르(한국어): {gen_kr}\n장르(영어): {gen_en}\n"
+                f"분위기: {mood}\n상황: {situ}\n제목: {theme.get('title_kr', '')}"
+            )
+            raw = music_lyrics._call(_TITLE_SYSTEM, user, max_tokens=100)
+            line = (raw or "").strip().splitlines()[0].strip().strip('"').strip("'").strip()
+            if "|" in line:
+                parts = [p.strip() for p in line.split("|", 1)]
+                if len(parts) == 2 and parts[0] and parts[1]:
+                    return parts[0][:40], parts[1][:50]
+    except Exception as e:  # noqa: BLE001
+        logger.debug("[music-meta] 제목 카피 LLM 실패(폴백): %s", e)
+    return _copy(theme, vs), _title_genre_en(theme, vs)
 
 
 def _title_genre_en(theme: dict, vs: dict) -> str:
@@ -235,16 +251,16 @@ def _title_genre_en(theme: dict, vs: dict) -> str:
 
 
 def build_title(theme: dict, viz_spec: dict | None) -> str:
-    """#52-E playlist🎧 {자극적 카피} | {장르 영문} | 광고없음. 100자 이내. '광고없음' 항상 끝."""
+    """playlist🎧 {한국어 감성 카피} | {영어 장르·분위기 카피} | 광고없음. 100자 이내."""
     vs = viz_spec or {}
-    copy = _hook_copy(theme, vs)
-    gen = _title_genre_en(theme, vs)
-    title = f"playlist🎧 {copy} | {gen} | 광고없음".strip()
+    ko_copy, en_copy = _generate_title_copy(theme, vs)
+    title = f"playlist🎧 {ko_copy} | {en_copy} | 광고없음".strip()
     if len(title) > 100:
-        # '광고없음' 보존 — 카피를 줄여 100자 보장.
-        keep = f"playlist🎧  | {gen} | 광고없음"
+        keep = "playlist🎧  |  | 광고없음"
         room = max(4, 100 - len(keep))
-        title = f"playlist🎧 {copy[:room]} | {gen} | 광고없음"
+        ko_room = room * 2 // 3
+        en_room = room - ko_room
+        title = f"playlist🎧 {ko_copy[:ko_room]} | {en_copy[:en_room]} | 광고없음"
     return title
 
 
