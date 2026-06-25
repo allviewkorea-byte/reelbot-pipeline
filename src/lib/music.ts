@@ -123,6 +123,12 @@ export const DESIGN_PRESET_FONTS = [
   "Bodoni Moda", "Young Serif", "Literata",
 ] as const
 
+// 한글 폰트 프리셋(제목·부제 한글 글자 fallback). 영어 폰트 뒤 스택으로 적용.
+export const DESIGN_PRESET_FONTS_KR = [
+  "Noto Serif KR", "Black Han Sans", "Nanum Myeongjo",
+] as const
+export const DESIGN_KR_FONT_DEFAULT = "Noto Serif KR"
+
 export interface TextBorder {
   enabled: boolean
   width: number
@@ -146,6 +152,8 @@ export interface MusicDesignConfig {
   playlist_text?: string
   where_text?: string
   where_label_hidden?: boolean // Where 라벨 영상 숨김(기본 true=숨김)
+  title_font_kr?: string // 제목 한글 폰트(기본 Noto Serif KR)
+  subtitle_font_kr?: string // 부제 한글 폰트(기본 Noto Serif KR)
   preview_title?: string
   preview_subtitle?: string
 }

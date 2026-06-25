@@ -96,10 +96,14 @@ def get_channel_config() -> dict:
 
 # #35-A 디자인 설정(PLAY LIST·Where 폰트·크기·두께·색·투명도·테두리) — channel_status.design_config jsonb.
 # 프리셋 폰트 10종(프론트/Remotion 공통). UI 드롭다운·렌더 매핑이 같은 이름을 쓴다.
+# 한글 폰트 3종(제목·부제 한글 글자 fallback). 영어 폰트 뒤 스택으로 적용.
+KR_FONTS = ("Noto Serif KR", "Black Han Sans", "Nanum Myeongjo")
+DEFAULT_KR_FONT = "Noto Serif KR"
 PRESET_FONTS = (
     "Montserrat", "Poppins", "Bebas Neue", "Oswald", "Anton",
     "Archivo", "Inter", "DM Sans", "Playfair Display", "Cormorant Garamond",
     "Bodoni Moda", "Young Serif", "Literata",
+    *KR_FONTS,
 )
 
 # UI 초기값(GET 기본). 비어 있을 때의 '렌더'는 MusicViz 가 현재 하드코딩값으로 폴백하므로,
@@ -190,6 +194,10 @@ def normalize_design_config(raw, *, include_all: bool = False) -> dict:
     # Where 라벨 영상 숨김(기본 True=숨김). bool 아니면 기본값.
     wlh = raw.get("where_label_hidden")
     out["where_label_hidden"] = wlh if isinstance(wlh, bool) else True
+    # 제목·부제 한글 폰트(KR_FONTS 화이트리스트, 미지정/위반=기본 Noto Serif KR).
+    for key in ("title_font_kr", "subtitle_font_kr"):
+        v = raw.get(key)
+        out[key] = v if v in KR_FONTS else DEFAULT_KR_FONT
     return out
 
 
