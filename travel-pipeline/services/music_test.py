@@ -181,11 +181,12 @@ def render_test(mood: str | None = None, *, seconds: float = 10.0) -> dict:
         video_url = r2_storage.upload_music_video(str(out), "test", name, content_type="video/mp4")
 
         # 배경(깨끗한 bg) → 검토 카드 썸네일 + 재렌더 배경(첫프레임=텍스트 박힘 회피).
+        # ⚠️ 큐 API 는 thumbnail_url 을 music_thumbnail_url(slug, mix_id) 로 '재구성'하므로
+        #    반드시 표준 썸네일 경로(music-thumbnails/{slug}/{mix_id}.png)에 올려야 미리보기가 뜬다.
         thumb_key: str | None = None
         try:
-            bg_name = f"{vid}_bg.png"
-            r2_storage.upload_music_video(str(bg), "test", bg_name, content_type="image/png")
-            thumb_key = r2_storage.music_video_key("test", bg_name)
+            r2_storage.upload_music_thumbnail(str(bg), slug, vid)
+            thumb_key = r2_storage.music_thumbnail_key(slug, vid)
         except Exception as e:  # noqa: BLE001 - 배경 업로드 실패해도 진행
             logger.warning("[music-test] 배경 업로드 실패(영상은 유효): %s", e)
 
