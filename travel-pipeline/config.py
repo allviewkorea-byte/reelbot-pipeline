@@ -5,6 +5,10 @@ from typing import List
 # 리포 루트 (이 파일은 travel-pipeline/ 아래에 있고 public/ 은 루트에 있음)
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# Claude(Anthropic) 모델 — 전 백엔드 공통 기본(비용 절감: Haiku). env CLAUDE_MODEL 로 한 곳에서
+# 오버라이드 가능(Railway 등). 개별 서비스의 MUSIC_*_MODEL env 가 있으면 그쪽이 우선.
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
+
 # 기본 캐릭터: 김이안 (char_1779198264788) — 콘티 reference 일관성 유지용
 DEFAULT_CHARACTER_ID = "char_1779198264788"
 _DEFAULT_CHARACTER_FRONT = os.path.join(

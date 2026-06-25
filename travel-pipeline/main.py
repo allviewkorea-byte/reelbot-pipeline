@@ -14,7 +14,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from config import Config, BANGKOK_SPOTS
+from config import Config, BANGKOK_SPOTS, CLAUDE_MODEL
 from character import generate_character_image
 from streetview import capture_street_view, check_street_view_availability
 from video_gen import generate_video_from_image
@@ -89,7 +89,7 @@ def generate_scenario(country: str, duration_min: int, config: Config | None = N
 
     client = anthropic.Anthropic(api_key=config.anthropic_api_key)
     message = client.messages.create(
-        model="claude-opus-4-7",
+        model=CLAUDE_MODEL,
         max_tokens=2048,
         system=system_prompt,
         messages=[{

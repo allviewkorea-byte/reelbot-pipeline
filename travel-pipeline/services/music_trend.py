@@ -16,13 +16,14 @@ import os
 
 import httpx
 
+from config import CLAUDE_MODEL
 from services import music_lyrics
 from services.music_store import _http_err, _supabase_cfg
 
 logger = logging.getLogger(__name__)
 
 _TABLE = "music_trends"
-_DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+_DEFAULT_MODEL = CLAUDE_MODEL
 
 # 글로벌 음악 플레이리스트 키워드(영어 — 헌법 장르·상황 기반). quota 위해 7개로 제한.
 DEFAULT_KEYWORDS = [

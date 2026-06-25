@@ -8,8 +8,8 @@ Supabase music_themes 에 기록한다. 보컬/연주 라우팅(type)은 헌법 
   - Anthropic 호출 + JSON 추출: services.music_lyrics._call / _extract_json
   - Supabase PostgREST: services.music_store._supabase_cfg / _http_err 패턴
 
-모델: 기본 claude-haiku-4-5-20251001(주제 뽑기는 조합·판단이라 싼 모델로 충분),
-env MUSIC_THEME_MODEL 로 교체. 가사만 Sonnet/Opus(music_lyrics) 를 탄다.
+모델: 공통 CLAUDE_MODEL(기본 Haiku — 주제 뽑기는 조합·판단이라 싼 모델로 충분),
+env MUSIC_THEME_MODEL 로 개별 교체.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from pathlib import Path
 
 import httpx
 
+from config import CLAUDE_MODEL
 from services import music_lyrics
 from services.music_store import _http_err, _supabase_cfg
 
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 _THEMES_PATH = Path(__file__).resolve().parent.parent / "prompts" / "music_themes.md"
 
 _TABLE = "music_themes"
-_DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+_DEFAULT_MODEL = CLAUDE_MODEL
 
 # 스키마 검증.
 _SLUG_RE = re.compile(r"^[a-z0-9_]+$")

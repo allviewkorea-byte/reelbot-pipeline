@@ -5,8 +5,8 @@
 ③자기검토(곡당 1콜): 깊이/여운/단조/클리셰 채점 → 어느 항목이든 7 미만이면 재작성
 
 가사 품질의 유일한 기준점은 prompts/lyrics_guidelines.md(가사 헌법)이며, 매 호출
-로드해 프롬프트에 박는다. 모델은 기본 claude-opus-4-8(품질 우선), env MUSIC_LYRICS_MODEL
-로 교체(검수 시 sonnet-4-6 비교용). anthropic SDK(>=0.40.0, 기존 의존성) 사용.
+로드해 프롬프트에 박는다. 모델은 공통 CLAUDE_MODEL(기본 Haiku, 비용 절감), env
+MUSIC_LYRICS_MODEL 로 개별 교체 가능. anthropic SDK(>=0.40.0, 기존 의존성) 사용.
 """
 
 from __future__ import annotations
@@ -16,13 +16,15 @@ import logging
 import os
 from pathlib import Path
 
+from config import CLAUDE_MODEL
+
 logger = logging.getLogger(__name__)
 
 # 가사 헌법 경로(이 파일 기준 ../prompts/).
 _GUIDELINES_PATH = Path(__file__).resolve().parent.parent / "prompts" / "lyrics_guidelines.md"
 
-# 기본 모델 — 품질 우선(채널의 영혼). env 한 줄로 교체 가능.
-_DEFAULT_MODEL = "claude-opus-4-8"
+# 기본 모델 — 공통 CLAUDE_MODEL(비용 절감 Haiku). MUSIC_LYRICS_MODEL env 로 개별 오버라이드.
+_DEFAULT_MODEL = CLAUDE_MODEL
 
 # 자기검토 통과 바(원칙 6): 4기준 모두 이 점수 이상이어야 채택.
 _REVIEW_BAR = 7
