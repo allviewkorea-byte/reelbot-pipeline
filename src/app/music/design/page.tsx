@@ -121,91 +121,93 @@ export default function MusicDesignPage() {
   }, [config])
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 overflow-auto p-4 md:p-6">
+    <div className="flex h-full min-h-0 flex-col overflow-auto">
       <link rel="stylesheet" href={FONT_LINK} />
       {/* 심경하체 미리보기 폰트(번들 TTF) — globals.css 무수정, 컴포넌트 스코프 주입. */}
       <style dangerouslySetInnerHTML={{ __html: SIMGYEONGHA_FACE }} />
-      <header className="flex items-center gap-3 pl-10 md:pl-0">
-        <Link href="/music" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-white/5 hover:text-foreground">
-          <ArrowLeft className="h-4 w-4" /> 대시보드
-        </Link>
-        <div>
-          <h1 className="text-xl font-semibold text-foreground">디자인 본부</h1>
-          <p className="text-sm text-muted-foreground">PLAY LIST 로고와 Where 라벨의 폰트·크기·두께·색·투명도·테두리를 조정합니다.</p>
-        </div>
-      </header>
 
       {loading ? (
         <div className="flex h-40 items-center justify-center text-muted-foreground"><Loader2 className="h-6 w-6 animate-spin" /></div>
       ) : (
         <>
-          <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-            <TargetPanel
-              title="메인 로고"
-              textValue={config.playlist_text ?? ""}
-              textDefault={DESIGN_TEXT_DEFAULTS.playlist_text}
-              onTextChange={(v) => patchText("playlist_text", v)}
-              previewScale={0.18}
-              value={config.play_list}
-              sizeRange={[80, 1200]}
-              onChange={(p) => patchTarget("play_list", p)}
-            />
-            <TargetPanel
-              title="Where : ___ 라벨"
-              textValue={config.where_text ?? ""}
-              textDefault={DESIGN_TEXT_DEFAULTS.where_text}
-              textSuffix=" : Tokyo"
-              onTextChange={(v) => patchText("where_text", v)}
-              previewScale={1}
-              value={config.where_label}
-              sizeRange={[12, 240]}
-              onChange={(p) => patchTarget("where_label", p)}
-              hidden={config.where_label_hidden ?? true}
-              onHiddenChange={(v) => setConfig((c) => ({ ...c, where_label_hidden: v }))}
-            />
-            <TargetPanel
-              title="제목 (곡 제목 · 미리보기 전용)"
-              textValue={config.preview_title ?? ""}
-              textDefault={DESIGN_TEXT_DEFAULTS.preview_title}
-              onTextChange={(v) => patchText("preview_title", v)}
-              previewScale={0.6}
-              withItalic
-              value={config.title}
-              sizeRange={[24, 480]}
-              onChange={(p) => patchTarget("title", p)}
-              krFont={config.title_font_kr ?? DESIGN_KR_FONT_DEFAULT}
-              onKrFontChange={(v) => setConfig((c) => ({ ...c, title_font_kr: v }))}
-            />
-            <TargetPanel
-              title="부제목 (미리보기 전용)"
-              textValue={config.preview_subtitle ?? ""}
-              textDefault={DESIGN_TEXT_DEFAULTS.preview_subtitle}
-              onTextChange={(v) => patchText("preview_subtitle", v)}
-              previewScale={0.7}
-              withItalic
-              value={config.subtitle}
-              sizeRange={[16, 360]}
-              onChange={(p) => patchTarget("subtitle", p)}
-              krFont={config.subtitle_font_kr ?? DESIGN_KR_FONT_DEFAULT}
-              onKrFontChange={(v) => setConfig((c) => ({ ...c, subtitle_font_kr: v }))}
-            />
+          {/* 상단 고정 미리보기 — 스크롤해도 항상 보임. 모든 설정(폰트·크기·색·위치·이퀄) 실시간 반영. */}
+          <div className="sticky top-0 z-20 border-b border-border bg-background/95 px-4 pb-3 pt-3 backdrop-blur md:px-6">
+            <div className="mb-2 flex items-center gap-3 pl-10 md:pl-0">
+              <Link href="/music" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-white/5 hover:text-foreground">
+                <ArrowLeft className="h-4 w-4" /> 대시보드
+              </Link>
+              <div className="min-w-0 flex-1">
+                <h1 className="text-base font-semibold text-foreground">디자인 본부</h1>
+                <p className="truncate text-xs text-muted-foreground">아래 컨트롤의 모든 설정이 이 미리보기에 실시간 반영됩니다.</p>
+              </div>
+              <button
+                type="button"
+                onClick={save}
+                disabled={saving}
+                className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60"
+              >
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} 저장
+              </button>
+            </div>
+            <UnifiedPreview config={config} />
           </div>
 
-          {/* #E 레이아웃(위치 조정) — 16:9 미리보기 + 요소별 X/Y 슬라이더 */}
-          <LayoutSection config={config} onPos={patchPos} onScale={patchScale} />
+          {/* 하단 컨트롤(스크롤 영역) — 각 패널은 미리보기 없이 컴팩트. */}
+          <div className="flex flex-col gap-4 p-4 md:p-6">
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+              <TargetPanel
+                title="메인 로고"
+                textValue={config.playlist_text ?? ""}
+                textDefault={DESIGN_TEXT_DEFAULTS.playlist_text}
+                onTextChange={(v) => patchText("playlist_text", v)}
+                value={config.play_list}
+                sizeRange={[80, 1200]}
+                onChange={(p) => patchTarget("play_list", p)}
+              />
+              <TargetPanel
+                title="Where : ___ 라벨"
+                textValue={config.where_text ?? ""}
+                textDefault={DESIGN_TEXT_DEFAULTS.where_text}
+                textSuffix=" : Tokyo"
+                onTextChange={(v) => patchText("where_text", v)}
+                value={config.where_label}
+                sizeRange={[12, 240]}
+                onChange={(p) => patchTarget("where_label", p)}
+                hidden={config.where_label_hidden ?? true}
+                onHiddenChange={(v) => setConfig((c) => ({ ...c, where_label_hidden: v }))}
+              />
+              <TargetPanel
+                title="제목 (곡 제목 · 미리보기 전용)"
+                textValue={config.preview_title ?? ""}
+                textDefault={DESIGN_TEXT_DEFAULTS.preview_title}
+                onTextChange={(v) => patchText("preview_title", v)}
+                withItalic
+                value={config.title}
+                sizeRange={[24, 480]}
+                onChange={(p) => patchTarget("title", p)}
+                krFont={config.title_font_kr ?? DESIGN_KR_FONT_DEFAULT}
+                onKrFontChange={(v) => setConfig((c) => ({ ...c, title_font_kr: v }))}
+              />
+              <TargetPanel
+                title="부제목 (미리보기 전용)"
+                textValue={config.preview_subtitle ?? ""}
+                textDefault={DESIGN_TEXT_DEFAULTS.preview_subtitle}
+                onTextChange={(v) => patchText("preview_subtitle", v)}
+                withItalic
+                value={config.subtitle}
+                sizeRange={[16, 360]}
+                onChange={(p) => patchTarget("subtitle", p)}
+                krFont={config.subtitle_font_kr ?? DESIGN_KR_FONT_DEFAULT}
+                onKrFontChange={(v) => setConfig((c) => ({ ...c, subtitle_font_kr: v }))}
+              />
+            </div>
 
-          {/* #C 이퀄라이저(산 모양, 로고 위) 설정 */}
-          <EqualizerSection eq={{ ...DEFAULT_EQUALIZER, ...config.equalizer }} onChange={patchEq} />
+            {/* 레이아웃(위치·크기 슬라이더) — 미리보기는 상단 통합 미리보기로 대체. */}
+            <LayoutControls config={config} onPos={patchPos} onScale={patchScale} />
 
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <button
-              type="button"
-              onClick={save}
-              disabled={saving}
-              className="inline-flex items-center justify-center gap-1.5 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60"
-            >
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} 저장
-            </button>
+            {/* 이퀄라이저 설정(색·그라데이션·사이즈) — 미리보기는 상단 통합 미리보기로 대체. */}
+            <EqualizerControls eq={{ ...DEFAULT_EQUALIZER, ...config.equalizer }} onChange={patchEq} />
+
             <span className="text-xs text-muted-foreground">다음 영상부터 자동 적용. 기존 영상은 <Link href="/music/queue" className="text-primary hover:underline">검토 대기</Link>에서 [재렌더]로 반영하세요.</span>
           </div>
         </>
@@ -275,7 +277,7 @@ function EditableText({ value, placeholder, onCommit }: {
 
 function TargetPanel({
   title, textValue, textDefault, textSuffix = "", onTextChange,
-  previewScale, value, sizeRange, onChange, withItalic = false,
+  value, sizeRange, onChange, withItalic = false,
   hidden, onHiddenChange, krFont, onKrFontChange,
 }: {
   title: string
@@ -283,7 +285,6 @@ function TargetPanel({
   textDefault: string
   textSuffix?: string
   onTextChange: (value: string) => void
-  previewScale: number
   value: TextStyleConfig
   sizeRange: [number, number]
   onChange: (patch: Partial<TextStyleConfig>) => void
@@ -293,43 +294,17 @@ function TargetPanel({
   krFont?: string
   onKrFontChange?: (value: string) => void
 }) {
-  const stroke = value.border.enabled
-    ? { WebkitTextStroke: `${value.border.width}px ${value.border.color}`, paintOrder: "stroke fill" as const }
-    : {}
-
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
-      <h2 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
-        {title}
-        <span className="inline-flex items-center gap-0.5 text-[11px] font-normal text-muted-foreground"><Pencil className="h-3 w-3" /> 텍스트 클릭 편집</span>
-      </h2>
+    <div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3">
+      <h2 className="text-sm font-semibold text-foreground">{title}</h2>
 
-      {/* 미리보기 — 어두운 배경(영상과 유사). 텍스트 클릭 → 인라인 편집. */}
-      <div className="flex h-40 items-center justify-center overflow-hidden rounded-lg" style={{ background: "#0c1020" }}>
-        <div
-          style={{
-            display: "inline-flex",
-            alignItems: "baseline",
-            // 영어+한글 스택(한글 폰트 패널이 있으면 fallback 적용). 없으면 기존과 동일.
-            fontFamily: onKrFontChange
-              ? `"${value.font_family}", "${krFont ?? DESIGN_KR_FONT_DEFAULT}", sans-serif`
-              : `"${value.font_family}", sans-serif`,
-            fontSize: value.font_size,
-            fontWeight: value.font_weight,
-            fontStyle: withItalic && value.italic ? "italic" : "normal",
-            color: value.color,
-            opacity: value.opacity,
-            letterSpacing: "0.02em",
-            whiteSpace: "nowrap",
-            transform: `scale(${previewScale})`,
-            transformOrigin: "center",
-            ...stroke,
-          }}
-        >
+      {/* 텍스트(클릭 편집) — 시각 미리보기는 상단 통합 미리보기에 반영. */}
+      <Field label={<span className="inline-flex items-center gap-0.5">텍스트 <Pencil className="h-3 w-3" /> 클릭 편집</span>}>
+        <div className="flex min-h-9 items-center rounded-md border border-border bg-background px-2 text-sm text-foreground">
           <EditableText value={textValue} placeholder={textDefault} onCommit={onTextChange} />
-          {textSuffix && <span>{textSuffix}</span>}
+          {textSuffix && <span className="text-muted-foreground">{textSuffix}</span>}
         </div>
-      </div>
+      </Field>
 
       {/* 영상에서 라벨 숨김(Where 전용) — 체크 시 영상에 렌더 안 함(기본 체크). */}
       {onHiddenChange && (
@@ -463,59 +438,101 @@ function mixHex(a: string, b: string, t: number): string {
   return `rgb(${ch(r1, r2)}, ${ch(g1, g2)}, ${ch(b1, b2)})`
 }
 
-// #E 레이아웃 — 16:9 미리보기 + 요소별 X/Y 슬라이더(실시간 반영).
-function LayoutSection({ config, onPos, onScale }: {
+// 테두리(외곽선) 스타일 — Remotion strokeStyle 과 동일 규칙(미리보기 반영).
+function strokeOf(b: TextStyleConfig["border"]): React.CSSProperties {
+  return b.enabled ? { WebkitTextStroke: `${b.width}px ${b.color}`, paintOrder: "stroke fill" } : {}
+}
+
+// 상단 통합 16:9 미리보기 — 영상(MusicViz)과 같은 결로 모든 요소를 그린다.
+// 폰트는 cqw(컨테이너 너비 %) 로 1920px 캔버스 기준 크기를 비례 환산 → 박스 크기와 무관하게 정확.
+function UnifiedPreview({ config }: { config: MusicDesignConfig }) {
+  const W = 1920, H = 1080
+  const cqw = (px: number) => `${(px / W) * 100}cqw`
+  const pos = (k: PosKey) => config[k] ?? POS_DEFAULTS[k]
+  const scl = (k: ScaleKey) => config[k] ?? SCALE_DEFAULTS[k]
+  const eq = { ...DEFAULT_EQUALIZER, ...config.equalizer }
+  const logo = config.play_list, ti = config.title, su = config.subtitle, wl = config.where_label
+  const krTitle = config.title_font_kr ?? DESIGN_KR_FONT_DEFAULT
+  const krSub = config.subtitle_font_kr ?? DESIGN_KR_FONT_DEFAULT
+  const shadow = "0 2px 14px rgba(0,0,0,0.78)"
+  // 이퀄 세로 위치: 로고 윗변 - 로고위간격 - 이퀄높이 (영상 계산과 동일 결).
+  const eqHFrac = eq.max_height / H
+  const eqTopFrac = pos("logo_y") - (logo.font_size * scl("logo_scale") / 2) / H - eq.gap_above_logo / H - eqHFrac
+  const eqBars = Array.from({ length: 20 }, (_, i) => 0.32 + 0.6 * Math.abs(Math.sin(i * 1.7 + 0.5)))
+  const showLoc = !(config.where_label_hidden ?? true)
+  return (
+    <div
+      className="relative mx-auto w-full overflow-hidden rounded-lg"
+      style={{ aspectRatio: "16 / 9", maxHeight: 360, maxWidth: 640, containerType: "inline-size", background: "#0c1020" }}
+    >
+      {/* 하단 가독성 스크림 */}
+      <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: "42%", background: "linear-gradient(to top, rgba(0,0,0,0.45), rgba(0,0,0,0))" }} />
+
+      {/* 이퀄(로고 위, pill · 오디오 반응형 표현) */}
+      <div
+        className="absolute flex items-end justify-center"
+        style={{ left: `${pos("logo_x") * 100}%`, top: `${eqTopFrac * 100}%`, width: `${(eq.width / W) * 100}%`, height: `${eqHFrac * 100}%`, transform: "translateX(-50%)", gap: 2 }}
+      >
+        {eqBars.map((v, i) => {
+          const tCol = eq.gradient === "center" ? Math.abs(i / 19 - 0.5) * 2 : i / 19
+          return <div key={i} style={{ flex: 1, height: `${Math.max(12, v * 100)}%`, borderRadius: 9999, background: mixHex(eq.color1, eq.color2, tCol) }} />
+        })}
+      </div>
+
+      {/* 메인 로고 */}
+      <div style={{
+        position: "absolute", left: `${pos("logo_x") * 100}%`, top: `${pos("logo_y") * 100}%`,
+        transform: `translate(-50%, -50%) scale(${scl("logo_scale")})`,
+        fontFamily: `"${logo.font_family}", sans-serif`, fontSize: cqw(logo.font_size), fontWeight: logo.font_weight,
+        color: logo.color, opacity: logo.opacity, lineHeight: 1, whiteSpace: "nowrap", textShadow: shadow, ...strokeOf(logo.border),
+      }}>{config.playlist_text || DESIGN_TEXT_DEFAULTS.playlist_text}</div>
+
+      {/* 제목(좌하단, 영어+한글 스택) */}
+      <div style={{
+        position: "absolute", left: `${pos("title_x") * 100}%`, top: `${pos("title_y") * 100}%`,
+        transform: `scale(${scl("title_scale")})`, transformOrigin: "left top",
+        fontFamily: `"${ti.font_family}", "${krTitle}", sans-serif`, fontSize: cqw(ti.font_size), fontWeight: ti.font_weight,
+        fontStyle: ti.italic ? "italic" : "normal", color: ti.color, opacity: ti.opacity, whiteSpace: "nowrap", textShadow: shadow, ...strokeOf(ti.border),
+      }}>{config.preview_title || DESIGN_TEXT_DEFAULTS.preview_title}</div>
+
+      {/* 부제목(좌하단, 영어+한글 스택) */}
+      <div style={{
+        position: "absolute", left: `${pos("subtitle_x") * 100}%`, top: `${pos("subtitle_y") * 100}%`,
+        transform: `scale(${scl("subtitle_scale")})`, transformOrigin: "left top",
+        fontFamily: `"${su.font_family}", "${krSub}", sans-serif`, fontSize: cqw(su.font_size), fontWeight: su.font_weight,
+        fontStyle: su.italic ? "italic" : "normal", color: su.color, opacity: su.opacity, whiteSpace: "nowrap", textShadow: shadow, ...strokeOf(su.border),
+      }}>{config.preview_subtitle || DESIGN_TEXT_DEFAULTS.preview_subtitle}</div>
+
+      {/* 지역명(Where 라벨 숨김이 아닐 때만) */}
+      {showLoc && (
+        <div style={{
+          position: "absolute", left: `${pos("location_x") * 100}%`, top: `${pos("location_y") * 100}%`,
+          transform: `translateX(-50%) scale(${scl("location_scale")})`, transformOrigin: "center top",
+          fontFamily: `"${wl.font_family}", sans-serif`, fontSize: cqw(wl.font_size), fontWeight: wl.font_weight,
+          color: wl.color, opacity: wl.opacity, letterSpacing: "0.05em", whiteSpace: "nowrap", textShadow: "0 2px 12px rgba(0,0,0,0.8)", ...strokeOf(wl.border),
+        }}>Tokyo</div>
+      )}
+    </div>
+  )
+}
+
+// 레이아웃 컨트롤 — 요소별 X/Y/크기 슬라이더(미리보기는 상단 통합 미리보기).
+function LayoutControls({ config, onPos, onScale }: {
   config: MusicDesignConfig
   onPos: (key: PosKey, value: number) => void
   onScale: (key: ScaleKey, value: number) => void
 }) {
   const at = (k: PosKey) => config[k] ?? POS_DEFAULTS[k]
   const sc = (k: ScaleKey) => config[k] ?? SCALE_DEFAULTS[k]
-  const eq = { ...DEFAULT_EQUALIZER, ...config.equalizer }
-  const elements: { label: string; xk: PosKey; yk: PosKey; sk: ScaleKey; center: boolean; cls: string }[] = [
-    { label: (config.playlist_text || "PLAY LIST"), xk: "logo_x", yk: "logo_y", sk: "logo_scale", center: true, cls: "text-base font-bold text-white" },
-    { label: (config.preview_title || "제목"), xk: "title_x", yk: "title_y", sk: "title_scale", center: false, cls: "text-xs text-white/90" },
-    { label: (config.preview_subtitle || "부제목"), xk: "subtitle_x", yk: "subtitle_y", sk: "subtitle_scale", center: false, cls: "text-[10px] italic text-white/70" },
-    { label: "Tokyo", xk: "location_x", yk: "location_y", sk: "location_scale", center: true, cls: "text-[10px] tracking-wide text-white/80" },
+  const elements: { label: string; xk: PosKey; yk: PosKey; sk: ScaleKey }[] = [
+    { label: "메인 로고", xk: "logo_x", yk: "logo_y", sk: "logo_scale" },
+    { label: "제목", xk: "title_x", yk: "title_y", sk: "title_scale" },
+    { label: "부제목", xk: "subtitle_x", yk: "subtitle_y", sk: "subtitle_scale" },
+    { label: "지역명", xk: "location_x", yk: "location_y", sk: "location_scale" },
   ]
-  // 미리보기 이퀄(로고 바로 위) — 오디오 반응 형태를 흉내낸 비대칭 막대(산 모양 고정 아님), pill.
-  const eqBars = Array.from({ length: 20 }, (_, i) => 0.32 + 0.6 * Math.abs(Math.sin(i * 1.7 + 0.5)))
   return (
-    <section className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
-      <h2 className="text-sm font-semibold text-foreground">레이아웃 (위치·크기 조정) · 16:9 미리보기</h2>
-      <div className="relative w-full overflow-hidden rounded-lg" style={{ aspectRatio: "16 / 9", maxHeight: 360, maxWidth: 640, background: "#0c1020" }}>
-        {/* 로고 위 이퀄 미리보기(오디오 반응형 · pill) */}
-        <div
-          className="absolute flex items-end justify-center"
-          style={{
-            left: `${at("logo_x") * 100}%`,
-            top: `${at("logo_y") * 100}%`,
-            transform: "translate(-50%, calc(-50% - 1.4em))",
-            width: `${(eq.width / 1920) * 100}%`,
-            height: `${(eq.max_height / 1080) * 100}%`,
-            gap: 2,
-          }}
-        >
-          {eqBars.map((v, i) => {
-            const tCol = eq.gradient === "center" ? Math.abs(i / 19 - 0.5) * 2 : i / 19
-            return <div key={i} style={{ flex: 1, height: `${Math.max(12, v * 100)}%`, borderRadius: 9999, background: mixHex(eq.color1, eq.color2, tCol) }} />
-          })}
-        </div>
-        {elements.map((el) => (
-          <span
-            key={el.xk}
-            className={`absolute whitespace-nowrap ${el.cls}`}
-            style={{
-              left: `${at(el.xk) * 100}%`,
-              top: `${at(el.yk) * 100}%`,
-              transform: `${el.center ? "translate(-50%, -50%)" : "translateY(-50%)"} scale(${sc(el.sk)})`,
-              transformOrigin: el.center ? "center" : "left center",
-            }}
-          >
-            {el.label}
-          </span>
-        ))}
-      </div>
+    <section className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3">
+      <h2 className="text-sm font-semibold text-foreground">레이아웃 (위치·크기)</h2>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {elements.map((el) => (
           <div key={el.xk} className="flex flex-col gap-1 rounded-lg border border-border/60 p-2">
@@ -542,22 +559,14 @@ function LayoutSection({ config, onPos, onScale }: {
   )
 }
 
-// #C 이퀄라이저 설정 — 색상·그라데이션·사이즈·로고 위 간격.
-function EqualizerSection({ eq, onChange }: {
+// 이퀄라이저 컨트롤 — 색상·그라데이션·사이즈(미리보기는 상단 통합 미리보기).
+function EqualizerControls({ eq, onChange }: {
   eq: EqualizerConfig
   onChange: (patch: Partial<EqualizerConfig>) => void
 }) {
-  const bars = Array.from({ length: 20 }, (_, i) => 0.32 + 0.6 * Math.abs(Math.sin(i * 1.7 + 0.5)))
   return (
-    <section className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
+    <section className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3">
       <h2 className="text-sm font-semibold text-foreground">이퀄라이저 (오디오 반응 · pill · 로고 위)</h2>
-      {/* 미리보기 막대(오디오 반응형 · pill 끝) */}
-      <div className="flex h-40 items-end justify-center gap-1 overflow-hidden rounded-lg" style={{ maxHeight: 160, background: "#0c1020" }}>
-        {bars.map((v, i) => {
-          const tCol = eq.gradient === "center" ? Math.abs(i / 19 - 0.5) * 2 : i / 19
-          return <div key={i} style={{ width: 8, height: `${Math.max(11, v * 90)}%`, borderRadius: 9999, background: mixHex(eq.color1, eq.color2, tCol) }} />
-        })}
-      </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="색상 1 (시작)">
           <div className="flex items-center gap-2">
@@ -598,7 +607,7 @@ function EqualizerSection({ eq, onChange }: {
   )
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
   return (
     <label className="flex flex-col gap-1">
       <span className="text-xs font-medium text-muted-foreground">{label}</span>
