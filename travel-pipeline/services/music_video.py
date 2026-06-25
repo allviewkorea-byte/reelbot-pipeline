@@ -790,6 +790,13 @@ def make_video(
                     _asset_public_url(character_path, char_local, slug, f"{video_id}_char.png")
                     if (lambda_ready and char_local) else None
                 )
+                logger.info(
+                    "[video] Lambda 조건: lambda_ready=%s, audio_url=%s, bg_url=%s, char_url=%s",
+                    lambda_ready,
+                    audio_url[:80] if audio_url else None,
+                    bg_url[:80] if bg_url else None,
+                    char_url[:80] if char_url else None,
+                )
                 if lambda_ready and audio_url and bg_url:
                     logger.info("[video] Lambda 렌더 경로 slug=%s (총 %.1f분)", slug, duration / 60)
                     _render_remotion(
