@@ -314,6 +314,24 @@ def clear_character(mix_id: str) -> dict:
         return {"stored": False, "error": _http_err(e)}
 
 
+def clear_localizations(mix_id: str) -> dict:
+    """localizations 캐시 초기화(PATCH null) — 재렌더 시 호출해 다국어 강제 재생성 유도."""
+    url, key = _supabase_cfg()
+    if not (url and key):
+        return {"stored": False, "error": "supabase 미설정"}
+    try:
+        with httpx.Client(timeout=30.0) as c:
+            r = c.patch(
+                f"{url}/rest/v1/{_TABLE}?mix_id=eq.{mix_id}",
+                headers=_headers(key, patch=True),
+                json={"localizations": None},
+            )
+            r.raise_for_status()
+        return {"stored": True, "error": None}
+    except Exception as e:  # noqa: BLE001
+        return {"stored": False, "error": _http_err(e)}
+
+
 def clear_thumbnail(mix_id: str) -> dict:
     """업로드한 이미지 제거(#33 C) — thumbnail_r2_key=null(PATCH). R2 파일은 만료에 위임."""
     url, key = _supabase_cfg()

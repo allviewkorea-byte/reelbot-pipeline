@@ -224,6 +224,10 @@ def rerender_start(mix_id: str, background: BackgroundTasks):
         raise HTTPException(status_code=404, detail="해당 mix_id 의 큐 항목이 없습니다.")
     if not row.get("thumbnail_r2_key"):
         raise HTTPException(status_code=400, detail="이미지를 먼저 업로드하세요.")
+    try:
+        music_uploads.clear_localizations(mix_id)
+    except Exception as e:  # noqa: BLE001 - 초기화 실패해도 재렌더는 진행
+        logger.warning("[music-dashboard] localizations 초기화 실패(재렌더 계속): %s", e)
     from services import music_rerender
     started = music_rerender.start(mix_id)
     if not started.get("ok"):
