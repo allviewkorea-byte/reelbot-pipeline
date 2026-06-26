@@ -55,6 +55,8 @@ export default function MusicLibraryPage() {
   // B-5: 선택 순서 보존(배열). 믹스 순서 = 이 순서.
   const [selectedOrder, setSelectedOrder] = useState<string[]>([])
   const [creating, setCreating] = useState(false)
+  const [jobId, setJobId] = useState<string | null>(null)
+  const [cancelRequested, setCancelRequested] = useState(false)
 
   // B-3/B-4: 순차 재생 + PiP — 단일 <video>(오디오 전용) 공유.
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -194,6 +196,8 @@ export default function MusicLibraryPage() {
     const ids = [...selectedOrder]
     if (ids.length === 0) return
     setCreating(true)
+    setCancelRequested(false)
+    setJobId(null)
     try {
       const res = await fetch("/api/music/library/create-video", {
         method: "POST",
@@ -202,12 +206,13 @@ export default function MusicLibraryPage() {
       })
       const data = await res.json()
       if (!res.ok || !data?.job_id) throw new Error(data?.detail || "영상 만들기 시작 실패")
-      const jobId = data.job_id as string
+      const jid = data.job_id as string
+      setJobId(jid)
       toast.success("영상 제작을 시작했습니다 — 검토 대기에서 진행 상황을 확인하세요.")
       await new Promise<void>((resolve) => {
         const tick = async () => {
           try {
-            const sr = await fetch(`/api/music/library/create-video/status/${jobId}`)
+            const sr = await fetch(`/api/music/library/create-video/status/${jid}`)
             const sd = await sr.json()
             if (sd?.status === "done") {
               toast.success("영상 생성 완료 — 검토 대기에 추가되었습니다.")
@@ -216,6 +221,10 @@ export default function MusicLibraryPage() {
               resolve(); return
             }
             if (sd?.status === "error") { toast.error(sd?.error || "영상 생성 실패"); resolve(); return }
+            if (sd?.status === "cancelled") {
+              toast.message("생성이 취소되었습니다.")
+              resolve(); return
+            }
           } catch { /* 일시 실패는 다음 틱 재시도 */ }
           setTimeout(tick, 3000)
         }
@@ -225,8 +234,18 @@ export default function MusicLibraryPage() {
       toast.error(e instanceof Error ? e.message : "영상 만들기 시작 실패")
     } finally {
       setCreating(false)
+      setJobId(null)
+      setCancelRequested(false)
     }
   }, [selectedOrder, load])
+
+  const handleCancel = useCallback(async () => {
+    if (!jobId || cancelRequested) return
+    setCancelRequested(true)
+    try {
+      await fetch(`/api/music/library/create-video/${jobId}/cancel`, { method: "POST" })
+    } catch { /* 취소 실패는 무시 */ }
+  }, [jobId, cancelRequested])
 
   const genreChips = [{ id: "all", label: "전체" }, ...MUSIC_GENRES.map((g) => ({ id: g.id, label: g.label }))]
   const playerActive = queue.length > 0 && Boolean(currentItem)
@@ -243,15 +262,27 @@ export default function MusicLibraryPage() {
             <Music2 className="h-5 w-5 shrink-0 text-primary" /> 음원 라이브러리
           </h1>
         </div>
-        <button
-          type="button"
-          onClick={createVideo}
-          disabled={selectedCount === 0 || creating}
-          className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-        >
-          {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clapperboard className="h-4 w-4" />}
-          영상 만들기{selectedCount > 0 ? ` (${selectedCount})` : ""}
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          {creating && jobId && (
+            <button
+              type="button"
+              onClick={handleCancel}
+              disabled={cancelRequested}
+              className="inline-flex items-center gap-1.5 rounded-md border border-red-500/40 px-2.5 py-1.5 text-[11px] font-medium text-red-400 hover:bg-red-500/10 disabled:opacity-60"
+            >
+              {cancelRequested ? "취소 요청됨…" : "✕ 생성 취소"}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={createVideo}
+            disabled={selectedCount === 0 || creating}
+            className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+          >
+            {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clapperboard className="h-4 w-4" />}
+            영상 만들기{selectedCount > 0 ? ` (${selectedCount})` : ""}
+          </button>
+        </div>
       </div>
 
       {/* 필터 — B-1 가로 스크롤 */}

@@ -65,6 +65,25 @@ def get_status(job_id: str) -> dict | None:
     return {k: job[k] for k in ("job_id", "status", "step", "video_url", "mix_id", "error")}
 
 
+def cancel(job_id: str) -> dict:
+    """진행 중 job 취소 요청. 현재 스텝 완료 후 큐 적재 없이 종료."""
+    with _LOCK:
+        job = _JOBS.get(job_id)
+        if not job:
+            return {"ok": False, "error": "job 없음"}
+        if job["status"] != "running":
+            return {"ok": False, "error": f"취소 불가 상태: {job['status']}"}
+        job["cancelled"] = True
+        job["status"] = "cancelled"
+    try:
+        from services import music_jobs
+        music_jobs.fail_job(job_id, "사용자 취소")
+    except Exception:  # noqa: BLE001
+        pass
+    logger.info("[music-library] 취소 요청 수신 job=%s", job_id)
+    return {"ok": True}
+
+
 def start(track_ids: list[str], mood: str | None = None) -> dict:
     """선택곡 영상 제작 시작(동시 1개). {ok, job_id} 또는 {ok:False, error}."""
     global _active_job
@@ -80,7 +99,8 @@ def start(track_ids: list[str], mood: str | None = None) -> dict:
         _JOBS[job_id] = {
             "job_id": job_id, "status": "running", "step": "준비",
             "track_ids": ids, "mood": (mood or "").strip().lower() or None,
-            "video_url": None, "mix_id": None, "error": None, "created_at": time.time(),
+            "video_url": None, "mix_id": None, "error": None, "cancelled": False,
+            "created_at": time.time(),
         }
         _active_job = job_id
     try:
@@ -141,6 +161,10 @@ def run(job_id: str) -> None:
         mix = music_mix.build_mix(slug, rows)
         if not mix or not mix.get("mp3_url"):
             raise RuntimeError("믹스 생성 실패.")
+
+        if job.get("cancelled"):
+            logger.info("[music-library] 취소됨 job=%s", job_id)
+            return
 
         # ③ 풀 렌더(분할 렌더·배경·자동 썸네일은 make_video 가 자동) → 검토 큐 적재.
         _step("렌더", "video")
