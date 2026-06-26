@@ -112,8 +112,6 @@ def generate_localizations(
     else:
         base_title, base_desc = _base_meta(theme, viz_spec, lyrics)
     out: dict[str, dict] = {src: {"title": base_title, "description": base_desc}}
-    if not _is_available():
-        return out
     # #37-B: 풍부화 본문(8섹션)은 길어, 10개 언어를 한 번에 번역하면 출력 JSON 이 잘려
     # 파싱 실패 → src 만 남는 버그가 있었다. 언어별 1콜로 분리해 각 콜이 토큰 한도에
     # 충분히 들어가게 하고, 한 언어 실패가 나머지를 막지 않도록 격리한다.
