@@ -19,6 +19,7 @@ import os
 import platform
 import random
 import shutil
+import concurrent.futures
 import subprocess
 import tempfile
 from pathlib import Path
@@ -529,11 +530,12 @@ def _render_chunks(
     (render.mjs 가 frameRange·muted 를 Lambda 로 위임 → 청크당 1~3분). 미지정이면 None →
     _render_remotion 이 로컬 분할 렌더 그대로 수행(회귀 0).
     """
-    chunk_files: list[Path] = []
-    for ch in chunks:
+    chunk_files: list[Path | None] = [None] * len(chunks)
+
+    def _render_one(ch: dict) -> None:
         cf = work / f"chunk_{ch['index']:03d}.mp4"
         logger.info(
-            "[video] 청크 %d/%d 렌더(frames %d~%d)",
+            "[video] 청크 %d/%d 렌더 시작(frames %d~%d)",
             ch["index"] + 1, len(chunks), ch["start_frame"], ch["end_frame"],
         )
         _render_remotion(
@@ -544,7 +546,15 @@ def _render_chunks(
             frame_start=ch["start_frame"], frame_end=ch["end_frame"], muted=True,
             audio_url=audio_url, bg_url=bg_url, character_url=character_url,
         )
-        chunk_files.append(cf)
+        chunk_files[ch["index"]] = cf
+        logger.info("[video] 청크 %d/%d 렌더 완료", ch["index"] + 1, len(chunks))
+
+    max_workers = min(len(chunks), 6)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_render_one, ch): ch for ch in chunks}
+        for future in concurrent.futures.as_completed(futures):
+            future.result()
+
     # 1) 비디오 concat(-c copy). 절대경로 + -safe 0.
     list_txt = work / "concat.txt"
     list_txt.write_text("".join(f"file '{cf}'\n" for cf in chunk_files), encoding="utf-8")
@@ -556,7 +566,7 @@ def _render_chunks(
         "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
         "-shortest", os.path.abspath(str(out)),
     ])
-    logger.info("[video] 분할 %d청크 concat+mux 완료 → %s", len(chunks), out)
+    logger.info("[video] 분할 %d청크 병렬 concat+mux 완료 → %s", len(chunks), out)
     return str(out)
 
 
