@@ -145,6 +145,15 @@ def run(job_id: str) -> None:
         # ③ 풀 렌더(분할 렌더·배경·자동 썸네일은 make_video 가 자동) → 검토 큐 적재.
         _step("렌더", "video")
         viz_spec = music_viz_analyzer.analyze_song(theme, mix)
+
+        try:
+            from services import music_meta
+            built = music_meta.build_title(theme, viz_spec)
+            if built:
+                theme["title_kr"] = built
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[music-library] build_title 실패(기본값 유지): %s", e)
+
         video = music_video.make_video(theme, mix, viz_spec=viz_spec, persist=True)
 
         # ④ 사용된 트랙 used=true 마킹(best-effort).

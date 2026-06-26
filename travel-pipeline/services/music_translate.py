@@ -66,7 +66,7 @@ def translate_lyrics(lyrics_text: str, source_lang: str | None = None) -> dict[s
     """
     src = (source_lang or detect_source_lang(lyrics_text)).strip()
     result = {src: lyrics_text}
-    if not _is_available() or not lyrics_text.strip():
+    if not lyrics_text.strip():
         return result
     for lng in [t for t in ALL_LANGS if t != src]:
         one = _translate_map(lyrics_text, src, [lng])  # 언어 1개씩 → JSON 잘림 없음

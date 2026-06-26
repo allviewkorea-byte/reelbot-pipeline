@@ -31,7 +31,7 @@ export const EST_CROSSFADE_SEC = 2
 export const EST_SUNO_MIN_PER_SONG = 2 // suno 곡당 생성 ~2분(순차)
 export const EST_MIX_BASE_MIN = 1
 export const EST_MIX_MIN_PER_SONG = 0.1
-export const EST_RENDER_RATIO = 3 // 영상 1초당 렌더 ~3초
+export const EST_RENDER_RATIO = 0.2 // Lambda 기준: 영상 1초당 ~0.2초 (실측 42s/240s)
 export const EST_UPLOAD_MIN = 3
 export const CREDITS_PER_SONG = 12 // suno 1호출=12크레딧(=2클립, 1곡 사용)
 export const CREDIT_USD = 0.005
