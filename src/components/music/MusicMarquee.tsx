@@ -11,6 +11,11 @@ interface RecentVideo {
   genre?: string
   youtube_url?: string
   thumbnail_url?: string | null
+  localizations?: {
+    meta?: {
+      ko?: { title?: string }
+    }
+  }
 }
 
 function VideoCard({ v }: { v: RecentVideo }) {
@@ -26,7 +31,7 @@ function VideoCard({ v }: { v: RecentVideo }) {
         )}
       </div>
       <div className="mt-2 h-16 w-0 min-w-full shrink-0 overflow-hidden px-0.5">
-        <p className="line-clamp-2 text-sm font-medium leading-snug text-foreground">{v.title_kr || v.mix_id}</p>
+        <p className="line-clamp-2 text-sm font-medium leading-snug text-foreground">{v.localizations?.meta?.ko?.title || v.title_kr || v.mix_id}</p>
         <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
           {v.genre && <span>{v.genre}</span>}
           <span>유튜브</span>
