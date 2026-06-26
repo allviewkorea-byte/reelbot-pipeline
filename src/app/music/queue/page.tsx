@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type TouchEvent as ReactTouchEvent } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
-import { ArrowLeft, Loader2, Music, Music2, Clapperboard } from "lucide-react"
+import { ArrowLeft, Loader2, Music, Music2, Clapperboard, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { MusicQueueCard, TestCard, type QueueItem } from "@/components/music/MusicQueueCard"
 import { SwipeVideoViewer } from "@/components/music/SwipeVideoViewer"
@@ -48,6 +48,9 @@ export default function MusicQueueGridPage() {
   // 수동 영상 생성(#26) — 검토 큐 정식 적재. 진행 상태는 #36 진행 카드(DB)로 표시.
   const [manualLoading, setManualLoading] = useState(false)
   const [manualCount, setManualCount] = useState("1") // #42 수동 생성 곡수(1~100, 기본 1)
+  // #26-C 취소 — 진행 중 job_id + 취소 요청 표시(현재 스텝 완료 후 중단).
+  const [manualJobId, setManualJobId] = useState<string | null>(null)
+  const [cancelRequested, setCancelRequested] = useState(false)
 
   // #36 진행 중(+미확인 실패) 작업 — DB 기준, 페이지 이동에도 유지.
   const [activeJobs, setActiveJobs] = useState<MusicJob[]>([])
@@ -103,6 +106,8 @@ export default function MusicQueueGridPage() {
 
   const runManual = useCallback(async () => {
     setManualLoading(true)
+    setCancelRequested(false)
+    setManualJobId(null)
     try {
       const tc = Math.max(1, Math.min(100, Math.floor(Number(manualCount)) || 1)) // #42 곡수 1~100 클램프
       const res = await fetch("/api/music/manual-render", {
@@ -113,8 +118,9 @@ export default function MusicQueueGridPage() {
       const data = await res.json()
       if (!res.ok || !data?.job_id) throw new Error(data?.detail || "수동 생성 시작 실패")
       const jobId = data.job_id as string
+      setManualJobId(jobId) // #26-C 취소 버튼 활성화용
       loadJobs() // #36 즉시 진행 카드 표시(DB row 는 시작 시 동기 생성됨)
-      // 폴링 — 3초 간격, done/error 까지.
+      // 폴링 — 3초 간격, done/error/cancelled 까지.
       await new Promise<void>((resolve) => {
         const tick = async () => {
           try {
@@ -131,6 +137,11 @@ export default function MusicQueueGridPage() {
               loadJobs() // 실패 카드로 전환
               resolve(); return
             }
+            if (sd?.status === "cancelled") {
+              toast.message("생성이 취소되었습니다 — 검토 큐에 적재되지 않습니다.")
+              loadJobs()
+              resolve(); return
+            }
           } catch { /* 일시 실패는 다음 틱에 재시도 */ }
           setTimeout(tick, 3000)
         }
@@ -140,8 +151,25 @@ export default function MusicQueueGridPage() {
       toast.error(e instanceof Error ? e.message : "수동 생성 시작 실패")
     } finally {
       setManualLoading(false)
+      setManualJobId(null)
+      setCancelRequested(false)
     }
   }, [testMood, manualCount, load, loadJobs])
+
+  // #26-C 진행 중 취소 — 현재 스텝 완료 후 큐 적재 없이 종료(즉시 중단 아님).
+  const cancelManual = useCallback(async () => {
+    if (!manualJobId) return
+    setCancelRequested(true)
+    try {
+      const r = await fetch(`/api/music/manual-render/${manualJobId}/cancel`, { method: "POST" })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok || d?.ok === false) throw new Error(d?.error || d?.detail || "취소 실패")
+      toast.message("취소 요청됨 — 현재 단계 완료 후 중단됩니다.")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "취소 실패")
+      setCancelRequested(false)
+    }
+  }, [manualJobId])
 
   const filtered = useMemo(() => items.filter((it) => matchesCategory(it, filter)), [items, filter])
 
@@ -257,6 +285,19 @@ export default function MusicQueueGridPage() {
             >
               {manualLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Music2 className="h-3.5 w-3.5" />} 수동 영상 생성
             </button>
+            {/* #26-C 취소 — 진행 중(job_id 확보)에만 표시. 클릭 후 "취소 요청됨..." 안내(즉시 중단 아님). */}
+            {manualLoading && manualJobId && (
+              <button
+                type="button"
+                onClick={cancelManual}
+                disabled={cancelRequested}
+                className="inline-flex items-center justify-center gap-1.5 rounded-md border border-red-500/40 px-2.5 py-1.5 text-[11px] font-medium text-red-400 hover:bg-red-500/10 disabled:opacity-60"
+                title="진행 중인 생성을 취소합니다(현재 단계 완료 후 중단, 검토 큐 미적재)"
+              >
+                {cancelRequested ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
+                {cancelRequested ? "취소 요청됨…" : "생성 취소"}
+              </button>
+            )}
             {/* #42 예상(선택 곡수 기반, #41 estimateProductionTime 연동) */}
             {(() => {
               const tc = Math.max(1, Math.min(100, Math.floor(Number(manualCount)) || 1))

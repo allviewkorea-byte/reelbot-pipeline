@@ -8,7 +8,7 @@
 //   1) Lambda(분산, 빠름): REMOTION_SERVE_URL + REMOTION_LAMBDA_FUNCTION_NAME 가 모두 설정되고
 //      에셋 공개 URL(--audio-url, --bg-url)이 주어지면 renderMediaOnLambda 로 렌더한다.
 //      배포된 번들은 영상마다 다른 audio/bg/character 를 못 담으므로 그 URL 을 inputProps 로 주입한다.
-//      분할(--frame-start/--muted)은 로컬 긴영상 전용 전략 → Lambda 는 항상 전체 1샷.
+//      분할(--frame-start/--muted)도 Lambda 가 처리한다(#43-L 청크별 Lambda 병렬 → 청크당 1~3분).
 //   2) 로컬(폴백): 위 조건이 안 되거나 Lambda 가 실패하면 기존 방식(bundle + renderMedia)으로.
 //
 // 자산(오디오·배경)은 로컬 경로일 때 임시 publicDir 로 복사해 staticFile 로 참조한다(원격 URL/file:// CORS 회피).
@@ -105,8 +105,8 @@ async function renderLocally() {
 
 // ── Lambda 렌더(분산, 빠름) ─────────────────────────────────────────────────
 function lambdaEligible() {
-  // 분할/muted 는 로컬 긴영상 전략 → Lambda 는 항상 전체 1샷이라 제외.
-  if (frameRange || values.muted) return false;
+  // 청크별 Lambda 병렬 렌더(#43-L) — frameRange/muted 도 Lambda 가 처리한다
+  // (renderMediaOnLambda 의 frameRange·muted 옵션). 청크당 1~3분이면 완료.
   if (!process.env.REMOTION_SERVE_URL || !process.env.REMOTION_LAMBDA_FUNCTION_NAME) return false;
   // Lambda 는 배포 번들을 공유 → 영상별 audio/bg 공개 URL 필수.
   return Boolean(values["audio-url"] && values["bg-url"]);
@@ -140,6 +140,8 @@ async function renderWithLambda() {
     privacy: "public",
     maxRetries: 3,
     outName,
+    ...(frameRange ? { frameRange } : {}), // #43-L 청크 구간(미지정 시 전체)
+    ...(values.muted ? { muted: true } : {}), // #43-L 분할 시 비디오만(오디오는 나중에 풀 mux)
   });
 
   // 완료까지 폴링(getRenderProgress). 치명 오류면 throw → 호출부가 로컬 폴백.

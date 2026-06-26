@@ -76,6 +76,7 @@ def start(mood: str | None = None, track_count: int | None = None) -> dict:
         _JOBS[job_id] = {
             "job_id": job_id, "status": "running", "step": "주제",
             "mood": key, "track_count": tc, "video_url": None, "mix_id": None, "error": None,
+            "cancelled": False,  # #26-C 취소 요청 플래그(렌더 직전 체크 → 큐 적재 없이 종료)
             "created_at": time.time(),
         }
         _active_job = job_id
@@ -86,6 +87,29 @@ def start(mood: str | None = None, track_count: int | None = None) -> dict:
     except Exception as e:  # noqa: BLE001
         logger.debug("[music-manual] job 추적 시작 실패(무시): %s", e)
     return {"ok": True, "job_id": job_id}
+
+
+def cancel(job_id: str) -> dict:
+    """진행 중 job 취소 요청(#26-C). 현재 스텝(Suno·렌더)은 완료되나 큐 적재 없이 종료한다.
+
+    백그라운드 스레드는 강제 종료 불가 → 협조적 취소: 플래그를 세우고 status='cancelled' 로 바꾼다.
+    run() 이 렌더 직전 플래그를 보고 early return → record_pending 미실행 → 검토 큐에 안 쌓인다.
+    """
+    with _LOCK:
+        job = _JOBS.get(job_id)
+        if not job:
+            return {"ok": False, "error": "job 없음"}
+        if job["status"] != "running":
+            return {"ok": False, "error": f"취소 불가 상태: {job['status']}"}
+        job["cancelled"] = True
+        job["status"] = "cancelled"
+    try:
+        from services import music_jobs
+        music_jobs.fail_job(job_id, "사용자 취소")
+    except Exception:  # noqa: BLE001 - 추적 실패는 무시
+        pass
+    logger.info("[music-manual] 취소 요청 수신 job=%s", job_id)
+    return {"ok": True}
 
 
 def get_status(job_id: str) -> dict | None:
@@ -146,6 +170,11 @@ def run(job_id: str) -> None:
         mix = result.get("mix")
         if not mix or not mix.get("mp3_url"):
             raise RuntimeError("믹스 생성 실패(음원 없음).")
+
+        # #26-C 취소 체크 — 음원 생성까지 끝났어도 렌더 시작 전 취소면 큐 적재 없이 종료.
+        if job.get("cancelled"):
+            logger.info("[music-manual] 취소됨 → 렌더 생략 job=%s", job_id)
+            return
 
         _step("렌더")
         viz_spec = music_viz_analyzer.analyze_song(theme, mix)
