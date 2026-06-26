@@ -300,6 +300,13 @@ def library_create_video(background: BackgroundTasks, body: LibraryCreateBody | 
     return {"ok": True, "job_id": started["job_id"]}
 
 
+@router.post("/library/create-video/{job_id}/cancel")
+def library_create_video_cancel(job_id: str):
+    """라이브러리 영상 생성 취소 — 현재 스텝 완료 후 큐 적재 없이 종료."""
+    from services import music_library
+    return music_library.cancel(job_id)
+
+
 @router.get("/library/create-video/status/{job_id}")
 def library_create_status(job_id: str):
     """선택곡 영상 제작 상태 폴링(#48) — {status, step, video_url, mix_id, error}. 없으면 404."""
