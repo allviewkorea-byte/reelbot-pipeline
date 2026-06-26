@@ -306,7 +306,7 @@ export default function MusicQueueGridPage() {
                 <div className="flex flex-col gap-0.5 text-[10px] text-muted-foreground">
                   <span>📹 영상 {fmtMinutes(e.videoMinutes)} · ⏱️ 제작 {fmtMinutes(e.totalMinutes)} · {tc}곡</span>
                   <span>💰 {e.credits} 크레딧 (~${e.costUsd.toFixed(2)})</span>
-                  {tc >= 3 && <span className="text-amber-500">※ 3곡 이상은 분할 렌더(#43) 전까지 타임아웃 가능</span>}
+
                 </div>
               )
             })()}
