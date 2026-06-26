@@ -83,6 +83,13 @@ async function renderLocally() {
       inputProps: props,
       browserExecutable,
     });
+    console.log("[render.mjs][inputProps]", JSON.stringify({
+      hasDesignConfig: !!props.designConfig,
+      whereText: props.designConfig?.where_text,
+      whereLabelHidden: props.designConfig?.where_label_hidden,
+      showPlaylist: props.showPlaylist,
+      frameRange: frameRange ?? null,
+    }));
     await renderMedia({
       composition,
       serveUrl,
@@ -126,6 +133,13 @@ async function renderWithLambda() {
     ...(values["character-url"] ? { characterUrl: values["character-url"] } : {}),
   };
 
+  console.log("[render.mjs][inputProps]", JSON.stringify({
+    hasDesignConfig: !!inputProps.designConfig,
+    whereText: inputProps.designConfig?.where_text,
+    whereLabelHidden: inputProps.designConfig?.where_label_hidden,
+    showPlaylist: inputProps.showPlaylist,
+    frameRange: frameRange ?? null,
+  }));
   const outName = path.basename(values.out) || "out.mp4";
   const { renderId, bucketName } = await renderMediaOnLambda({
     region,

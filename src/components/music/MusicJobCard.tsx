@@ -58,7 +58,19 @@ export function MusicJobCard({ job, onChanged }: { job: MusicJob; onChanged: () 
         <span className="text-sm font-semibold text-foreground">
           {failed ? `${typeLabel} 실패` : typeLabel}
         </span>
-        <span className="ml-auto text-[11px] text-muted-foreground">{relTime(job.created_at)}</span>
+        {failed ? (
+          <span className="ml-auto text-[11px] text-muted-foreground">{relTime(job.created_at)}</span>
+        ) : (
+          <button
+            type="button"
+            onClick={dismiss}
+            disabled={busy}
+            className="ml-auto inline-flex items-center justify-center rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-50"
+            title="목록에서 제거(작업 추적만 숨김)"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
 
       {failed ? (
@@ -88,6 +100,15 @@ export function MusicJobCard({ job, onChanged }: { job: MusicJob; onChanged: () 
                 {s}
               </span>
             ))}
+          </div>
+          <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+            <span>{relTime(job.created_at)}</span>
+            {typeof job.metadata?.mood === "string" && (
+              <span>
+                {job.metadata.mood}
+                {job.metadata.track_count != null ? ` · ${String(job.metadata.track_count)}곡` : ""}
+              </span>
+            )}
           </div>
         </>
       )}
