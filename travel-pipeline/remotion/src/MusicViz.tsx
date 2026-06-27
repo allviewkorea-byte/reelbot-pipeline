@@ -30,9 +30,9 @@ import { loadFont as loadBlackHanSans } from "@remotion/google-fonts/BlackHanSan
 import { loadFont as loadNanumMyeongjo } from "@remotion/google-fonts/NanumMyeongjo";
 import { currentTrack, Track } from "./tracks";
 
-// Google Fonts(무료, OFL) — Playfair Display(세리프: PLAY LIST·부제), Dancing Script(필기: 곡 제목).
-const playfair = loadPlayfair();
-const dancing = loadDancing();
+// Google Fonts — weight·subset 제한(CJK 폰트의 992개 @font-face 요청 → 브라우저 crash 방지).
+const playfair = loadPlayfair("normal", { weights: ["400", "500", "600", "700"], subsets: ["latin"] });
+const dancing = loadDancing("normal", { weights: ["400", "700"], subsets: ["latin"] });
 const SERIF = playfair.fontFamily;
 const SCRIPT = dancing.fontFamily;
 
@@ -51,26 +51,24 @@ if (typeof window !== "undefined" && typeof FontFace !== "undefined") {
     .catch((err) => cancelRender(err));
 }
 
-// #35-A 디자인 본부 프리셋 폰트 10종 — UI 드롭다운 이름 → 실제 fontFamily 매핑.
+// #35-A 디자인 본부 프리셋 폰트 — weight·subset 제한(네트워크 요청 최소화).
 const PRESET_FONTS: Record<string, string> = {
-  Montserrat: loadMontserrat().fontFamily,
-  Poppins: loadPoppins().fontFamily,
-  "Bebas Neue": loadBebas().fontFamily,
-  Oswald: loadOswald().fontFamily,
-  Anton: loadAnton().fontFamily,
-  Archivo: loadArchivo().fontFamily,
-  Inter: loadInter().fontFamily,
-  "DM Sans": loadDMSans().fontFamily,
+  Montserrat: loadMontserrat("normal", { weights: ["400", "500", "600", "700"], subsets: ["latin"] }).fontFamily,
+  Poppins: loadPoppins("normal", { weights: ["400", "500", "600", "700"], subsets: ["latin"] }).fontFamily,
+  "Bebas Neue": loadBebas("normal", { weights: ["400"], subsets: ["latin"] }).fontFamily,
+  Oswald: loadOswald("normal", { weights: ["400", "500", "600", "700"], subsets: ["latin"] }).fontFamily,
+  Anton: loadAnton("normal", { weights: ["400"], subsets: ["latin"] }).fontFamily,
+  Archivo: loadArchivo("normal", { weights: ["400", "500", "600", "700"], subsets: ["latin"] }).fontFamily,
+  Inter: loadInter("normal", { weights: ["400", "500", "600", "700"], subsets: ["latin"] }).fontFamily,
+  "DM Sans": loadDMSans("normal", { weights: ["400", "500", "600", "700"], subsets: ["latin"] }).fontFamily,
   "Playfair Display": playfair.fontFamily,
-  "Cormorant Garamond": loadCormorant().fontFamily,
-  "Bodoni Moda": loadBodoni().fontFamily,
-  "Young Serif": loadYoungSerif().fontFamily,
-  Literata: loadLiterata().fontFamily,
-  // 한글 폰트(제목·부제 한글 글자 fallback용). 영어 폰트 뒤에 스택으로 붙는다.
-  "Noto Serif KR": loadNotoSerifKR().fontFamily,
-  "Black Han Sans": loadBlackHanSans().fontFamily,
-  "Nanum Myeongjo": loadNanumMyeongjo().fontFamily,
-  // 심경하체(번들 TTF, FontFace 로 등록한 family 명 그대로).
+  "Cormorant Garamond": loadCormorant("normal", { weights: ["400", "500", "600", "700"], subsets: ["latin"] }).fontFamily,
+  "Bodoni Moda": loadBodoni("normal", { weights: ["400", "500", "600", "700"], subsets: ["latin"] }).fontFamily,
+  "Young Serif": loadYoungSerif("normal", { weights: ["400"], subsets: ["latin"] }).fontFamily,
+  Literata: loadLiterata("normal", { weights: ["400", "500", "600", "700"], subsets: ["latin"] }).fontFamily,
+  "Noto Serif KR": loadNotoSerifKR("normal", { weights: ["400", "500", "600", "700"], subsets: ["korean"] }).fontFamily,
+  "Black Han Sans": loadBlackHanSans("normal", { weights: ["400"], subsets: ["korean"] }).fontFamily,
+  "Nanum Myeongjo": loadNanumMyeongjo("normal", { weights: ["400", "700"], subsets: ["korean"] }).fontFamily,
   SimgyeongHa: SIMGYEONGHA,
 };
 
