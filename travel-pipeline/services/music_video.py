@@ -560,7 +560,7 @@ def _render_chunks(
         except Exception as exc:  # noqa: BLE001
             logger.warning("[debug-chunk] 업로드 실패(무시): %s", exc)
 
-    max_workers = min(len(chunks), 6)
+    max_workers = min(len(chunks), int(os.getenv("MUSIC_CHUNK_WORKERS", "2")))
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(_render_one, ch): ch for ch in chunks}
         for future in concurrent.futures.as_completed(futures):

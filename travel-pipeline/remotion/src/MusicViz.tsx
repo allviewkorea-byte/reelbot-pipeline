@@ -66,9 +66,9 @@ const PRESET_FONTS: Record<string, string> = {
   "Bodoni Moda": loadBodoni("normal", { weights: ["400", "500", "600", "700"], subsets: ["latin"] }).fontFamily,
   "Young Serif": loadYoungSerif("normal", { weights: ["400"], subsets: ["latin"] }).fontFamily,
   Literata: loadLiterata("normal", { weights: ["400", "500", "600", "700"], subsets: ["latin"] }).fontFamily,
-  "Noto Serif KR": loadNotoSerifKR("normal", { weights: ["400", "500", "600", "700"], subsets: ["korean"] }).fontFamily,
-  "Black Han Sans": loadBlackHanSans("normal", { weights: ["400"], subsets: ["korean"] }).fontFamily,
-  "Nanum Myeongjo": loadNanumMyeongjo("normal", { weights: ["400", "700"], subsets: ["korean"] }).fontFamily,
+  "Noto Serif KR": loadNotoSerifKR("normal", { weights: ["400"], subsets: ["korean"], ignoreTooManyRequestsWarning: true }).fontFamily,
+  "Black Han Sans": loadBlackHanSans("normal", { weights: ["400"], subsets: ["korean"], ignoreTooManyRequestsWarning: true }).fontFamily,
+  "Nanum Myeongjo": loadNanumMyeongjo("normal", { weights: ["400"], subsets: ["korean"], ignoreTooManyRequestsWarning: true }).fontFamily,
   SimgyeongHa: SIMGYEONGHA,
 };
 
