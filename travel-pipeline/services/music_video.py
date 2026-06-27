@@ -520,6 +520,7 @@ def _render_chunks(
     audio_url: str | None = None,
     bg_url: str | None = None,
     character_url: str | None = None,
+    slug: str = "",
 ) -> str:
     """청크별 muted 비디오 렌더(frameRange) → concat(-c copy) → 풀 믹스 오디오 mux.
 
@@ -548,6 +549,16 @@ def _render_chunks(
         )
         chunk_files[ch["index"]] = cf
         logger.info("[video] 청크 %d/%d 렌더 완료", ch["index"] + 1, len(chunks))
+        # [임시 디버그] 청크 mp4 를 R2 에 복사(where;_____ 유무 육안 확인용). 검증 후 제거.
+        try:
+            if r2_storage.is_available():
+                debug_url = r2_storage.upload_music_video(
+                    str(cf), f"debug-chunks/{slug}", f"chunk_{ch['index']:03d}.mp4",
+                    content_type="video/mp4",
+                )
+                logger.info("[debug-chunk] uploaded: %s", debug_url)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[debug-chunk] 업로드 실패(무시): %s", exc)
 
     max_workers = min(len(chunks), 6)
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -876,6 +887,7 @@ def make_video(
                         design_config=design_config, show_playlist=show_playlist,
                         character_path=char_local,
                         audio_url=audio_url, bg_url=bg_url, character_url=char_url,
+                        slug=slug,
                     )
                     rendered = True
                     logger.info("[video] 분할 렌더 완료 slug=%s", slug)
