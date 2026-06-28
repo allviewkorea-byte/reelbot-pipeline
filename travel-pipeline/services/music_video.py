@@ -914,15 +914,20 @@ def make_video(
             # #33 D-10 다국어 자동 번역 — 생성 시점에 미리 채워 검수 카드가 '번역 없음' 안 뜨게.
             # 이미 있으면 스킵(재렌더 시 중복 번역·비용 방지). best-effort(실패해도 영상은 유효).
             try:
-                from services import music_translate, music_uploads as _mu
+                from services import music_translate, music_meta, music_uploads as _mu
                 if not _mu.get_localizations(video_id):
                     _lyrics = "\n".join(
                         (t.get("lyrics") or "").strip() for t in tracks if (t.get("lyrics") or "").strip()
                     )
                     src = music_translate.detect_source_lang(_lyrics or title_kr or "ko-")
+                    _bt = music_meta.build_title(theme, viz_spec)
+                    _bd = music_meta.build_description(theme, viz_spec, tracks, None)
                     loc = {
                         "source_lang": src,
-                        "meta": music_translate.generate_localizations(theme, viz_spec, _lyrics),
+                        "meta": music_translate.generate_localizations(
+                            theme, viz_spec, _lyrics,
+                            base_title=_bt, base_description=_bd,
+                        ),
                         "lyrics": music_translate.translate_lyrics(_lyrics, src) if _lyrics.strip() else {},
                         "hashtags": music_translate.generate_hashtags(theme, viz_spec),
                     }
