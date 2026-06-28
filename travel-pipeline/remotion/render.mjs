@@ -49,7 +49,7 @@ for (const k of ["audio", "bg", "out"]) {
 }
 
 const root = path.dirname(fileURLToPath(import.meta.url));
-const props = JSON.parse(values.props || "{}");
+const props = { ...JSON.parse(values.props || "{}"), ...(values.muted ? { muted: true } : {}) };
 const browserExecutable =
   process.env.REMOTION_CHROMIUM_EXECUTABLE ||
   process.env.PUPPETEER_EXECUTABLE_PATH ||
@@ -104,6 +104,7 @@ async function renderLocally() {
       crf: 16,
       ...(frameRange ? { frameRange } : {}), // #43 분할 구간(미지정 시 전체)
       ...(values.muted ? { muted: true } : {}), // #43 분할 시 비디오만
+      delayRenderTimeoutInMilliseconds: 120000, // 28초 기본 → 120초(오디오 메타 로딩 대기)
     });
   } finally {
     rmSync(publicDir, { recursive: true, force: true });
@@ -156,6 +157,7 @@ async function renderWithLambda() {
     outName,
     ...(frameRange ? { frameRange } : {}), // #43-L 청크 구간(미지정 시 전체)
     ...(values.muted ? { muted: true } : {}), // #43-L 분할 시 비디오만(오디오는 나중에 풀 mux)
+    timeoutInMilliseconds: 120000, // Lambda 렌더 타임아웃 120초(오디오 메타 로딩 포함)
   });
 
   // 완료까지 폴링(getRenderProgress). 치명 오류면 throw → 호출부가 로컬 폴백.
