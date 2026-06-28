@@ -167,6 +167,7 @@ export function MusicQueueCard({ item, onChanged, onOpenViewer }: { item: QueueI
   const [thumbUrl, setThumbUrl] = useState<string | null>(item.thumbnail_url ?? null)
   const [needsRerender, setNeedsRerender] = useState(false)
   const [rerendering, setRerendering] = useState(false)
+  const [mlVer, setMlVer] = useState(0)
   const [rerenderStep, setRerenderStep] = useState("준비")
   const [uploading, setUploading] = useState(false)
   const [publishing, setPublishing] = useState(false)
@@ -392,6 +393,7 @@ export function MusicQueueCard({ item, onChanged, onOpenViewer }: { item: QueueI
             if (sd?.status === "done") {
               toast.success("재렌더 완료 — 영상이 갱신되었습니다.")
               setNeedsRerender(false)
+              setMlVer((v) => v + 1)
               onChanged(item.mix_id) // 큐 새로고침 → 새 mp4_url 반영
               resolve(); return
             }
@@ -607,7 +609,7 @@ export function MusicQueueCard({ item, onChanged, onOpenViewer }: { item: QueueI
         )}
 
         {/* #32 다국어 검수 — 펼쳐서 언어별 제목·설명·가사 확인/수정 */}
-        <MultilangPanel mixId={item.mix_id} />
+        <MultilangPanel key={mlVer} mixId={item.mix_id} />
 
         {/* 업로드 미리보기 — 접이식, 제목+본문 확인 */}
         <div className="rounded-md border border-border/50">
