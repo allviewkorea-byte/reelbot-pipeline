@@ -47,7 +47,7 @@ def _translate_map(text: str, source: str, targets: list[str]) -> dict[str, str]
             "Keep line breaks and the singable, natural tone (not literal). "
             'Return STRICT JSON only: {"<lang>": "<translation>", ...}. No markdown.'
         )
-        raw = music_lyrics._call(system, text, max_tokens=3000)
+        raw = music_lyrics._call(system, text, max_tokens=8000)
         data = music_lyrics._extract_json(raw)
         if not isinstance(data, dict):
             return {}
@@ -138,7 +138,7 @@ def _translate_one_meta(base_title: str, base_desc: str, src: str, target: str) 
             'Return STRICT JSON only: {"title": "...", "description": "..."}. No markdown.'
         )
         user = f"TITLE:\n{base_title}\n\nDESCRIPTION:\n{base_desc}"
-        data = music_lyrics._extract_json(music_lyrics._call(system, user, max_tokens=3000))
+        data = music_lyrics._extract_json(music_lyrics._call(system, user, max_tokens=8000))
         if isinstance(data, dict) and data.get("title") and data.get("description"):
             return {"title": str(data["title"])[:100], "description": str(data["description"])}
     except Exception as e:  # noqa: BLE001 - 언어별 격리
