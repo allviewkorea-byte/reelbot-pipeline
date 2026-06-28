@@ -54,6 +54,7 @@ export default function MusicQueueGridPage() {
 
   // #36 진행 중(+미확인 실패) 작업 — DB 기준, 페이지 이동에도 유지.
   const [activeJobs, setActiveJobs] = useState<MusicJob[]>([])
+  const prevJobIdsRef = useRef<Set<string>>(new Set())
 
   const load = useCallback(() => {
     fetch("/api/music/queue")
@@ -66,7 +67,29 @@ export default function MusicQueueGridPage() {
   const loadJobs = useCallback(() => {
     fetch("/api/music/jobs/active")
       .then((r) => r.json())
-      .then((d) => setActiveJobs(Array.isArray(d?.jobs) ? d.jobs : []))
+      .then((d) => {
+        const jobs: MusicJob[] = Array.isArray(d?.jobs) ? d.jobs : []
+        const newIds = new Set(jobs.map((j) => j.job_id))
+        const prev = prevJobIdsRef.current
+        if (prev.size > 0) {
+          let finished = false
+          prev.forEach((id) => { if (!newIds.has(id)) finished = true })
+          if (finished) {
+            try {
+              const ctx = new AudioContext()
+              const osc = ctx.createOscillator()
+              const gain = ctx.createGain()
+              osc.connect(gain); gain.connect(ctx.destination)
+              osc.frequency.value = 880
+              gain.gain.setValueAtTime(0.3, ctx.currentTime)
+              gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5)
+              osc.start(); osc.stop(ctx.currentTime + 0.5)
+            } catch { /* 브라우저 자동재생 정책으로 막힐 수 있음 — 무시 */ }
+          }
+        }
+        prevJobIdsRef.current = newIds
+        setActiveJobs(jobs)
+      })
       .catch(() => {})
   }, [])
 
