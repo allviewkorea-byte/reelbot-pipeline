@@ -102,14 +102,16 @@ def _track_duration(rec: dict) -> float | None:
     return _measure_mp3_duration(rec.get("audio_url") or "")
 
 
-def _generate_with_retry(theme: dict, log) -> dict:
+def _generate_with_retry(theme: dict, log, *, max_retries: int | None = None) -> dict:
     """generate_and_store 를 호출하되, 사용될 첫 클립이 너무 짧으면 자동 재생성.
 
-    150초 미만이면 최대 2번까지 재시도. 끝까지 짧으면 마지막 결과를 그대로 사용(경고).
+    150초 미만이면 최대 max_retries 번까지 재시도. 끝까지 짧으면 마지막 결과를 그대로 사용(경고).
     재시도는 Suno 정상 호출과 동일 → 무한루프 없음(고정 횟수), 길이 정상이면 재시도 0.
+    max_retries: 미지정 → _MAX_DURATION_RETRIES(기본 2). 태그 경로는 1로 줄여 호출.
     """
+    retries = max_retries if max_retries is not None else _MAX_DURATION_RETRIES
     last = music_suno.generate_and_store(theme)
-    for attempt in range(_MAX_DURATION_RETRIES):
+    for attempt in range(retries):
         tracks = last.get("tracks") or []
         if not tracks:
             return last  # 생성 실패/빈 결과는 호출부가 처리(여기선 재시도 안 함)
@@ -118,9 +120,9 @@ def _generate_with_retry(theme: dict, log) -> dict:
             return last  # 정상 길이(또는 길이 미상) → 그대로 통과
         logger.warning(
             "[produce] 곡 길이 부족 %.0f초 < %.0f초 (시도 %d/%d) — 재생성",
-            dur, _MIN_DURATION_SEC, attempt + 1, _MAX_DURATION_RETRIES + 1,
+            dur, _MIN_DURATION_SEC, attempt + 1, retries + 1,
         )
-        log(f"⚠️ 곡 길이 부족 {dur:.0f}초 — 재생성 ({attempt + 1}/{_MAX_DURATION_RETRIES})")
+        log(f"⚠️ 곡 길이 부족 {dur:.0f}초 — 재생성 ({attempt + 1}/{retries})")
         last = music_suno.generate_and_store(theme)
     # 최종 점검 — 마지막 결과도 짧으면 경고만 남기고 그대로 사용.
     final_tracks = last.get("tracks") or []
@@ -129,7 +131,7 @@ def _generate_with_retry(theme: dict, log) -> dict:
         if fdur is not None and fdur < _MIN_DURATION_SEC:
             logger.warning(
                 "[produce] 최대 재시도(%d) 초과 — 짧은 곡 %.0f초 그대로 사용",
-                _MAX_DURATION_RETRIES, fdur,
+                retries, fdur,
             )
             log(f"⚠️ 재시도 후에도 짧음 {fdur:.0f}초 — 그대로 사용")
     return last
@@ -213,6 +215,7 @@ def _consume_generated(all_clips: list[dict], seen: set[str]) -> list[dict]:
 def _gen_vocal(
     theme_slug: str, songs: list[dict], base_style: str, genre_theme: str, log,
     *, genre_id: str | None = None, seen: set[str] | None = None,
+    is_tag_path: bool = False,
 ) -> tuple[list[dict], dict[str, str]]:
     """보컬 경로: 곡별 가사로 보컬곡 생성(부분 실패 허용) + 가사 원문 R2 보존.
 
@@ -240,7 +243,7 @@ def _gen_vocal(
         }
         try:
             log(f"보컬 생성 {i}/{len(valid)} [{gender}]: {s.get('title')}")
-            res = _generate_with_retry(theme, log)
+            res = _generate_with_retry(theme, log, max_retries=1 if is_tag_path else None)
         except Exception as e:  # noqa: BLE001 - 1곡 실패가 전체를 막지 않게
             logger.warning("[produce] 곡 %d 보컬 생성 실패: %s", i, e)
             continue
@@ -270,14 +273,19 @@ def _gen_vocal(
 def _gen_instrumental(
     theme_slug: str, n: int, style: str, genre_theme: str, log,
     *, genre_id: str | None = None, seen: set[str] | None = None,
+    is_tag_path: bool = False,
 ) -> tuple[list[dict], dict[str, str]]:
     """연주 경로: 가사 없이 style 만으로 연주곡 N회 생성(instrumental=True, 부분 실패 허용).
 
     가사 없음 → lyrics_by_id 는 빈 dict(믹스 JSON 에 가사 미포함).
     #46: 곡마다 먼저 장르 재활용 풀을 확인 — 미사용 트랙이 있으면 Suno 호출 없이 재활용.
+    is_tag_path: 태그 조합 경로면 True — 길이 힌트 보강 + 재시도 1회 제한(비용 절약).
     """
     produced: list[dict] = []
     seen = seen if seen is not None else set()
+    # 태그 경로: 가사 없는 연주곡은 길이 힌트가 유일한 장치 → _with_length_hint 로 보강.
+    effective_style = music_lyrics._with_length_hint(style) if is_tag_path else style
+    tag_retries = 1 if is_tag_path else None  # 태그 경로 재시도 1회, 14장르는 기본(2회)
     for i in range(1, n + 1):
         # ① 재활용 우선 — 같은 장르 미사용 트랙이 있으면 Suno 건너뜀(크레딧 0).
         recycled = _recycle_track(genre_id, seen, log)
@@ -288,13 +296,13 @@ def _gen_instrumental(
         theme = {
             "theme_slug": theme_slug,
             "instrumental": True,
-            "style": style,
+            "style": effective_style,
             "title": "",  # #52-A 빈값 → Suno 가 곡 제목 자동 생성(장르명+번호 "시티팝 5" 표시 방지)
             "genre_id": genre_id,  # #46: 둘째 클립이 used=false 로 적립 → 다음에 재활용
         }
         try:
             log(f"연주 생성 {i}/{n}")
-            res = _generate_with_retry(theme, log)
+            res = _generate_with_retry(theme, log, max_retries=tag_retries)
         except Exception as e:  # noqa: BLE001 - 1곡 실패가 전체를 막지 않게
             logger.warning("[produce] 연주 %d 생성 실패: %s", i, e)
             continue
@@ -360,6 +368,7 @@ def produce(
         produced, lyrics_by_id = _gen_instrumental(
             theme_slug, n, style_prompt or base_style, genre_theme, _log,
             genre_id=genre_id, seen=seen,
+            is_tag_path=not cfg,  # 태그 조합 경로: 길이 힌트 보강 + 재시도 1회 제한
         )
     else:
         # ① 가사(헌법 3-스테이지) — 주어지면 재사용(검수본), lyric_tone 반영.
@@ -376,6 +385,7 @@ def produce(
         produced, lyrics_by_id = _gen_vocal(
             theme_slug, songs, base_style, genre_theme, _log,
             genre_id=genre_id, seen=seen,
+            is_tag_path=not cfg,  # 태그 조합 경로: 재시도 1회 제한
         )
 
     if not produced:
