@@ -167,11 +167,18 @@ def conflict_hidden_chips(action_id: str | None) -> dict[str, set[str]]:
 
 
 # ── Suno style 문자열 변환 ─────────────────────────────────────────
+_SLEEP_STYLE_BOOST = "soothing, calm, for sleep, gentle, soft, slow"
+_SLEEP_VOCAL_BOOST = "slow ballad, whisper-like vocals, lullaby feel"
+
+
 def tags_to_suno_style(combo: dict) -> str:
     """TagCombo dict → Suno style 문자열(쉼표 구분).
 
     combo 예: {"action": "study", "genre": ["lofi", "jazz"], "emotion": ["calm"], ...}
     반환 예: "for studying, focus, lo-fi, jazz, calm, composed, gentle, soft"
+
+    잠들때(action=sleep): 잠들때 맥락 키워드 강화 주입(신나는 곡 방지).
+    보컬곡이면 slow ballad 톤도 추가.
     """
     parts: list[str] = []
     action_id = combo.get("action")
@@ -186,6 +193,11 @@ def tags_to_suno_style(combo: dict) -> str:
             prompt = tags_map.get(tid)
             if prompt:
                 parts.append(prompt)
+    # 잠들때 맥락 강화 — 잔잔한 키워드 주입(신나는 곡 방지).
+    if action_id == "sleep":
+        parts.append(_SLEEP_STYLE_BOOST)
+        if not is_instrumental(combo):
+            parts.append(_SLEEP_VOCAL_BOOST)
     return ", ".join(parts)
 
 
@@ -217,11 +229,20 @@ def combo_summary_kr(combo: dict) -> str:
 
 
 def is_instrumental(combo: dict) -> bool:
-    """format 축에 instrumental 계열이 있으면 True."""
+    """format 축에 instrumental 계열이 있으면 True.
+
+    잠들때(action=sleep) 특칙: 보컬 명시("vocal")가 없으면 연주곡(True).
+    format 미선택 or nature_mix 등 비보컬 → 연주곡. "vocal" 선택 시에만 보컬 허용.
+    """
     fmt = combo.get("format") or []
     if isinstance(fmt, str):
         fmt = [fmt]
-    return bool(set(fmt) & {"instrumental", "inst_only", "piano_solo", "guitar_solo", "beats_only", "nature_only"})
+    if set(fmt) & {"instrumental", "inst_only", "piano_solo", "guitar_solo", "beats_only", "nature_only"}:
+        return True
+    # 잠들때: 보컬 명시 없으면 연주곡 확정(보컬 누수 방지).
+    if combo.get("action") == "sleep" and "vocal" not in fmt:
+        return True
+    return False
 
 
 # ── 똑똑한 랜덤 ──────────────────────────────────────────────────────
@@ -239,23 +260,39 @@ _RANDOM_PRESETS: list[dict] = [
 ]
 
 
+_SLEEP_DEFAULTS: dict[str, list[str]] = {
+    "genre": ["ballad", "piano", "acoustic", "ambient", "classical", "newage", "sensballad"],
+    "tempo": ["gentle", "slow", "relaxed"],
+    "emotion": ["calm", "peaceful", "drowsy", "warm", "comfort", "lonely", "sad", "nostalgic", "dreamy"],
+}
+
+
 def smart_random(partial: dict | None = None) -> dict:
     """빈 축을 맥락에 맞게 자동 채움.
 
     partial 이 주어지면 이미 선택된 축은 유지, 빈 축만 프리셋 기반으로 채운다.
     partial 이 없으면 프리셋 중 하나를 랜덤 선택.
+    잠들때(action=sleep): 미선택 장르·템포·감정을 잠들때 어울리는 풀에서 채움.
     """
     if not partial or not any(partial.values()):
         return dict(random.choice(_RANDOM_PRESETS))
 
     result = dict(partial)
     hidden = conflict_hidden_chips(result.get("action"))
+    is_sleep = result.get("action") == "sleep"
 
     for axis, tags_map in _AXIS_MAP.items():
         existing = result.get(axis)
         if existing:
             continue
         hidden_ids = hidden.get(axis, set())
+        # 잠들때: 미선택 축은 잠들때 풀에서 선택(사용자 선택 존중, 미선택만 유도).
+        if is_sleep and axis in _SLEEP_DEFAULTS:
+            pool = [k for k in _SLEEP_DEFAULTS[axis] if k in tags_map and k not in hidden_ids]
+            if pool:
+                pick_count = 1 if axis in ("tempo",) else random.randint(1, 2)
+                result[axis] = random.sample(pool, min(pick_count, len(pool)))
+                continue
         candidates = [k for k in tags_map if k not in hidden_ids]
         if not candidates:
             continue
