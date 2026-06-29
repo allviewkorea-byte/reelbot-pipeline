@@ -49,6 +49,9 @@ def _clamp_track_count(n) -> int:
 def _build_theme(mood: str, track_count: int = 1, tag_combo: dict | None = None) -> dict:
     if tag_combo:
         from services import music_tags
+        has_chips = any(tag_combo.get(k) for k in ("genre", "situation", "emotion", "tempo", "format", "charm"))
+        if not has_chips:
+            tag_combo = music_tags.smart_random(tag_combo)
         style = music_tags.tags_to_suno_style(tag_combo)
         instrumental = music_tags.is_instrumental(tag_combo)
         action = tag_combo.get("action") or ""
