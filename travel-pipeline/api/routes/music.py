@@ -264,15 +264,17 @@ class LibraryCreateBody(BaseModel):
 
 @router.get("/library")
 def library_list(
-    genre: str | None = None, used: str | None = None, limit: int = 100, offset: int = 0,
+    genre: str | None = None, action: str | None = None, used: str | None = None,
+    limit: int = 100, offset: int = 0,
 ):
-    """적립곡 목록(#48) — status=SUCCESS, 최신순. genre/used 필터 + 페이지네이션.
+    """적립곡 목록(#48) — status=SUCCESS, 최신순. genre/action/used 필터 + 페이지네이션.
 
-    used: 'true'/'false'(미지정=전체). 각 항목에 play_url(공개 재생 URL) 포함.
+    used: 'true'/'false'(미지정=전체). action: 어떨때 id(미지정=전체).
+    각 항목에 play_url(공개 재생 URL) 포함.
     """
     from services import music_library
     used_flag = None if used is None else (str(used).lower() == "true")
-    items = music_library.list_library(genre=genre, used=used_flag, limit=limit, offset=offset)
+    items = music_library.list_library(genre=genre, action=action, used=used_flag, limit=limit, offset=offset)
     return {"items": items}
 
 

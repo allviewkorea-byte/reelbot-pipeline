@@ -31,10 +31,11 @@ _TRACK_MIN, _TRACK_MAX = 1, 100
 
 # ── 조회 (목록·통계) ───────────────────────────────────────────────────
 def list_library(
-    *, genre: str | None = None, used: bool | None = None, limit: int = 100, offset: int = 0,
+    *, genre: str | None = None, action: str | None = None, used: bool | None = None,
+    limit: int = 100, offset: int = 0,
 ) -> list[dict]:
     """적립곡 목록 + 재생 URL(play_url) 부착. 최신순."""
-    rows = music_store.list_library(genre=genre, used=used, limit=limit, offset=offset)
+    rows = music_store.list_library(genre=genre, action=action, used=used, limit=limit, offset=offset)
     out: list[dict] = []
     for r in rows:
         out.append({
@@ -43,6 +44,7 @@ def list_library(
             "title": r.get("title") or "",
             "tags": r.get("tags") or "",
             "genre": r.get("genre") or "",
+            "action": r.get("action") or "",
             "duration": r.get("duration"),
             "r2_key": r.get("r2_key") or "",
             "used": bool(r.get("used")),
