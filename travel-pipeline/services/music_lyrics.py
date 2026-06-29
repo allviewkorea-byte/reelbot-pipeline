@@ -191,21 +191,20 @@ def _call(system: str, user: str, *, max_tokens: int = 2000, model: str | None =
 
 
 # ── 스테이지 1: 다양성 플랜 ───────────────────────────────────────────────
-def plan_songs(
-    theme: str,
-    n: int,
-    *,
-    sub_theme_pool: list[str] | None = None,
-    language: str = "ko",
-    model: str | None = None,
-    moods: list[str] | None = None,
-) -> list[dict]:
-    """주제 → N개의 서로 다른 곡 설계(sub_theme/core_message/화자/상황/감정/title/style).
+_PLAN_BATCH = int(os.getenv("MUSIC_PLAN_BATCH", "5"))
 
-    moods(선택): 영상 1개(N곡) 공통 분위기 조합. 주면 그 정서로 일관되게 기획하고,
-    장르 자체를 소재로 한 표현(카페→커피 등)은 금지한다.
-    """
-    pool = sub_theme_pool or DEFAULT_SUBTHEME_POOL
+
+def _plan_songs_batch(
+    theme: str,
+    take: int,
+    *,
+    sub_theme_pool: list[str],
+    language: str,
+    model: str | None,
+    moods: list[str] | None,
+    used_themes: list[str],
+) -> list[dict]:
+    """take곡 분량의 플랜을 1회 LLM 호출로 생성(내부 배치 단위)."""
     guidelines = load_guidelines()
     system = (
         "너는 한국어 작사 디렉터다. 아래 '가사 헌법'을 절대 기준으로 삼아, 서로 확실히 "
@@ -220,13 +219,21 @@ def plan_songs(
     )
     moods_str = ", ".join(moods) if moods else ""
     mood_line = (
-        f"분위기(이 영상 {n}곡 공통, 일관 유지): {moods_str}\n" if moods_str else ""
+        f"분위기(이 영상의 곡 전체 공통, 일관 유지): {moods_str}\n" if moods_str else ""
     )
+    avoid_line = ""
+    if used_themes:
+        avoid_line = (
+            "⚠️ 이미 기획된 주제(아래와 절대 겹치지 말 것):\n"
+            + "\n".join(f"- {t}" for t in used_themes)
+            + "\n\n"
+        )
     user = (
-        f"{mood_line}곡 수: {n}\n언어: {language} (한국어 기반 + 영어 훅 살짝)\n"
-        f"참고 sub-주제 풀(그대로 베끼지 말고 변형/확장): {', '.join(pool)}\n\n"
-        f"원칙 5(다양성)에 따라 {n}곡이 서로 다른 sub-주제·화자·상황·감정이 되도록 기획하라"
-        + (f"(단, 위 분위기 정서는 {n}곡 모두 일관 유지). " if moods_str else ". ")
+        f"{mood_line}곡 수: {take}\n언어: {language} (한국어 기반 + 영어 훅 살짝)\n"
+        f"참고 sub-주제 풀(그대로 베끼지 말고 변형/확장): {', '.join(sub_theme_pool)}\n\n"
+        f"{avoid_line}"
+        f"원칙 5(다양성)에 따라 {take}곡이 서로 다른 sub-주제·화자·상황·감정이 되도록 기획하라"
+        + (f"(단, 위 분위기 정서는 모든 곡에서 일관 유지). " if moods_str else ". ")
         + "각 곡마다 원칙 1의 '핵심 메시지'(주제 라벨이 아니라 듣는 사람에게 전하고 싶은 말 한 줄)를 정하라.\n"
         "⚠️ 장르 연상 소재 금지: 장르 이름이나 그 장르를 떠올리게 하는 소재(예: 카페→커피·라떼, "
         "재즈→색소폰)를 가사 소재로 쓰지 말 것. 소재는 분위기에 맞게 자유롭게 고른다.\n"
@@ -239,7 +246,56 @@ def plan_songs(
     data = _extract_json(_call(system, user, max_tokens=4400, model=model))
     if not isinstance(data, list):
         raise RuntimeError("플랜 응답이 배열이 아닙니다.")
-    return data[:n]
+    return data[:take]
+
+
+def plan_songs(
+    theme: str,
+    n: int,
+    *,
+    sub_theme_pool: list[str] | None = None,
+    language: str = "ko",
+    model: str | None = None,
+    moods: list[str] | None = None,
+) -> list[dict]:
+    """주제 → N개의 서로 다른 곡 설계(sub_theme/core_message/화자/상황/감정/title/style).
+
+    N ≤ 배치크기(기본 5)면 1회 호출(기존과 동일). N이 크면 배치 분할하여 JSON 잘림 방지.
+    배치 간 다양성: 이전 배치의 sub_theme·title을 다음 배치에 "피하라"로 전달.
+    """
+    pool = sub_theme_pool or DEFAULT_SUBTHEME_POOL
+    batch_size = _PLAN_BATCH
+
+    if n <= batch_size:
+        return _plan_songs_batch(
+            theme, n, sub_theme_pool=pool, language=language,
+            model=model, moods=moods, used_themes=[],
+        )
+
+    plans: list[dict] = []
+    used_themes: list[str] = []
+    remaining = n
+    batch_idx = 0
+    while remaining > 0:
+        take = min(batch_size, remaining)
+        batch_idx += 1
+        try:
+            batch = _plan_songs_batch(
+                theme, take, sub_theme_pool=pool, language=language,
+                model=model, moods=moods, used_themes=used_themes,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[lyrics] 플랜 배치 %d 실패: %s", batch_idx, e)
+            remaining -= take
+            continue
+        plans.extend(batch)
+        used_themes.extend(
+            f"{p.get('sub_theme', '')} / {p.get('title', '')}" for p in batch
+        )
+        remaining -= take
+    if not plans:
+        raise RuntimeError("가사 플랜 생성 결과가 비어 있습니다(전 배치 실패).")
+    return plans[:n]
 
 
 # ── 스테이지 2: 작성 ─────────────────────────────────────────────────────
@@ -361,8 +417,9 @@ def generate_lyrics(
     if progress and moods:
         progress(f"분위기 조합({', '.join(moods)}) — {n}곡 공통")
 
+    batches = (n + _PLAN_BATCH - 1) // _PLAN_BATCH
     if progress:
-        progress(f"① 다양성 플랜 생성({n}곡)...")
+        progress(f"① 다양성 플랜 생성({n}곡, {batches}배치)...")
     plans = plan_songs(
         theme, n, sub_theme_pool=sub_theme_pool, language=language, model=model, moods=moods,
     )
