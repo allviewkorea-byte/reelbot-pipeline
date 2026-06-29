@@ -213,6 +213,15 @@ def run(job_id: str) -> None:
 
         _step("렌더")
         viz_spec = music_viz_analyzer.analyze_song(theme, mix)
+        # tag_combo 경로: LLM 한국어 제목으로 title_kr 업그레이드(카드·영상 표시용).
+        if theme.get("tag_combo"):
+            try:
+                from services import music_meta
+                ko_copy, _ = music_meta._generate_title_copy_tag(theme)
+                if ko_copy:
+                    theme["title_kr"] = ko_copy
+            except Exception:  # noqa: BLE001
+                pass
         # 일반 cron 과 동일: gpt-image 배경 + Remotion 풀 렌더 + record_pending(검토 큐 적재).
         video = music_video.make_video(theme, mix, viz_spec=viz_spec, persist=True)
 
