@@ -101,10 +101,10 @@ def _build_body(theme: dict) -> dict:
     instrumental=True(기본): 연주곡 — 기존 동작 그대로(회귀 없음).
     instrumental=False: 보컬곡 — body 에 prompt=가사를 넣는다(sunoapi customMode
       보컬은 prompt 가 가사). 가사가 없으면 ValueError(보컬인데 가사 누락 방지).
-    기본 모델: V4_5ALL (better song structure + 최대 8분).
+    기본 모델: V5_5 (ELO 1293, 44.1kHz). env SUNO_MODEL 로 오버라이드 가능.
     """
     instrumental = bool(theme.get("instrumental", True))
-    default_model = "V4_5ALL"
+    default_model = os.getenv("SUNO_MODEL", "V5_5")
     body: dict = {
         "customMode": theme.get("customMode", True),
         "instrumental": instrumental,
