@@ -20,8 +20,6 @@ export function TagComboSelector({ disabled, onChange }: Props) {
   const [chips, setChips] = useState<Record<string, string[]>>({})
   const [currentStep, setCurrentStep] = useState(0)
 
-  const hidden = useMemo(() => getHiddenChips(action), [action])
-
   const buildCombo = useCallback(
     (a: string | null, c: Record<string, string[]>): TagCombo | null => {
       const hasAny = a || Object.values(c).some((v) => v.length > 0)
@@ -37,6 +35,11 @@ export function TagComboSelector({ disabled, onChange }: Props) {
     [],
   )
 
+  const hidden = useMemo(() => {
+    const combo = buildCombo(action, chips)
+    return getHiddenChips(action, combo)
+  }, [action, chips, buildCombo])
+
   const handleAction = useCallback(
     (id: string) => {
       const next = id === "" ? null : id
@@ -44,7 +47,7 @@ export function TagComboSelector({ disabled, onChange }: Props) {
       setCurrentStep(0)
       const cleaned = { ...chips }
       if (next) {
-        const h = getHiddenChips(next)
+        const h = getHiddenChips(next, buildCombo(next, cleaned))
         for (const [axis, hiddenIds] of Object.entries(h)) {
           if (cleaned[axis]) {
             cleaned[axis] = cleaned[axis].filter((t) => !hiddenIds.has(t))
@@ -60,9 +63,16 @@ export function TagComboSelector({ disabled, onChange }: Props) {
   const toggleChip = useCallback(
     (axis: string, id: string) => {
       const prev = chips[axis] || []
-      const next = prev.includes(id)
+      let next = prev.includes(id)
         ? prev.filter((t) => t !== id)
         : [...prev, id]
+      if (axis === "format" && next.includes(id)) {
+        const combo = buildCombo(action, { ...chips, [axis]: next })
+        const h = getHiddenChips(action, combo)
+        if (h.format) {
+          next = next.filter((t) => !h.format!.has(t))
+        }
+      }
       const updated = { ...chips, [axis]: next }
       setChips(updated)
       onChange(buildCombo(action, updated))

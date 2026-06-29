@@ -182,9 +182,27 @@ const INTENSE_ACTIONS = new Set(["workout", "running", "confidence"])
 
 export type HiddenChips = Record<string, Set<string>>
 
-export function getHiddenChips(actionId: string | null): HiddenChips {
-  if (!actionId) return {}
+const INSTRUMENTAL_FORMATS = new Set([
+  "instrumental", "inst_only", "piano_solo", "guitar_solo",
+  "beats_only", "nature_only", "music_box", "white_noise",
+])
+
+export function getHiddenChips(
+  actionId: string | null,
+  combo?: TagCombo | null,
+): HiddenChips {
   const hidden: HiddenChips = {}
+
+  // vocal ↔ instrumental 상호배제
+  const fmt = combo?.format ?? []
+  const fmtSet = new Set(fmt)
+  if (fmtSet.has("vocal")) {
+    hidden.format = new Set(INSTRUMENTAL_FORMATS)
+  } else if ([...fmtSet].some((f) => INSTRUMENTAL_FORMATS.has(f))) {
+    hidden.format = new Set(["vocal"])
+  }
+
+  if (!actionId) return hidden
 
   if (CALM_ACTIONS.has(actionId)) {
     hidden.tempo = new Set(["intense", "fast", "upbeat"])
@@ -198,12 +216,18 @@ export function getHiddenChips(actionId: string | null): HiddenChips {
     hidden.charm = new Set(["addictive"])
   }
   if (actionId === "meditation") {
-    hidden.format = new Set(
-      FORMAT_TAGS.filter((t) => t.id !== "instrumental").map((t) => t.id),
-    )
+    const prev = hidden.format ?? new Set()
+    hidden.format = new Set([
+      ...prev,
+      ...FORMAT_TAGS.filter((t) => t.id !== "instrumental" && !prev.has(t.id)).map((t) => t.id),
+    ])
   }
   if (actionId === "singing") {
-    hidden.format = new Set(["instrumental", "inst_only", "nature_only", "beats_only"])
+    const prev = hidden.format ?? new Set()
+    hidden.format = new Set([
+      ...prev,
+      ...["instrumental", "inst_only", "nature_only", "beats_only"].filter((id) => !prev.has(id)),
+    ])
   }
   return hidden
 }
