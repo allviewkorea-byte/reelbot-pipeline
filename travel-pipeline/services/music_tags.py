@@ -152,23 +152,45 @@ _CALM = {"sleep", "meditation", "rest", "yoga", "stretching", "pilates", "baby_s
 _INTENSE = {"workout", "running", "confidence"}
 
 
-def conflict_hidden_chips(action_id: str | None) -> dict[str, set[str]]:
-    """행동에 따라 숨길 칩 id 집합 반환."""
-    if not action_id:
-        return {}
+_INSTRUMENTAL_FORMATS = {"instrumental", "inst_only", "piano_solo", "guitar_solo",
+                         "beats_only", "nature_only", "music_box", "white_noise"}
+
+
+def conflict_hidden_chips(action_id: str | None, combo: dict | None = None) -> dict[str, set[str]]:
+    """행동 + 현재 선택에 따라 숨길 칩 id 집합 반환.
+
+    vocal↔instrumental 상호 배제: vocal 선택 시 연주 계열 숨김, 연주 계열 선택 시 vocal 숨김.
+    """
     hidden: dict[str, set[str]] = {}
+
+    # ── format 축 상호배제(vocal ↔ instrumental 계열) ──
+    fmt = (combo or {}).get("format") or []
+    if isinstance(fmt, str):
+        fmt = [fmt]
+    fmt_set = set(fmt)
+    if "vocal" in fmt_set:
+        hidden["format"] = set(_INSTRUMENTAL_FORMATS)
+    elif fmt_set & _INSTRUMENTAL_FORMATS:
+        hidden["format"] = {"vocal"}
+
+    if not action_id:
+        return hidden
     if action_id in _CALM:
         hidden["tempo"] = {"intense", "fast", "upbeat"}
         hidden["charm"] = {"addictive", "beat"}
     if action_id in _INTENSE:
         hidden["tempo"] = {"gentle", "slow"}
     if action_id == "meditation":
-        hidden["format"] = {k for k in FORMAT_TAGS if k != "instrumental"}
+        hidden.setdefault("format", set()).update(
+            k for k in FORMAT_TAGS if k not in ("instrumental", *(hidden.get("format") or set()))
+        )
     if action_id == "focus":
         hidden["tempo"] = {"intense", "fast"}
         hidden["charm"] = {"addictive"}
     if action_id == "singing":
-        hidden["format"] = {"instrumental", "inst_only", "nature_only", "beats_only"}
+        hidden.setdefault("format", set()).update(
+            {"instrumental", "inst_only", "nature_only", "beats_only"} - (hidden.get("format") or set())
+        )
     return hidden
 
 
@@ -304,7 +326,7 @@ def smart_random(partial: dict | None = None) -> dict:
         return dict(random.choice(_RANDOM_PRESETS))
 
     result = dict(partial)
-    hidden = conflict_hidden_chips(result.get("action"))
+    hidden = conflict_hidden_chips(result.get("action"), result)
     action = result.get("action")
     action_defaults = (
         _SLEEP_DEFAULTS if action == "sleep"
