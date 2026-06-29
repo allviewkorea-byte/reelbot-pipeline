@@ -3,14 +3,14 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type TouchEvent as ReactTouchEvent } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
-import { ArrowLeft, Loader2, Music, Music2, Clapperboard, X } from "lucide-react"
+import { ArrowLeft, Loader2, Music, Music2, Clapperboard, Shuffle, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { MusicQueueCard, TestCard, type QueueItem } from "@/components/music/MusicQueueCard"
 import { SwipeVideoViewer } from "@/components/music/SwipeVideoViewer"
 import { MusicJobCard } from "@/components/music/MusicJobCard"
 import type { MusicJob } from "@/lib/music-jobs"
 import { estimateProductionTime, fmtMinutes } from "@/lib/music"
-import { MUSIC_GENRES, PLACE_BGM_SET } from "@/lib/music-genres"
+import { MUSIC_GENRES } from "@/lib/music-genres"
 import { TagComboSelector } from "@/components/music/TagComboSelector"
 import type { TagCombo } from "@/lib/music-tags"
 
@@ -20,9 +20,6 @@ const CATEGORIES = [
   { key: "all", label: "전체", keywords: [] as string[] },
   ...MUSIC_GENRES.map((g) => ({ key: g.id, label: g.label, keywords: g.keywords })),
 ]
-
-// 테스트/수동 생성 무드 드롭다운 — 14장르.
-const TEST_MOODS = MUSIC_GENRES.map((g) => ({ key: g.id, label: g.label }))
 
 function matchesCategory(item: QueueItem, catKey: string): boolean {
   if (catKey === "all") return true
@@ -42,7 +39,7 @@ export default function MusicQueueGridPage() {
   // PiP·스와이프 전체화면 뷰어 — 열린 영상의 (필터된 목록 기준) 인덱스. null=닫힘.
   const [viewerIndex, setViewerIndex] = useState<number | null>(null)
 
-  const [testMood, setTestMood] = useState("citypop")
+  const [testMood] = useState("citypop")
   const [testLoading, setTestLoading] = useState(false)
   const [testVideo, setTestVideo] = useState<{ url: string; engine?: string } | null>(null)
   const [showTestCard, setShowTestCard] = useState(false)
@@ -276,20 +273,14 @@ export default function MusicQueueGridPage() {
       <div className="flex min-h-0 flex-1 flex-col gap-4 md:flex-row">
         {/* 좌측 패널 — 모바일: 필터(위) + 수동 생성(아래) 세로 스택·전체 폭 / md+: 사이드바 */}
         <aside className="flex shrink-0 flex-col gap-3 md:w-[240px]">
-          {/* 영상 생성 — 수동(검토 큐 정식) + 빠른 테스트(폐기). 모바일은 아래(order-2). */}
-          <div className="order-2 flex w-full flex-col gap-1.5 rounded-xl border border-dashed border-border bg-secondary/20 p-2.5 md:order-1 md:w-auto">
-            <select
-              value={testMood}
-              onChange={(e) => setTestMood(e.target.value)}
-              disabled={testLoading || manualLoading}
-              className="h-8 rounded-md border border-border bg-background px-1.5 text-xs text-foreground"
-            >
-              {TEST_MOODS.filter((m) => !PLACE_BGM_SET.has(m.key)).map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
-              <optgroup label="── 장소 BGM ──">
-                {TEST_MOODS.filter((m) => PLACE_BGM_SET.has(m.key)).map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
-              </optgroup>
-            </select>
-            {/* #42 곡수 입력(1~100) */}
+          {/* 영상 생성 — 태그 조합 + 곡수 + 생성/테스트 버튼. 모바일은 아래(order-2). */}
+          <div className="order-2 flex w-full flex-col gap-2 rounded-xl border border-dashed border-border bg-secondary/20 p-2.5 md:order-1 md:w-auto">
+            {/* 태그 조합 Q&A — 어떨때 드롭다운 + 단계 카드 */}
+            <TagComboSelector disabled={manualLoading} onChange={setTagCombo} />
+
+            <div className="border-t border-border/40" />
+
+            {/* 곡수 입력(1~100) */}
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
               곡수
               <input
@@ -303,17 +294,28 @@ export default function MusicQueueGridPage() {
               />
               곡
             </label>
-            {/* 메인 액션 — 수동 영상 생성(검토 큐에 정식 적재) */}
+            {/* 메인 액션 — 버튼 라벨 동적: action만→랜덤 / 칩→수동 / 없음→수동 */}
             <button
               type="button"
               onClick={runManual}
               disabled={manualLoading}
               className="inline-flex items-center justify-center gap-1.5 rounded-md bg-primary px-2.5 py-2 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-60"
-              title="선택한 곡수만큼 진짜 음원을 생성해 검토 큐에 추가(수 분~수십 분, 유튜브 X)"
+              title={tagCombo && !Object.keys(tagCombo).some((k) => k !== "action" && (tagCombo as Record<string, unknown>)[k])
+                ? "어떨때 기반으로 백엔드가 나머지 태그를 랜덤 채워 생성"
+                : "선택한 곡수만큼 진짜 음원을 생성해 검토 큐에 추가(수 분~수십 분, 유튜브 X)"}
             >
-              {manualLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Music2 className="h-3.5 w-3.5" />} {tagCombo ? "태그 조합 생성" : "수동 영상 생성"}
+              {manualLoading
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : tagCombo && !Object.keys(tagCombo).some((k) => k !== "action" && (tagCombo as Record<string, unknown>)[k])
+                  ? <Shuffle className="h-3.5 w-3.5" />
+                  : <Music2 className="h-3.5 w-3.5" />
+              }
+              {" "}
+              {tagCombo && !Object.keys(tagCombo).some((k) => k !== "action" && (tagCombo as Record<string, unknown>)[k])
+                ? "랜덤 영상 생성"
+                : "수동 영상 생성"}
             </button>
-            {/* #26-C 취소 — 진행 중(job_id 확보)에만 표시. 클릭 후 "취소 요청됨..." 안내(즉시 중단 아님). */}
+            {/* 취소 — 진행 중(job_id 확보)에만 표시 */}
             {manualLoading && manualJobId && (
               <button
                 type="button"
@@ -326,7 +328,7 @@ export default function MusicQueueGridPage() {
                 {cancelRequested ? "취소 요청됨…" : "생성 취소"}
               </button>
             )}
-            {/* #42 예상(선택 곡수 기반, #41 estimateProductionTime 연동) */}
+            {/* 예상(선택 곡수 기반) */}
             {(() => {
               const tc = Math.max(1, Math.min(100, Math.floor(Number(manualCount)) || 1))
               const e = estimateProductionTime(tc)
@@ -334,11 +336,10 @@ export default function MusicQueueGridPage() {
                 <div className="flex flex-col gap-0.5 text-[10px] text-muted-foreground">
                   <span>📹 영상 {fmtMinutes(e.videoMinutes)} · ⏱️ 제작 {fmtMinutes(e.totalMinutes)} · {tc}곡</span>
                   <span>💰 {e.credits} 크레딧 (~${e.costUsd.toFixed(2)})</span>
-
                 </div>
               )
             })()}
-            {/* 보조 — 빠른 테스트 10초(합성 음원, 폐기) */}
+            {/* 보조 — 빠른 테스트 10초(합성 음원, 기존 14장르 기본값 사용) */}
             <button
               type="button"
               onClick={runTest}
@@ -348,11 +349,6 @@ export default function MusicQueueGridPage() {
             >
               {testLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Clapperboard className="h-3 w-3" />} 🧪 빠른 테스트 10초
             </button>
-          </div>
-
-          {/* ③-A 태그 조합 Q&A */}
-          <div className="order-3 rounded-xl border border-dashed border-border bg-secondary/20 p-2.5 md:order-2">
-            <TagComboSelector disabled={manualLoading} onChange={setTagCombo} />
           </div>
 
           {/* 카테고리 필터 — 모바일: 위(order-1) + 가로 스크롤(스크롤바 숨김) / md+: 세로 */}
