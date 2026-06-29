@@ -57,6 +57,10 @@ def _build_theme(mood: str, track_count: int = 1, tag_combo: dict | None = None)
         action = tag_combo.get("action") or ""
         genres = tag_combo.get("genre") or []
         genre_label = ", ".join(genres[:2]) if genres else "custom"
+        # 잠들때 보컬곡: 잔잔한 가사 톤 주입(신나는 가사 방지).
+        lyric_tone = ""
+        if action == "sleep" and not instrumental:
+            lyric_tone = "잔잔하고 차분한, 잠들기 좋은, 느린, 위로하는 톤. 신나거나 빠른 분위기 금지."
         return {
             "slug": f"manual_{uuid.uuid4().hex[:12]}",
             "title_kr": f"태그 조합 — {action}" if action else "태그 조합",
@@ -65,7 +69,7 @@ def _build_theme(mood: str, track_count: int = 1, tag_combo: dict | None = None)
             "mood": action or "custom",
             "type": "instrumental" if instrumental else "vocal",
             "style_prompt": style,
-            "lyric_tone": "",
+            "lyric_tone": lyric_tone,
             "track_count": _clamp_track_count(track_count),
             "tag_combo": tag_combo,
         }
