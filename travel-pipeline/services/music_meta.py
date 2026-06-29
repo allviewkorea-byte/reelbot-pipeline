@@ -335,7 +335,61 @@ def build_title(theme: dict, viz_spec: dict | None) -> str:
     return title
 
 
-# ── 해시태그 ──────────────────────────────────────────────────────────
+# ── 곡별 명언풍 부제(quote) ─────────────────────────────────────────
+_QUOTE_SYSTEM = """\
+You write short, evocative, aphorism-style English quotes for music video subtitles.
+Rules:
+- 8-12 words. One sentence. No attribution, no quotation marks.
+- NEVER use real famous quotes. Always original/creative.
+- Match the emotional core of the provided lyrics or mood.
+- Poetic, reflective tone — like a whispered truth, not a slogan.
+- No questions. No exclamation marks. No hashtags.
+Examples:
+- "Some goodbyes echo longer than the love itself"
+- "In silence, the heart finally learns to rest"
+- "Every lullaby is a quiet act of love"
+- "The road home is paved with songs unsung"
+"""
+
+_QUOTE_MODEL = "claude-sonnet-4-6"
+
+
+def generate_track_quotes(tracks: list[dict], theme: dict) -> list[str]:
+    """곡별 명언풍 부제 생성(Claude Sonnet 4.6). 실패 시 빈 리스트(폴백=subtitle_en)."""
+    if not tracks:
+        return []
+    try:
+        from services import music_lyrics
+        if not music_lyrics.is_available():
+            return []
+    except Exception:  # noqa: BLE001
+        return []
+
+    lines: list[str] = []
+    for i, t in enumerate(tracks, 1):
+        lyrics = (t.get("lyrics") or "").strip()
+        if lyrics:
+            lines.append(f"Song {i} (vocal — use lyrics emotion):\n{lyrics[:500]}")
+        else:
+            mood = theme.get("mood") or ""
+            action = (theme.get("tag_combo") or {}).get("action") or theme.get("situation") or ""
+            genre = theme.get("genre") or ""
+            lines.append(f"Song {i} (instrumental — use mood/genre):\naction={action}, mood={mood}, genre={genre}")
+
+    user = f"Generate exactly {len(tracks)} quotes, one per song. Output each quote on its own line (no numbering, no bullets).\n\n" + "\n\n".join(lines)
+
+    try:
+        raw = music_lyrics._call(_QUOTE_SYSTEM, user, max_tokens=300, model=_QUOTE_MODEL)
+        result = [ln.strip().strip('"').strip("'").strip() for ln in (raw or "").strip().splitlines() if ln.strip()]
+        if len(result) >= len(tracks):
+            return result[:len(tracks)]
+        logger.warning("[music-meta] quote 수 불일치(기대=%d, 생성=%d) — 빈 폴백", len(tracks), len(result))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[music-meta] quote 생성 실패(subtitle_en 폴백): %s", e)
+    return []
+
+
+
 _BASE_TAGS = ["#playlist", "#playlists", "#플리", "#플레이리스트", "#music", "#musician", "#감성", "#감성음악", "#밝은음악"]
 _GENRE_TAGS = {
     "city pop": ["#citypop", "#시티팝", "#citypopmusic", "#lofi"],

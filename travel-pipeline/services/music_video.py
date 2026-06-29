@@ -469,14 +469,18 @@ def _render_remotion(
     audio_url/bg_url/character_url: 에셋 공개 URL(있으면 render.mjs 가 Lambda 경로에서 사용).
     미지정 시 로컬 경로만으로 기존 단일 렌더와 100% 동일(회귀 0).
     """
+    track_props = []
+    for t in tracks:
+        tp: dict = {
+            "title": (t.get("title") or "").strip(),
+            "start_sec": float(t.get("start_sec") or 0.0),
+        }
+        q = (t.get("quote") or "").strip()
+        if q:
+            tp["quote"] = q
+        track_props.append(tp)
     props = {
-        "tracks": [
-            {
-                "title": (t.get("title") or "").strip(),
-                "start_sec": float(t.get("start_sec") or 0.0),
-            }
-            for t in tracks
-        ],
+        "tracks": track_props,
         "mood": mood,
         "durationSec": round(duration, 3),
         "vizSpec": viz_spec or None,
@@ -835,6 +839,19 @@ def make_video(
             char_local = str(char_png)
 
         out = work / f"{video_id}.mp4"
+
+        # 곡별 명언풍 부제(quote) 생성 — Remotion 렌더 전, tracks 에 quote 를 주입.
+        # 실패 시 빈 결과 → subtitle_en 폴백(회귀 0). 14장르(quote 없음)도 동일 폴백.
+        try:
+            from services import music_meta as _mm
+            quotes = _mm.generate_track_quotes(tracks, theme)
+            for i, q in enumerate(quotes):
+                if i < len(tracks):
+                    tracks[i]["quote"] = q
+            if quotes:
+                logger.info("[video] 곡별 quote 생성 OK (%d곡)", len(quotes))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[video] quote 생성 실패(subtitle_en 폴백): %s", e)
 
         # 합성: Remotion(인트로+텍스트+이퀄) 우선, 실패/off 면 ffmpeg 폴백(회귀 0).
         rendered = False

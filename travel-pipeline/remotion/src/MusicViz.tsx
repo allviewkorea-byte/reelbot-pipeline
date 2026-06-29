@@ -229,7 +229,7 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
 
   // #27: 모든 텍스트 순백 고정(vizSpec.text_color 무시). 이퀄 색은 design_config 가 결정.
   const textColor = "#FFFFFF";
-  const subtitleEn = (vizSpec?.subtitle_en || "").trim();
+  const subtitleFallback = (vizSpec?.subtitle_en || "").trim();
   const locationEn = (vizSpec?.location_en || "").trim() || "City View"; // #33: 항상 WHERE 표시(폴백)
 
   // ── #35-A 디자인 설정: 미지정 필드는 현재 하드코딩값으로 폴백(designConfig 비면 100% 동일) ──
@@ -327,6 +327,8 @@ export const MusicViz: React.FC<MusicVizProps> = ({ tracks, mood, durationSec, v
   // 타이핑 시작: 첫 곡은 4초(라벨 등장 후), 이후 곡은 그 곡 시작 프레임.
   const isFirstSong = !active || active.start <= 1e-3;
   const typeStartF = isFirstSong ? TITLE_START_SEC * fps : active!.start * fps;
+  // 곡별 quote 가 있으면 부제로 사용, 없으면 vizSpec.subtitle_en 폴백(14장르·레거시 호환).
+  const subtitleEn = active?.quote || subtitleFallback;
   // 제목 마지막 글자 등장 프레임 → +PAUSE 후 부제 시작(제목 글자수에 따라 동적).
   const titleLastCharF = typeStartF + Math.max(0, curTitleLen - 1) * CHAR_INTERVAL;
   const subStartF = (curTitleLen > 0 ? titleLastCharF : typeStartF) + TITLE_SUBTITLE_PAUSE;
