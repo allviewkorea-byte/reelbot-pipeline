@@ -5,6 +5,10 @@ import { toast } from "sonner"
 import { Loader2, Music, Copy, Check, Upload, Globe, Trash2, MonitorPlay, Languages, ChevronDown, ChevronUp, RefreshCw, FileText, Maximize2, PictureInPicture2 } from "lucide-react"
 import { isPipSupported, togglePip } from "@/lib/pip"
 import { cn } from "@/lib/utils"
+import { ACTION_TAGS, comboLabelsKr } from "@/lib/music-tags"
+import type { TagCombo } from "@/lib/music-tags"
+
+const ACTION_LABEL = new Map(ACTION_TAGS.map((t) => [t.id, t.label_kr]))
 
 export interface VizSpec {
   primary_color?: string
@@ -17,6 +21,7 @@ export interface QueueItem {
   title_kr?: string
   genre?: string
   mood?: string
+  tag_combo?: TagCombo | null
   mp4_url?: string
   gpt_prompt?: string
   thumbnail_r2_key?: string | null
@@ -480,14 +485,15 @@ export function MusicQueueCard({ item, onChanged, onOpenViewer }: { item: QueueI
           <h3 className="truncate text-sm font-semibold text-foreground">{item.title_kr || item.slug}</h3>
           {viz?.subtitle_en && <p className="truncate text-xs italic text-muted-foreground">{viz.subtitle_en}</p>}
           <div className="flex flex-wrap items-center gap-1.5">
-            {item.genre && <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[11px] text-primary">{item.genre}</span>}
-            {item.mood && <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-[11px] text-sky-400">{item.mood}</span>}
-            {viz?.primary_color && (
-              <span className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
-                <span className="h-2.5 w-2.5 rounded-full" style={{ background: viz.primary_color }} />
-                <span className="h-2.5 w-2.5 rounded-full" style={{ background: viz.secondary_color || viz.primary_color }} />
-                색감
-              </span>
+            {item.tag_combo ? (
+              comboLabelsKr(item.tag_combo).map((lbl) => (
+                <span key={lbl} className="rounded-full bg-sky-500/15 px-2 py-0.5 text-[11px] text-sky-400">{lbl}</span>
+              ))
+            ) : (
+              <>
+                {item.genre && <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[11px] text-primary">{item.genre}</span>}
+                {item.mood && <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-[11px] text-sky-400">{ACTION_LABEL.get(item.mood) || item.mood}</span>}
+              </>
             )}
           </div>
         </div>

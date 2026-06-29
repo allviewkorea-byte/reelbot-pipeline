@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 _TABLE = "music_uploads"
 _KST = timezone(timedelta(hours=9))
 _SELECT = (
-    "slug,mix_id,title_kr,genre,mood,mp4_url,gpt_prompt,thumbnail_r2_key,character_r2_key,viz_spec,"
+    "slug,mix_id,title_kr,genre,mood,tag_combo,mp4_url,gpt_prompt,thumbnail_r2_key,character_r2_key,viz_spec,"
     "localizations,show_playlist,status,youtube_video_id,youtube_url,created_at"
 )
 
@@ -45,6 +45,7 @@ def record_pending(
     title_kr: str = "",
     genre: str = "",
     mood: str = "",
+    tag_combo: dict | None = None,
     gpt_prompt: str = "",
     thumbnail_r2_key: str | None = None,
     viz_spec: dict | None = None,
@@ -53,6 +54,7 @@ def record_pending(
 
     thumbnail_r2_key: 첫프레임 자동 썸네일(#20) 키. 주면 공개 업로드 게이트가 자동 충족.
     viz_spec: 곡 분석 결과(#20) 캐시 — 같은 mix 재렌더 시 재사용.
+    tag_combo: 8축 태그 조합(jsonb). 카드에 한글 칩 나열용.
     """
     url, key = _supabase_cfg()
     if not (url and key):
@@ -68,6 +70,8 @@ def record_pending(
         "gpt_prompt": gpt_prompt,
         "status": "pending",
     }
+    if tag_combo is not None:
+        record["tag_combo"] = tag_combo
     if thumbnail_r2_key:
         record["thumbnail_r2_key"] = thumbnail_r2_key
     if viz_spec is not None:

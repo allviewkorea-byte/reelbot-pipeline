@@ -950,6 +950,7 @@ def make_video(
                 record_pending(
                     slug, video_id, mp4_url=video_url, title_kr=title_kr,
                     genre=theme.get("genre", ""), mood=theme.get("mood", ""),
+                    tag_combo=theme.get("tag_combo"),
                     gpt_prompt=gpt_prompt, viz_spec=viz_spec,
                 )
             except Exception as e:  # noqa: BLE001

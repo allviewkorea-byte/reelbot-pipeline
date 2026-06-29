@@ -64,9 +64,10 @@ def _build_theme(mood: str, track_count: int = 1, tag_combo: dict | None = None)
             lyric_tone = "자장가 톤, 아기에게 들려주는 부드럽고 따뜻한 가사. 느리고 반복적인 리듬."
         elif action == "focus" and not instrumental:
             lyric_tone = "차분하고 집중에 방해되지 않는 톤. 가사는 최소한으로, 반복적이고 단순하게."
+        summary_kr = music_tags.combo_summary_kr(tag_combo)
         return {
             "slug": f"manual_{uuid.uuid4().hex[:12]}",
-            "title_kr": f"태그 조합 — {action}" if action else "태그 조합",
+            "title_kr": summary_kr or "태그 조합",
             "genre": genre_label,
             "situation": action,
             "mood": action or "custom",
@@ -212,6 +213,15 @@ def run(job_id: str) -> None:
 
         _step("렌더")
         viz_spec = music_viz_analyzer.analyze_song(theme, mix)
+        # tag_combo 경로: LLM 한국어 제목으로 title_kr 업그레이드(카드·영상 표시용).
+        if theme.get("tag_combo"):
+            try:
+                from services import music_meta
+                ko_copy, _ = music_meta._generate_title_copy_tag(theme)
+                if ko_copy:
+                    theme["title_kr"] = ko_copy
+            except Exception:  # noqa: BLE001
+                pass
         # 일반 cron 과 동일: gpt-image 배경 + Remotion 풀 렌더 + record_pending(검토 큐 적재).
         video = music_video.make_video(theme, mix, viz_spec=viz_spec, persist=True)
 

@@ -207,16 +207,37 @@ def _gpt_spec(theme: dict, fallback: dict, *, model: str | None = None) -> dict:
     return _coerce(data if isinstance(data, dict) else {}, fallback)
 
 
+def _apply_tag_combo_location(theme: dict, spec: dict) -> None:
+    """tag_combo 경로일 때 location_en 을 action 영어 라벨로 교체(영상 WHERE 라벨)."""
+    tc = theme.get("tag_combo")
+    if not tc:
+        return
+    action = tc.get("action") or ""
+    if not action:
+        return
+    from services import music_tags
+    tag_info = music_tags.ACTION_TAGS.get(action)
+    if tag_info:
+        label = tag_info["prompt_en"].split(",")[0].strip().title()
+        if 2 <= len(label) <= 40:
+            spec["location_en"] = label
+
+
 def analyze_song(theme: dict, mix: dict | None = None, *, use_gpt: bool = True) -> dict:
     """곡 → VizSpec. GPT 가능하면 풍부화, 아니면 fallback. 항상 유효한 dict."""
     fallback = _fallback_spec(theme)
     if not use_gpt:
+        _apply_tag_combo_location(theme, fallback)
         return fallback
     try:
         from services import music_lyrics
         if not music_lyrics.is_available():
+            _apply_tag_combo_location(theme, fallback)
             return fallback
-        return _gpt_spec(theme, fallback)
+        result = _gpt_spec(theme, fallback)
+        _apply_tag_combo_location(theme, result)
+        return result
     except Exception as e:  # noqa: BLE001 - GPT 실패 시 결정적 fallback(회귀 안전)
         logger.warning("[music-viz] 곡 분석 GPT 실패 → fallback: %s", e)
+        _apply_tag_combo_location(theme, fallback)
         return fallback
