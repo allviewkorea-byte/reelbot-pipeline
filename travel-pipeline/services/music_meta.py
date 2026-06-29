@@ -229,12 +229,17 @@ _TITLE_TAG_SYSTEM = (
     "한국어 카피와 영어 카피를 | 로 구분해 한 줄로 출력한다. "
     "규칙:\n"
     "1. 출력 형식: 한국어 카피 | 영어 카피  (이것만 출력, 따옴표·설명 금지)\n"
-    "2. 유형 지시가 '검색형'이면: 태그 키워드를 자연스럽게 녹인 검색 친화 문장.\n"
-    "   유형 지시가 '감성형'이면: 상황·감정을 묘사하는 감성 카피.\n"
+    "2. 유형 지시가 '검색형'이면: 태그 키워드(행동·장르·상황)를 자연스럽게 녹인 검색 친화 문장. "
+    "실제 사람들이 유튜브에서 검색할 표현 우선.\n"
+    "   유형 지시가 '감성형'이면: 감성 카피를 쓰되 ★검색 키워드를 최소 1개는 반드시 포함"
+    "(순수 감성·추상 표현만으로 이루어진 제목 금지).\n"
     "3. 한국어 카피: 장르 영어명 금지. 20자 이내.\n"
     "4. 영어 카피: 태그 영어 키워드 포함(SEO). 30자 이내.\n"
-    "5. 검색형 예: 공부할때 듣는 로파이 재즈 | lofi jazz for studying\n"
-    "   감성형 예: 밤새 나를 감싸던 멜로디 | dreamy late night ambient"
+    "5. 행동→검색어 변환: '아기재울때'→'아기 재우는 음악/자장가/수면음악', "
+    "'공부할때'→'공부할 때 듣는', '잠들때'→'잠들 때 듣는/수면 음악', "
+    "'집중할때'→'집중 음악/집중할 때 듣는'. 사람들이 실제로 검색하는 표현을 쓴다.\n"
+    "6. 검색형 예: 공부할때 듣는 로파이 재즈 | lofi jazz for studying\n"
+    "   감성형 예: 잠들 때 듣는 피아노 | 비 오는 밤의 위로"
 )
 
 
@@ -271,14 +276,14 @@ def _generate_title_copy(theme: dict, vs: dict) -> tuple[str, str]:
 
 
 def _generate_title_copy_tag(theme: dict) -> tuple[str, str]:
-    """태그 조합 기반 제목 카피(검색형 70% / 감성형 30%). 실패 시 결정적 폴백."""
+    """태그 조합 기반 제목 카피(검색형 85% / 감성형 15%). 실패 시 결정적 폴백."""
     import random as _rnd
     from services import music_tags
     combo = theme["tag_combo"]
     labels = music_tags.combo_labels_kr(combo)
     summary = music_tags.combo_summary_kr(combo)
     style_en = music_tags.tags_to_suno_style(combo)
-    title_type = "검색형" if _rnd.random() < 0.70 else "감성형"
+    title_type = "검색형" if _rnd.random() < 0.85 else "감성형"
     try:
         from services import music_lyrics
         user = (
