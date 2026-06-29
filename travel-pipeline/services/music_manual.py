@@ -64,9 +64,10 @@ def _build_theme(mood: str, track_count: int = 1, tag_combo: dict | None = None)
             lyric_tone = "자장가 톤, 아기에게 들려주는 부드럽고 따뜻한 가사. 느리고 반복적인 리듬."
         elif action == "focus" and not instrumental:
             lyric_tone = "차분하고 집중에 방해되지 않는 톤. 가사는 최소한으로, 반복적이고 단순하게."
+        summary_kr = music_tags.combo_summary_kr(tag_combo)
         return {
             "slug": f"manual_{uuid.uuid4().hex[:12]}",
-            "title_kr": f"태그 조합 — {action}" if action else "태그 조합",
+            "title_kr": summary_kr or "태그 조합",
             "genre": genre_label,
             "situation": action,
             "mood": action or "custom",

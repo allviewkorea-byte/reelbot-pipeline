@@ -5,6 +5,9 @@ import { toast } from "sonner"
 import { Loader2, Music, Copy, Check, Upload, Globe, Trash2, MonitorPlay, Languages, ChevronDown, ChevronUp, RefreshCw, FileText, Maximize2, PictureInPicture2 } from "lucide-react"
 import { isPipSupported, togglePip } from "@/lib/pip"
 import { cn } from "@/lib/utils"
+import { ACTION_TAGS } from "@/lib/music-tags"
+
+const ACTION_LABEL = new Map(ACTION_TAGS.map((t) => [t.id, t.label_kr]))
 
 export interface VizSpec {
   primary_color?: string
@@ -480,15 +483,8 @@ export function MusicQueueCard({ item, onChanged, onOpenViewer }: { item: QueueI
           <h3 className="truncate text-sm font-semibold text-foreground">{item.title_kr || item.slug}</h3>
           {viz?.subtitle_en && <p className="truncate text-xs italic text-muted-foreground">{viz.subtitle_en}</p>}
           <div className="flex flex-wrap items-center gap-1.5">
-            {item.genre && <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[11px] text-primary">{item.genre}</span>}
-            {item.mood && <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-[11px] text-sky-400">{item.mood}</span>}
-            {viz?.primary_color && (
-              <span className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
-                <span className="h-2.5 w-2.5 rounded-full" style={{ background: viz.primary_color }} />
-                <span className="h-2.5 w-2.5 rounded-full" style={{ background: viz.secondary_color || viz.primary_color }} />
-                색감
-              </span>
-            )}
+            {item.genre && item.genre !== "custom" && <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[11px] text-primary">{item.genre}</span>}
+            {item.mood && <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-[11px] text-sky-400">{ACTION_LABEL.get(item.mood) || item.mood}</span>}
           </div>
         </div>
 
