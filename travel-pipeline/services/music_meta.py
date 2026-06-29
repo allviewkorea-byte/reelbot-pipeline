@@ -19,6 +19,10 @@ from services import music_genres  # #52-E 장르 영문 라벨(label_en) — 19
 
 logger = logging.getLogger(__name__)
 
+
+def _has_tag_combo(theme: dict) -> bool:
+    return bool(theme.get("tag_combo"))
+
 # 𝐏𝐥𝐚𝐲𝐥𝐢𝐬𝐭 — Unicode Mathematical Bold(모든 영상 공통 시그니처). 일반 'Playlist' 와 다른 코드포인트.
 SIGNATURE = "\U0001D40F\U0001D425\U0001D41A\U0001D432\U0001D425\U0001D422\U0001D42C\U0001D42D"
 SEP = "━" * 20
@@ -180,11 +184,18 @@ def generate_vibe_intro(theme: dict, viz_spec: dict | None) -> str:
     vs = viz_spec or {}
     try:
         from services import music_lyrics
-        gen = music_genres.label_kr(music_genres.classify_theme(theme) or "") or theme.get("genre", "")
-        mood = str(vs.get("dominant_emotion") or vs.get("mood_category") or theme.get("mood") or "")
-        where = str(vs.get("location_en") or "").strip() or "City View"
-        situ = str(theme.get("situation") or "")
-        user = f"장르: {gen} / 분위기: {mood} / 장소: {where} / 상황: {situ}"
+        if _has_tag_combo(theme):
+            from services import music_tags
+            combo = theme["tag_combo"]
+            summary = music_tags.combo_summary_kr(combo)
+            style_en = music_tags.tags_to_suno_style(combo)
+            user = f"태그 조합: {summary}\n분위기(영어): {style_en}"
+        else:
+            gen = music_genres.label_kr(music_genres.classify_theme(theme) or "") or theme.get("genre", "")
+            mood = str(vs.get("dominant_emotion") or vs.get("mood_category") or theme.get("mood") or "")
+            where = str(vs.get("location_en") or "").strip() or "City View"
+            situ = str(theme.get("situation") or "")
+            user = f"장르: {gen} / 분위기: {mood} / 장소: {where} / 상황: {situ}"
         raw = music_lyrics._call(_VIBE_SYSTEM, user, max_tokens=200)
         lines = [ln.strip() for ln in (raw or "").strip().splitlines() if ln.strip()]
         if lines:
@@ -213,9 +224,24 @@ _TITLE_SYSTEM = (
     "   도입부부터 미쳤다 진짜 | hiphop beats that go hard"
 )
 
+_TITLE_TAG_SYSTEM = (
+    "너는 유튜브 음악 플레이리스트 제목 카피라이터다. "
+    "한국어 카피와 영어 카피를 | 로 구분해 한 줄로 출력한다. "
+    "규칙:\n"
+    "1. 출력 형식: 한국어 카피 | 영어 카피  (이것만 출력, 따옴표·설명 금지)\n"
+    "2. 유형 지시가 '검색형'이면: 태그 키워드를 자연스럽게 녹인 검색 친화 문장.\n"
+    "   유형 지시가 '감성형'이면: 상황·감정을 묘사하는 감성 카피.\n"
+    "3. 한국어 카피: 장르 영어명 금지. 20자 이내.\n"
+    "4. 영어 카피: 태그 영어 키워드 포함(SEO). 30자 이내.\n"
+    "5. 검색형 예: 공부할때 듣는 로파이 재즈 | lofi jazz for studying\n"
+    "   감성형 예: 밤새 나를 감싸던 멜로디 | dreamy late night ambient"
+)
+
 
 def _generate_title_copy(theme: dict, vs: dict) -> tuple[str, str]:
     """LLM 으로 한국어+영어 카피 생성. 실패 시 결정적 폴백."""
+    if _has_tag_combo(theme):
+        return _generate_title_copy_tag(theme)
     try:
         from services import music_lyrics
         gid = music_genres.classify_theme(theme) or ""
@@ -244,6 +270,36 @@ def _generate_title_copy(theme: dict, vs: dict) -> tuple[str, str]:
     return _copy(theme, vs), _title_genre_en(theme, vs)
 
 
+def _generate_title_copy_tag(theme: dict) -> tuple[str, str]:
+    """태그 조합 기반 제목 카피(검색형 70% / 감성형 30%). 실패 시 결정적 폴백."""
+    import random as _rnd
+    from services import music_tags
+    combo = theme["tag_combo"]
+    labels = music_tags.combo_labels_kr(combo)
+    summary = music_tags.combo_summary_kr(combo)
+    style_en = music_tags.tags_to_suno_style(combo)
+    title_type = "검색형" if _rnd.random() < 0.70 else "감성형"
+    try:
+        from services import music_lyrics
+        user = (
+            f"유형: {title_type}\n"
+            f"태그 한국어: {summary}\n"
+            f"태그 영어: {style_en}\n"
+            f"행동: {labels.get('action', [''])[0]}\n"
+            f"장르: {', '.join(labels.get('genre', []))}\n"
+            f"감정: {', '.join(labels.get('emotion', []))}"
+        )
+        raw = music_lyrics._call(_TITLE_TAG_SYSTEM, user, max_tokens=100)
+        line = (raw or "").strip().splitlines()[0].strip().strip('"').strip("'").strip()
+        if "|" in line:
+            parts = [p.strip() for p in line.split("|", 1)]
+            if len(parts) == 2 and parts[0] and parts[1]:
+                return parts[0][:40], parts[1][:50]
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[music-meta] 태그 제목 카피 LLM 실패(폴백): %s", e)
+    return summary[:30] or "감성 플레이리스트", style_en[:50] or "mood playlist"
+
+
 def _title_genre_en(theme: dict, vs: dict) -> str:
     """제목용 장르 영문 — music_genres.label_en(19장르 정확). 미분류 시 genre_en 폴백."""
     gid = music_genres.classify_theme(theme)
@@ -256,16 +312,21 @@ def _title_genre_en(theme: dict, vs: dict) -> str:
 
 
 def build_title(theme: dict, viz_spec: dict | None) -> str:
-    """playlist🎧 {한국어 감성 카피} | {영어 장르·분위기 카피} | 광고없음. 100자 이내."""
+    """playlist🎧 {한국어 감성 카피} | {영어 장르·분위기 카피}. 100자 이내.
+
+    태그 조합이 있으면 곡수(N곡 모음) 포함, '광고없음' 제거.
+    태그 없는 기존 경로도 '광고없음' 제거(일관성).
+    """
     vs = viz_spec or {}
     ko_copy, en_copy = _generate_title_copy(theme, vs)
-    title = f"playlist🎧 {ko_copy} | {en_copy} | 광고없음".strip()
+    tc = theme.get("track_count") or 0
+    tc_label = f" {tc}곡 모음" if isinstance(tc, int) and tc >= 2 else ""
+    title = f"playlist🎧 {ko_copy} | {en_copy}{tc_label}".strip()
     if len(title) > 100:
-        keep = "playlist🎧  |  | 광고없음"
-        room = max(4, 100 - len(keep))
+        room = max(4, 100 - len(f"playlist🎧  | {tc_label}"))
         ko_room = room * 2 // 3
         en_room = room - ko_room
-        title = f"playlist🎧 {ko_copy[:ko_room]} | {en_copy[:en_room]} | 광고없음"
+        title = f"playlist🎧 {ko_copy[:ko_room]} | {en_copy[:en_room]}{tc_label}"
     return title
 
 
@@ -328,7 +389,12 @@ def _time_bucket(theme: dict, vs: dict) -> str:
 
 
 def build_hashtags(theme: dict, viz_spec: dict | None) -> list[str]:
-    """해시태그 30~50개 자동 조합(중복 없음). 베이스+장르+용도+시간대+무드+위치(+필러)."""
+    """해시태그 20~50개 자동 조합(중복 없음).
+
+    태그 조합이 있으면 태그 기반(강세 3개 + 20~30개). 없으면 기존 풀 기반 30~50개.
+    """
+    if _has_tag_combo(theme):
+        return _build_hashtags_tag(theme)
     vs = viz_spec or {}
     tags: list[str] = []
     seen: set[str] = set()
@@ -363,6 +429,48 @@ def build_hashtags(theme: dict, viz_spec: dict | None) -> list[str]:
     if len(tags) < 30:
         add(_FILLER_TAGS)
     return tags[:50]
+
+
+def _build_hashtags_tag(theme: dict) -> list[str]:
+    """태그 조합 기반 해시태그. 강세 3개(action·genre·emotion) + 나머지 축 + 필러."""
+    from services import music_tags
+    combo = theme["tag_combo"]
+    labels = music_tags.combo_labels_kr(combo)
+    tags: list[str] = []
+    seen: set[str] = set()
+
+    def add(items: list[str]) -> None:
+        for t in items:
+            t = re.sub(r"\s+", "", t)
+            if not t.startswith("#"):
+                t = "#" + t.lstrip("#")
+            key = t.lower()
+            if len(t) > 1 and key not in seen:
+                seen.add(key)
+                tags.append(t)
+
+    add(_BASE_TAGS[:4])
+    for lbl in labels.get("action", []):
+        add([f"#{lbl}", f"#{lbl}듣는음악", f"#{lbl}플리"])
+    for lbl in labels.get("genre", []):
+        add([f"#{lbl}", f"#{lbl}플레이리스트", f"#{lbl}음악"])
+    for lbl in labels.get("emotion", []):
+        add([f"#{lbl}", f"#{lbl}음악"])
+    for lbl in labels.get("situation", []):
+        add([f"#{lbl}", f"#{lbl}음악"])
+    for lbl in labels.get("tempo", []):
+        add([f"#{lbl}음악"])
+    for lbl in labels.get("charm", []):
+        add([f"#{lbl}"])
+    genre_ids = combo.get("genre") or []
+    if isinstance(genre_ids, str):
+        genre_ids = [genre_ids]
+    for gid in genre_ids:
+        en = music_tags.GENRE_TAGS.get(gid, "")
+        if en:
+            add([f"#{en.replace(' ', '')}"])
+    add(_FILLER_TAGS)
+    return tags[:35]
 
 
 # ── 트랙 리스트 ───────────────────────────────────────────────────────

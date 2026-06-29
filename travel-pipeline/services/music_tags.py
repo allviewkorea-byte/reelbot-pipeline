@@ -103,6 +103,47 @@ _AXIS_MAP: dict[str, dict[str, str]] = {
     "tempo": TEMPO_TAGS, "format": FORMAT_TAGS, "charm": CHARM_TAGS,
 }
 
+# ── 한글 라벨 (제목·해시태그용) ──────────────────────────────────────
+_GENRE_KR: dict[str, str] = {
+    "citypop": "시티팝", "lofi": "로파이", "jazz": "재즈", "acoustic": "어쿠스틱",
+    "piano": "피아노", "rnb": "알앤비", "ballad": "발라드", "pop": "팝",
+    "indie": "인디", "bossanova": "보사노바", "ambient": "앰비언트",
+    "classical": "클래식", "electronic": "일렉트로닉", "synthwave": "신스웨이브",
+    "soul": "소울", "neosoul": "네오소울", "dreampop": "드림팝",
+    "hiphop": "힙합", "lofihiphop": "로파이힙합", "chillhop": "칠합",
+    "triphop": "트립합", "house": "하우스", "deephouse": "딥하우스",
+    "jazzhop": "재즈합", "newage": "뉴에이지", "kindie": "K인디",
+    "kballad": "K발라드", "sensballad": "감성발라드",
+}
+_SITUATION_KR: dict[str, str] = {
+    "rain": "비올때", "snow": "눈올때", "sunny": "맑은날", "cloudy": "흐린날",
+    "first_snow": "첫눈", "spring": "봄", "summer": "여름", "autumn": "가을",
+    "winter": "겨울", "breakup": "이별", "meeting": "만남", "confession": "고백",
+    "alone": "혼자일때", "window": "창밖", "lights_off": "불끄고누웠을때",
+}
+_EMOTION_KR: dict[str, str] = {
+    "lonely": "외로움", "sad": "슬픔", "nostalgic": "그리움", "depressed": "우울",
+    "desolate": "쓸쓸함", "happy": "기분좋음", "refreshed": "기분전환",
+    "excited": "설렘", "heartbeat": "두근거림", "positive": "긍정", "hopeful": "희망",
+    "passionate": "열정", "calm": "차분함", "peaceful": "평온", "drowsy": "나른함",
+    "dreamy": "몽환", "comfort": "위로", "warm": "따뜻함",
+    "overwhelmed": "벅참", "free": "자유로움", "sentimental": "센치함",
+}
+_TEMPO_KR: dict[str, str] = {
+    "gentle": "잔잔한", "slow": "느린", "relaxed": "편안한", "moderate": "적당한",
+    "lively": "경쾌한", "upbeat": "신나는", "fast": "빠른", "intense": "강렬한",
+}
+_CHARM_KR: dict[str, str] = {
+    "melody": "멜로디가인상적인", "beat": "비트가매력적인",
+    "addictive": "중독성있는", "refined": "세련된",
+    "immersive": "편안하게빠져드는", "emotional": "감성을자극하는",
+    "refreshing": "청량한", "deep": "깊이있는",
+}
+_AXIS_KR: dict[str, dict[str, str]] = {
+    "genre": _GENRE_KR, "situation": _SITUATION_KR, "emotion": _EMOTION_KR,
+    "tempo": _TEMPO_KR, "charm": _CHARM_KR,
+}
+
 # ── 충돌 규칙 ─────────────────────────────────────────────────────────
 _CALM = {"sleep", "meditation", "rest", "yoga", "stretching", "pilates"}
 _INTENSE = {"workout", "running", "confidence"}
@@ -146,6 +187,33 @@ def tags_to_suno_style(combo: dict) -> str:
             if prompt:
                 parts.append(prompt)
     return ", ".join(parts)
+
+
+def combo_labels_kr(combo: dict) -> dict[str, list[str]]:
+    """TagCombo → 축별 한글 라벨 목록. 제목·해시태그·프롬프트 생성용."""
+    result: dict[str, list[str]] = {}
+    action_id = combo.get("action")
+    if action_id and action_id in ACTION_TAGS:
+        result["action"] = [ACTION_TAGS[action_id]["label_kr"]]
+    for axis in ("genre", "situation", "emotion", "tempo", "charm"):
+        kr_map = _AXIS_KR.get(axis, {})
+        ids = combo.get(axis) or []
+        if isinstance(ids, str):
+            ids = [ids]
+        labels = [kr_map[tid] for tid in ids if tid in kr_map]
+        if labels:
+            result[axis] = labels
+    return result
+
+
+def combo_summary_kr(combo: dict) -> str:
+    """TagCombo → 한국어 한 줄 요약. 예: '명상할때 · 어쿠스틱 · 비올때 · 차분함'"""
+    labels = combo_labels_kr(combo)
+    parts: list[str] = []
+    for axis in ("action", "genre", "situation", "emotion", "tempo", "charm"):
+        for lbl in labels.get(axis, []):
+            parts.append(lbl)
+    return " · ".join(parts[:6])
 
 
 def is_instrumental(combo: dict) -> bool:
