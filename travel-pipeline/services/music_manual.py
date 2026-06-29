@@ -46,7 +46,26 @@ def _clamp_track_count(n) -> int:
         return 1
 
 
-def _build_theme(mood: str, track_count: int = 1) -> dict:
+def _build_theme(mood: str, track_count: int = 1, tag_combo: dict | None = None) -> dict:
+    if tag_combo:
+        from services import music_tags
+        style = music_tags.tags_to_suno_style(tag_combo)
+        instrumental = music_tags.is_instrumental(tag_combo)
+        action = tag_combo.get("action") or ""
+        genres = tag_combo.get("genre") or []
+        genre_label = ", ".join(genres[:2]) if genres else "custom"
+        return {
+            "slug": f"manual_{uuid.uuid4().hex[:12]}",
+            "title_kr": f"태그 조합 — {action}" if action else "태그 조합",
+            "genre": genre_label,
+            "situation": action,
+            "mood": action or "custom",
+            "type": "instrumental" if instrumental else "vocal",
+            "style_prompt": style,
+            "lyric_tone": "",
+            "track_count": _clamp_track_count(track_count),
+            "tag_combo": tag_combo,
+        }
     preset = music_genres.preset(mood)
     return {
         "slug": f"manual_{uuid.uuid4().hex[:12]}",
@@ -61,10 +80,11 @@ def _build_theme(mood: str, track_count: int = 1) -> dict:
     }
 
 
-def start(mood: str | None = None, track_count: int | None = None) -> dict:
+def start(mood: str | None = None, track_count: int | None = None, tag_combo: dict | None = None) -> dict:
     """수동 영상 생성 1개 시작(동시 1개 제한). {ok, job_id} 또는 {ok:False, error, busy_job}.
 
     track_count(#42): 영상에 넣을 곡수 1~100(미지정→1). 곡수 = Suno 호출 수 = 영상 길이(#40).
+    tag_combo(③-A): 8축 태그 조합. 있으면 mood 무시, 태그 기반 style 생성.
     """
     global _active_job
     key = music_genres.normalize_mood_key(mood or _DEFAULT_MOOD)
@@ -76,14 +96,17 @@ def start(mood: str | None = None, track_count: int | None = None) -> dict:
         _JOBS[job_id] = {
             "job_id": job_id, "status": "running", "step": "주제",
             "mood": key, "track_count": tc, "video_url": None, "mix_id": None, "error": None,
-            "cancelled": False,  # #26-C 취소 요청 플래그(렌더 직전 체크 → 큐 적재 없이 종료)
+            "cancelled": False,
             "created_at": time.time(),
+            "tag_combo": tag_combo,
         }
         _active_job = job_id
-    # #36 운영 가시성 — DB 작업 추적(인메모리와 같은 job_id). best-effort.
+    meta = {"mood": key, "track_count": tc}
+    if tag_combo:
+        meta["tag_combo"] = tag_combo
     try:
         from services import music_jobs
-        music_jobs.start_job("manual_render", job_id=job_id, metadata={"mood": key, "track_count": tc})
+        music_jobs.start_job("manual_render", job_id=job_id, metadata=meta)
     except Exception as e:  # noqa: BLE001
         logger.debug("[music-manual] job 추적 시작 실패(무시): %s", e)
     return {"ok": True, "job_id": job_id}
@@ -153,7 +176,7 @@ def run(job_id: str) -> None:
         from services import music_produce, music_video, music_viz_analyzer
 
         tc = _clamp_track_count(job.get("track_count", 1))
-        theme = _build_theme(job["mood"], tc)
+        theme = _build_theme(job["mood"], tc, tag_combo=job.get("tag_combo"))
         slug = theme["slug"]
 
         _step("음원")
@@ -162,9 +185,9 @@ def run(job_id: str) -> None:
         result = music_produce.produce(
             slug, n=tc,
             genre_theme=theme["genre"], base_style=theme["style_prompt"],
-            style_prompt=theme["style_prompt"], track_type="vocal",
+            style_prompt=theme["style_prompt"], track_type=theme.get("type", "vocal"),
             lyric_tone=theme["lyric_tone"], minutes=3.5,
-            genre_id=job["mood"],
+            genre_id=None if job.get("tag_combo") else job["mood"],
             progress=_produce_progress,
         )
         mix = result.get("mix")

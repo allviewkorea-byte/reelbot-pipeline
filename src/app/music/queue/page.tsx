@@ -11,6 +11,8 @@ import { MusicJobCard } from "@/components/music/MusicJobCard"
 import type { MusicJob } from "@/lib/music-jobs"
 import { estimateProductionTime, fmtMinutes } from "@/lib/music"
 import { MUSIC_GENRES, PLACE_BGM_SET } from "@/lib/music-genres"
+import { TagComboSelector } from "@/components/music/TagComboSelector"
+import type { TagCombo } from "@/lib/music-tags"
 
 // 카테고리(14장르 SSOT) + 전체. 클라이언트 사이드 필터(genre·mood 등 텍스트 키워드 매칭).
 // 옛 5분류로 저장된 영상도 raw genre 라벨을 그대로 표시하고, 키워드로 해당 장르 필터에 잡힌다.
@@ -48,6 +50,7 @@ export default function MusicQueueGridPage() {
   // 수동 영상 생성(#26) — 검토 큐 정식 적재. 진행 상태는 #36 진행 카드(DB)로 표시.
   const [manualLoading, setManualLoading] = useState(false)
   const [manualCount, setManualCount] = useState("1") // #42 수동 생성 곡수(1~100, 기본 1)
+  const [tagCombo, setTagCombo] = useState<TagCombo | null>(null)
   // #26-C 취소 — 진행 중 job_id + 취소 요청 표시(현재 스텝 완료 후 중단).
   const [manualJobId, setManualJobId] = useState<string | null>(null)
   const [cancelRequested, setCancelRequested] = useState(false)
@@ -133,10 +136,12 @@ export default function MusicQueueGridPage() {
     setManualJobId(null)
     try {
       const tc = Math.max(1, Math.min(100, Math.floor(Number(manualCount)) || 1)) // #42 곡수 1~100 클램프
+      const payload: Record<string, unknown> = { mood: testMood, track_count: tc }
+      if (tagCombo) payload.tag_combo = tagCombo
       const res = await fetch("/api/music/manual-render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mood: testMood, track_count: tc }),
+        body: JSON.stringify(payload),
       })
       const data = await res.json()
       if (!res.ok || !data?.job_id) throw new Error(data?.detail || "수동 생성 시작 실패")
@@ -177,7 +182,7 @@ export default function MusicQueueGridPage() {
       setManualJobId(null)
       setCancelRequested(false)
     }
-  }, [testMood, manualCount, load, loadJobs])
+  }, [testMood, manualCount, tagCombo, load, loadJobs])
 
   // #26-C 진행 중 취소 — 현재 스텝 완료 후 큐 적재 없이 종료(즉시 중단 아님).
   const cancelManual = useCallback(async () => {
@@ -306,7 +311,7 @@ export default function MusicQueueGridPage() {
               className="inline-flex items-center justify-center gap-1.5 rounded-md bg-primary px-2.5 py-2 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-60"
               title="선택한 곡수만큼 진짜 음원을 생성해 검토 큐에 추가(수 분~수십 분, 유튜브 X)"
             >
-              {manualLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Music2 className="h-3.5 w-3.5" />} 수동 영상 생성
+              {manualLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Music2 className="h-3.5 w-3.5" />} {tagCombo ? "태그 조합 생성" : "수동 영상 생성"}
             </button>
             {/* #26-C 취소 — 진행 중(job_id 확보)에만 표시. 클릭 후 "취소 요청됨..." 안내(즉시 중단 아님). */}
             {manualLoading && manualJobId && (
@@ -345,9 +350,14 @@ export default function MusicQueueGridPage() {
             </button>
           </div>
 
+          {/* ③-A 태그 조합 Q&A */}
+          <div className="order-3 rounded-xl border border-dashed border-border bg-secondary/20 p-2.5 md:order-2">
+            <TagComboSelector disabled={manualLoading} onChange={setTagCombo} />
+          </div>
+
           {/* 카테고리 필터 — 모바일: 위(order-1) + 가로 스크롤(스크롤바 숨김) / md+: 세로 */}
           <div
-            className="order-1 flex flex-nowrap gap-1.5 overflow-x-auto [&::-webkit-scrollbar]:hidden md:order-2 md:flex-col md:overflow-x-visible"
+            className="order-1 flex flex-nowrap gap-1.5 overflow-x-auto [&::-webkit-scrollbar]:hidden md:order-3 md:flex-col md:overflow-x-visible"
             style={{ scrollbarWidth: "none" }}
           >
             {CATEGORIES.map((c) => (
