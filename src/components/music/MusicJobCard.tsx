@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { Loader2, AlertTriangle, RotateCcw, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { JOB_TYPE_LABEL, STEP_LABEL, STEP_NODE_INDEX, relTime, type MusicJob } from "@/lib/music-jobs"
+import { comboLabelsKr, type TagCombo } from "@/lib/music-tags"
 
 // 검토대기 상단 진행/실패 카드(#36) — 페이지 이동·기기 전환에도 DB 기준으로 유지.
 const cardBase = "flex flex-col gap-2 rounded-xl border bg-card p-3 shadow-sm"
@@ -103,12 +104,12 @@ export function MusicJobCard({ job, onChanged }: { job: MusicJob; onChanged: () 
           </div>
           <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
             <span>{relTime(job.created_at)}</span>
-            {typeof job.metadata?.mood === "string" && (
-              <span>
-                {job.metadata.mood}
-                {job.metadata.track_count != null ? ` · ${String(job.metadata.track_count)}곡` : ""}
-              </span>
-            )}
+            <span>
+              {job.metadata?.tag_combo
+                ? comboLabelsKr(job.metadata.tag_combo as TagCombo).slice(0, 4).join(" · ")
+                : typeof job.metadata?.mood === "string" ? job.metadata.mood : null}
+              {job.metadata?.track_count != null ? ` · ${String(job.metadata.track_count)}곡` : ""}
+            </span>
           </div>
         </>
       )}

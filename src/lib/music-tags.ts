@@ -210,3 +210,29 @@ export interface TagCombo {
   format?: string[]
   charm?: string[]
 }
+
+// ── ID → 한글 라벨 룩업 (진행 카드·카드 탭 표시용) ──────────────
+const _actionMap = new Map(ACTION_TAGS.map((t) => [t.id, t.label_kr]))
+const _axisMap: Record<string, Map<string, string>> = {}
+for (const axis of CHIP_AXES) {
+  _axisMap[axis.key] = new Map(axis.tags.map((t) => [t.id, t.label_kr]))
+}
+
+export function comboLabelsKr(combo: TagCombo): string[] {
+  const labels: string[] = []
+  if (combo.action) {
+    const kr = _actionMap.get(combo.action)
+    if (kr) labels.push(kr)
+  }
+  for (const axis of ["genre", "situation", "emotion", "tempo", "charm"] as const) {
+    const ids = combo[axis]
+    if (!ids) continue
+    const map = _axisMap[axis]
+    if (!map) continue
+    for (const id of ids) {
+      const kr = map.get(id)
+      if (kr) labels.push(kr)
+    }
+  }
+  return labels
+}
