@@ -41,6 +41,8 @@ ACTION_TAGS: dict[str, dict] = {
     "stretching": {"label_kr": "스트레칭할때", "prompt_en": "for stretching, gentle flow"},
     "pilates": {"label_kr": "필라테스할때", "prompt_en": "for pilates, controlled tempo"},
     "yoga": {"label_kr": "요가할때", "prompt_en": "for yoga, serene and balanced"},
+    "baby_sleep": {"label_kr": "아기재울때", "prompt_en": "for putting a baby to sleep, gentle lullaby, music box"},
+    "focus": {"label_kr": "집중할때", "prompt_en": "for deep focus, concentration"},
 }
 
 # ── 축2~8 (칩 기반) ──────────────────────────────────────────────────
@@ -89,6 +91,7 @@ FORMAT_TAGS: dict[str, str] = {
     "piano_solo": "piano solo", "guitar_solo": "acoustic guitar solo",
     "inst_only": "pure instrumental", "beats_only": "beats only, no vocals",
     "nature_mix": "nature sounds mixed with music", "nature_only": "nature sounds only, no music",
+    "music_box": "music box, lullaby chime", "white_noise": "ambient white noise, soft background texture",
 }
 
 CHARM_TAGS: dict[str, str] = {
@@ -145,7 +148,7 @@ _AXIS_KR: dict[str, dict[str, str]] = {
 }
 
 # ── 충돌 규칙 ─────────────────────────────────────────────────────────
-_CALM = {"sleep", "meditation", "rest", "yoga", "stretching", "pilates"}
+_CALM = {"sleep", "meditation", "rest", "yoga", "stretching", "pilates", "baby_sleep"}
 _INTENSE = {"workout", "running", "confidence"}
 
 
@@ -161,6 +164,9 @@ def conflict_hidden_chips(action_id: str | None) -> dict[str, set[str]]:
         hidden["tempo"] = {"gentle", "slow"}
     if action_id == "meditation":
         hidden["format"] = {k for k in FORMAT_TAGS if k != "instrumental"}
+    if action_id == "focus":
+        hidden["tempo"] = {"intense", "fast"}
+        hidden["charm"] = {"addictive"}
     if action_id == "singing":
         hidden["format"] = {"instrumental", "inst_only", "nature_only", "beats_only"}
     return hidden
@@ -169,6 +175,8 @@ def conflict_hidden_chips(action_id: str | None) -> dict[str, set[str]]:
 # ── Suno style 문자열 변환 ─────────────────────────────────────────
 _SLEEP_STYLE_BOOST = "soothing, calm, for sleep, gentle, soft, slow"
 _SLEEP_VOCAL_BOOST = "slow ballad, whisper-like vocals, lullaby feel"
+_BABY_SLEEP_STYLE_BOOST = "lullaby, music box, very gentle, soft, slow, soothing baby sleep"
+_FOCUS_STYLE_BOOST = "focus-enhancing, steady rhythm, minimal distraction, concentration"
 
 
 def tags_to_suno_style(combo: dict) -> str:
@@ -193,11 +201,14 @@ def tags_to_suno_style(combo: dict) -> str:
             prompt = tags_map.get(tid)
             if prompt:
                 parts.append(prompt)
-    # 잠들때 맥락 강화 — 잔잔한 키워드 주입(신나는 곡 방지).
     if action_id == "sleep":
         parts.append(_SLEEP_STYLE_BOOST)
         if not is_instrumental(combo):
             parts.append(_SLEEP_VOCAL_BOOST)
+    elif action_id == "baby_sleep":
+        parts.append(_BABY_SLEEP_STYLE_BOOST)
+    elif action_id == "focus":
+        parts.append(_FOCUS_STYLE_BOOST)
     return ", ".join(parts)
 
 
@@ -237,10 +248,10 @@ def is_instrumental(combo: dict) -> bool:
     fmt = combo.get("format") or []
     if isinstance(fmt, str):
         fmt = [fmt]
-    if set(fmt) & {"instrumental", "inst_only", "piano_solo", "guitar_solo", "beats_only", "nature_only"}:
+    if set(fmt) & {"instrumental", "inst_only", "piano_solo", "guitar_solo", "beats_only", "nature_only", "music_box", "white_noise"}:
         return True
-    # 잠들때: 보컬 명시 없으면 연주곡 확정(보컬 누수 방지).
-    if combo.get("action") == "sleep" and "vocal" not in fmt:
+    # 잠들때/아기재울때/집중할때: 보컬 명시 없으면 연주곡 확정(보컬 누수 방지).
+    if combo.get("action") in ("sleep", "baby_sleep", "focus") and "vocal" not in fmt:
         return True
     return False
 
@@ -257,6 +268,8 @@ _RANDOM_PRESETS: list[dict] = [
     {"action": "walk", "genre": ["indie", "dreampop"], "emotion": ["free"], "tempo": ["lively"]},
     {"action": "coding", "genre": ["lofihiphop"], "emotion": ["calm"], "tempo": ["moderate"]},
     {"action": "meditation", "genre": ["ambient", "newage"], "emotion": ["peaceful"], "tempo": ["gentle"], "format": ["instrumental"]},
+    {"action": "baby_sleep", "genre": ["classical", "piano"], "emotion": ["warm"], "tempo": ["gentle"], "format": ["music_box"]},
+    {"action": "focus", "genre": ["lofi", "ambient"], "emotion": ["calm"], "tempo": ["moderate"]},
 ]
 
 
@@ -264,6 +277,19 @@ _SLEEP_DEFAULTS: dict[str, list[str]] = {
     "genre": ["ballad", "piano", "acoustic", "ambient", "classical", "newage", "sensballad"],
     "tempo": ["gentle", "slow", "relaxed"],
     "emotion": ["calm", "peaceful", "drowsy", "warm", "comfort", "lonely", "sad", "nostalgic", "dreamy"],
+}
+
+_BABY_SLEEP_DEFAULTS: dict[str, list[str]] = {
+    "genre": ["classical", "piano", "acoustic", "ambient", "newage"],
+    "tempo": ["gentle", "slow"],
+    "emotion": ["warm", "peaceful", "calm", "dreamy", "comfort"],
+    "format": ["music_box", "instrumental", "piano_solo"],
+}
+
+_FOCUS_DEFAULTS: dict[str, list[str]] = {
+    "genre": ["lofi", "ambient", "lofihiphop", "chillhop", "jazzhop", "piano", "classical", "electronic"],
+    "tempo": ["moderate", "relaxed", "gentle"],
+    "emotion": ["calm", "peaceful"],
 }
 
 
@@ -279,16 +305,21 @@ def smart_random(partial: dict | None = None) -> dict:
 
     result = dict(partial)
     hidden = conflict_hidden_chips(result.get("action"))
-    is_sleep = result.get("action") == "sleep"
+    action = result.get("action")
+    action_defaults = (
+        _SLEEP_DEFAULTS if action == "sleep"
+        else _BABY_SLEEP_DEFAULTS if action == "baby_sleep"
+        else _FOCUS_DEFAULTS if action == "focus"
+        else None
+    )
 
     for axis, tags_map in _AXIS_MAP.items():
         existing = result.get(axis)
         if existing:
             continue
         hidden_ids = hidden.get(axis, set())
-        # 잠들때: 미선택 축은 잠들때 풀에서 선택(사용자 선택 존중, 미선택만 유도).
-        if is_sleep and axis in _SLEEP_DEFAULTS:
-            pool = [k for k in _SLEEP_DEFAULTS[axis] if k in tags_map and k not in hidden_ids]
+        if action_defaults and axis in action_defaults:
+            pool = [k for k in action_defaults[axis] if k in tags_map and k not in hidden_ids]
             if pool:
                 pick_count = 1 if axis in ("tempo",) else random.randint(1, 2)
                 result[axis] = random.sample(pool, min(pick_count, len(pool)))
