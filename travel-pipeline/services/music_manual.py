@@ -57,10 +57,13 @@ def _build_theme(mood: str, track_count: int = 1, tag_combo: dict | None = None)
         action = tag_combo.get("action") or ""
         genres = tag_combo.get("genre") or []
         genre_label = ", ".join(genres[:2]) if genres else "custom"
-        # 잠들때 보컬곡: 잔잔한 가사 톤 주입(신나는 가사 방지).
         lyric_tone = ""
         if action == "sleep" and not instrumental:
             lyric_tone = "잔잔하고 차분한, 잠들기 좋은, 느린, 위로하는 톤. 신나거나 빠른 분위기 금지."
+        elif action == "baby_sleep" and not instrumental:
+            lyric_tone = "자장가 톤, 아기에게 들려주는 부드럽고 따뜻한 가사. 느리고 반복적인 리듬."
+        elif action == "focus" and not instrumental:
+            lyric_tone = "차분하고 집중에 방해되지 않는 톤. 가사는 최소한으로, 반복적이고 단순하게."
         return {
             "slug": f"manual_{uuid.uuid4().hex[:12]}",
             "title_kr": f"태그 조합 — {action}" if action else "태그 조합",

@@ -51,6 +51,8 @@ export const ACTION_TAGS: Tag[] = [
   { id: "stretching", label_kr: "스트레칭할때", prompt_en: "for stretching, gentle flow" },
   { id: "pilates", label_kr: "필라테스할때", prompt_en: "for pilates, controlled tempo" },
   { id: "yoga", label_kr: "요가할때", prompt_en: "for yoga, serene and balanced" },
+  { id: "baby_sleep", label_kr: "아기재울때", prompt_en: "for putting a baby to sleep, gentle lullaby, music box" },
+  { id: "focus", label_kr: "집중할때", prompt_en: "for deep focus, concentration" },
 ]
 
 // ── 축2~8 (칩 기반) ──────────────────────────────────────────────
@@ -148,6 +150,8 @@ export const FORMAT_TAGS: Tag[] = [
   { id: "beats_only", label_kr: "비트만(가사없는비트)", prompt_en: "beats only, no vocals" },
   { id: "nature_mix", label_kr: "자연소리믹스(음악+자연)", prompt_en: "nature sounds mixed with music" },
   { id: "nature_only", label_kr: "자연소리만(음악없음)", prompt_en: "nature sounds only, no music" },
+  { id: "music_box", label_kr: "오르골", prompt_en: "music box, lullaby chime" },
+  { id: "white_noise", label_kr: "화이트노이즈", prompt_en: "ambient white noise, soft background texture" },
 ]
 
 export const CHARM_TAGS: Tag[] = [
@@ -173,7 +177,7 @@ export const CHIP_AXES: TagAxis[] = [
 
 // ── 충돌 규칙 — 행동 그룹별 숨길 칩 ──────────────────────────────
 
-const CALM_ACTIONS = new Set(["sleep", "meditation", "rest", "yoga", "stretching", "pilates"])
+const CALM_ACTIONS = new Set(["sleep", "meditation", "rest", "yoga", "stretching", "pilates", "baby_sleep"])
 const INTENSE_ACTIONS = new Set(["workout", "running", "confidence"])
 
 export type HiddenChips = Record<string, Set<string>>
@@ -188,6 +192,10 @@ export function getHiddenChips(actionId: string | null): HiddenChips {
   }
   if (INTENSE_ACTIONS.has(actionId)) {
     hidden.tempo = new Set(["gentle", "slow"])
+  }
+  if (actionId === "focus") {
+    hidden.tempo = new Set(["intense", "fast"])
+    hidden.charm = new Set(["addictive"])
   }
   if (actionId === "meditation") {
     hidden.format = new Set(
