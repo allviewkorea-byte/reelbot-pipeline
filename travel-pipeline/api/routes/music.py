@@ -186,6 +186,7 @@ def trends_analyze(background: BackgroundTasks, authorization: str | None = Head
 class TestRenderBody(BaseModel):
     mood: str | None = None  # citypop/cafe/ballad/workout/sleep (없으면 기본 citypop)
     track_count: int | None = None  # #42 수동 생성 곡수 1~100(미지정→1). test_render 는 무시.
+    tag_combo: dict | None = None  # ③-A 태그 조합(8축). 있으면 mood 무시, style 을 태그로 생성.
 
 
 @router.post("/test-render")
@@ -217,6 +218,7 @@ def manual_render(background: BackgroundTasks, body: TestRenderBody | None = Non
     started = music_manual.start(
         mood=body.mood if body else None,
         track_count=body.track_count if body else None,
+        tag_combo=body.tag_combo if body else None,
     )
     if not started.get("ok"):
         raise HTTPException(status_code=409, detail=started.get("error") or "이미 진행 중")
