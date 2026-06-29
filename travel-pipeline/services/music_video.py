@@ -309,15 +309,61 @@ def _thumb_trend_hint() -> str:
     return f", with a {', '.join(kws[:2])} feel"
 
 
+def _thumb_subject_tag() -> str:
+    """태그 조합용 인물 비중 — 50~70% 불규칙 등장(얼굴 안 보이는 인물), 나머지 풍경."""
+    r = random.random()
+    if r < 0.40:
+        return "사람은 없이 풍경·건축·자연에만 집중."
+    if r < 0.90:
+        return "멀리 작게 보이는 사람 한둘(얼굴은 보이지 않게, 거리감 있게)."
+    return "수영하거나 거니는 강아지 등 작은 동물 한 마리가 자연스럽게."
+
+
+def _tag_mood_hint(combo: dict) -> str:
+    """태그 조합에서 분위기 한 줄 추출(프롬프트 말미에 한 스푼)."""
+    from services import music_tags
+    labels = music_tags.combo_labels_kr(combo)
+    parts: list[str] = []
+    for axis in ("emotion", "situation", "tempo"):
+        for lbl in labels.get(axis, []):
+            parts.append(lbl)
+    return ", ".join(parts[:3]) if parts else ""
+
+
 def build_thumbnail_prompt(theme: dict, viz_spec: dict | None = None) -> str:
-    """주제 → ChatGPT(gpt-image)에 붙여넣을 영어 썸네일 프롬프트(#8 큐 복사용).
+    """주제 → ChatGPT(gpt-image)에 붙여넣을 썸네일 프롬프트(#8 큐 복사용).
 
     #27: viz_spec 가 있으면 **풍경·도시·자연 중심**(인물 거의 없음, 80/15/5) + location_en·
     씬키워드 강조 + 색감, **텍스트 0개**(글자는 Remotion 이 그림). viz_spec 없으면 #17 동작.
     배경은 데이터(_THUMB_SCENES) 매핑. 영어 한 문단.
     #49: 14장르 분류가 되면 장르별 이미지 프롬프트 풀(한국어 15개 중 랜덤)을 우선 반환한다.
-    매칭 실패 시에만 아래 기존(viz_spec/#17) 방식으로 폴백한다.
+    ④: 태그 조합이 있으면 기존 한국어 프롬프트 뼈대 유지 + 칩 분위기 한 스푼 + 불규칙 인물.
     """
+    combo = theme.get("tag_combo")
+
+    if combo:
+        pooled = _genre_image_prompt(theme)
+        bucket_key = _city_bucket(theme, viz_spec) if viz_spec else "citypop"
+        pool = _CITY_POOLS.get(bucket_key, _CITY_POOLS["citypop"])
+        location_label = random.choice(pool["cities"])
+        bright = bucket_key in ("citypop", "cafe", "workout", "summer")
+        bright_force = "맑은 한낮의 환한 자연광, 화창한 날씨, " if bright else ""
+        mood_hint = _tag_mood_hint(combo)
+        mood_line = f" {mood_hint} 느낌을 살려서." if mood_hint else ""
+        if pooled:
+            return f"{pooled}{mood_line}"
+        return (
+            f"가로형 롱폼사이즈 (1920x1080, 16:9 비율), 파일 사이즈 4MB 이하의 "
+            f"플레이리스트 썸네일 배경 이미지. "
+            f"{location_label}, {pool['scene']}, {pool['time']}. "
+            f"{bright_force}"
+            f"맑은 날의 사실적인 풍경 사진, {pool['tone']}, {pool['light']}, "
+            f"깊이감 있는 원근감, {pool['accent']}. "
+            f"{_thumb_subject_tag()} "
+            f"실제 사진처럼 선명하고 고급스럽게.{mood_line} "
+            f"사람 얼굴은 보이지 않게, 글자 없음, 영어 없음, 로고 없음, 워터마크 없음."
+        )
+
     pooled = _genre_image_prompt(theme)
     if pooled:
         return pooled
@@ -326,8 +372,6 @@ def build_thumbnail_prompt(theme: dict, viz_spec: dict | None = None) -> str:
     person = _thumb_person()
 
     if viz_spec:
-        # #31: 한국어 톤(맑고 청량하고 밝은 사실적 풍경) + 무드별 글로벌 도시 랜덤.
-        # #32: 금지어(cinematic/moody/dramatic/neon) 미사용, 밝은 무드는 '맑은 한낮' 강제.
         bucket = _city_bucket(theme, viz_spec)
         pool = _CITY_POOLS[bucket]
         location_label = random.choice(pool["cities"])
