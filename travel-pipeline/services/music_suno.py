@@ -223,7 +223,7 @@ def _download_mp3(url: str, dest: str) -> str:
     return dest
 
 
-def store_tracks(theme_slug: str, task_id: str, tracks: list[dict], *, genre: str = "") -> list[dict]:
+def store_tracks(theme_slug: str, task_id: str, tracks: list[dict], *, genre: str = "", action: str = "") -> list[dict]:
     """완료된 곡들을 R2 영구 저장 + DB 기록(멱등). 저장된 record 리스트 반환.
 
     genre(#46): 재활용 매칭용 장르 id. 신규 트랙은 used=false 로 저장되어, 1회 호출당
@@ -279,6 +279,8 @@ def store_tracks(theme_slug: str, task_id: str, tracks: list[dict], *, genre: st
         if genre:
             record["genre"] = genre
             record["used"] = False
+        if action:
+            record["action"] = action
         music_store.upsert_track(record)
         records.append(record)
     return records
@@ -298,5 +300,5 @@ def generate_and_store(
     theme_slug = theme.get("theme_slug") or "untitled"
     task_id = submit_generation(theme)
     tracks = poll_task(task_id, timeout=timeout, interval=interval)
-    records = store_tracks(theme_slug, task_id, tracks, genre=theme.get("genre_id") or "")
+    records = store_tracks(theme_slug, task_id, tracks, genre=theme.get("genre_id") or "", action=theme.get("action") or "")
     return {"task_id": task_id, "tracks": records}

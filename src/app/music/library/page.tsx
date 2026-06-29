@@ -9,6 +9,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { MUSIC_GENRES } from "@/lib/music-genres"
+import { ACTION_TAGS } from "@/lib/music-tags"
 import { estimateProductionTime, fmtMinutes } from "@/lib/music"
 
 interface LibraryItem {
@@ -17,6 +18,7 @@ interface LibraryItem {
   title: string
   tags: string
   genre: string
+  action: string
   duration: number | null
   used: boolean
   created_at?: string
@@ -30,6 +32,7 @@ interface GenreStat {
 }
 
 const GENRE_LABEL = new Map(MUSIC_GENRES.map((g) => [g.id, g.label]))
+const ACTION_LABEL = new Map(ACTION_TAGS.map((t) => [t.id, t.label_kr]))
 const STATUS_FILTERS = [
   { key: "all", label: "전체" },
   { key: "unused", label: "미사용" },
@@ -51,6 +54,7 @@ export default function MusicLibraryPage() {
   const [stats, setStats] = useState<GenreStat[]>([])
   const [loading, setLoading] = useState(true)
   const [genre, setGenre] = useState("all")
+  const [action, setAction] = useState("all")
   const [status, setStatus] = useState<(typeof STATUS_FILTERS)[number]["key"]>("all")
   // B-5: 선택 순서 보존(배열). 믹스 순서 = 이 순서.
   const [selectedOrder, setSelectedOrder] = useState<string[]>([])
@@ -71,6 +75,7 @@ export default function MusicLibraryPage() {
   const load = useCallback(() => {
     const qs = new URLSearchParams()
     if (genre !== "all") qs.set("genre", genre)
+    if (action !== "all") qs.set("action", action)
     if (status !== "all") qs.set("used", status === "used" ? "true" : "false")
     qs.set("limit", "200")
     fetch(`/api/music/library?${qs.toString()}`)
@@ -78,7 +83,7 @@ export default function MusicLibraryPage() {
       .then((d) => setItems(Array.isArray(d?.items) ? d.items : []))
       .catch(() => setItems([]))
       .finally(() => setLoading(false))
-  }, [genre, status])
+  }, [genre, action, status])
 
   useEffect(() => { load() }, [load])
   useEffect(() => {
@@ -247,6 +252,7 @@ export default function MusicLibraryPage() {
     } catch { /* 취소 실패는 무시 */ }
   }, [jobId, cancelRequested])
 
+  const actionChips = [{ id: "all", label: "전체" }, ...ACTION_TAGS.map((t) => ({ id: t.id, label: t.label_kr }))]
   const genreChips = [{ id: "all", label: "전체" }, ...MUSIC_GENRES.map((g) => ({ id: g.id, label: g.label }))]
   const playerActive = queue.length > 0 && Boolean(currentItem)
 
@@ -285,8 +291,23 @@ export default function MusicLibraryPage() {
         </div>
       </div>
 
-      {/* 필터 — B-1 가로 스크롤 */}
+      {/* 필터 — 어떨때 + 장르 + 상태 */}
       <div className="flex flex-col gap-2">
+        <div className={HSCROLL} style={NOSCROLLBAR}>
+          {actionChips.map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              onClick={() => setAction(a.id)}
+              className={cn(
+                "shrink-0 whitespace-nowrap rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors",
+                action === a.id ? "border-primary/40 bg-primary/15 text-primary" : "border-border text-muted-foreground hover:border-primary/30 hover:text-foreground",
+              )}
+            >
+              {a.label}
+            </button>
+          ))}
+        </div>
         <div className={HSCROLL} style={NOSCROLLBAR}>
           {genreChips.map((g) => (
             <Fragment key={g.id}>
@@ -408,6 +429,7 @@ export default function MusicLibraryPage() {
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-foreground">{it.title || "(제목 없음)"}</p>
                     <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                      {it.action && <span className="rounded-full bg-emerald-500/15 px-1.5 text-emerald-400">{ACTION_LABEL.get(it.action) || it.action}</span>}
                       <span className="rounded-full bg-primary/15 px-1.5 text-primary">{GENRE_LABEL.get(it.genre) || it.genre || "기타"}</span>
                       <span className="tabular-nums">{fmtDuration(it.duration)}</span>
                       <span className={it.used ? "text-muted-foreground" : "text-emerald-400"}>{it.used ? "사용됨" : "미사용"}</span>

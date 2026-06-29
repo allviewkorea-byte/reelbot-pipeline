@@ -215,7 +215,7 @@ def _consume_generated(all_clips: list[dict], seen: set[str]) -> list[dict]:
 def _gen_vocal(
     theme_slug: str, songs: list[dict], base_style: str, genre_theme: str, log,
     *, genre_id: str | None = None, seen: set[str] | None = None,
-    is_tag_path: bool = False,
+    is_tag_path: bool = False, action: str = "",
 ) -> tuple[list[dict], dict[str, str]]:
     """보컬 경로: 곡별 가사로 보컬곡 생성(부분 실패 허용) + 가사 원문 R2 보존.
 
@@ -240,6 +240,7 @@ def _gen_vocal(
             "lyrics": lyric,
             "vocalGender": gender,
             "genre_id": genre_id,  # #46: 트랙에 장르 기록(used=false로 적립)
+            "action": action,
         }
         try:
             log(f"보컬 생성 {i}/{len(valid)} [{gender}]: {s.get('title')}")
@@ -273,7 +274,7 @@ def _gen_vocal(
 def _gen_instrumental(
     theme_slug: str, n: int, style: str, genre_theme: str, log,
     *, genre_id: str | None = None, seen: set[str] | None = None,
-    is_tag_path: bool = False,
+    is_tag_path: bool = False, action: str = "",
 ) -> tuple[list[dict], dict[str, str]]:
     """연주 경로: 가사 없이 style 만으로 연주곡 N회 생성(instrumental=True, 부분 실패 허용).
 
@@ -299,6 +300,7 @@ def _gen_instrumental(
             "style": effective_style,
             "title": "",  # #52-A 빈값 → Suno 가 곡 제목 자동 생성(장르명+번호 "시티팝 5" 표시 방지)
             "genre_id": genre_id,  # #46: 둘째 클립이 used=false 로 적립 → 다음에 재활용
+            "action": action,
         }
         try:
             log(f"연주 생성 {i}/{n}")
@@ -331,6 +333,7 @@ def produce(
     seed: int | None = None,
     model: str | None = None,
     genre_id: str | None = None,
+    action: str = "",
     progress=None,
 ) -> dict:
     """주제 → N곡 생성 → 마스터 → 믹스. 완성 오디오 메타 반환.
@@ -341,6 +344,7 @@ def produce(
     lyrics(선택, vocal): 이미 만든/검수한 가사 리스트를 주면 가사 생성을 건너뛴다.
     genre_id(#46): 14장르 id. 있으면 (1) 고정 Suno 태그·instrumental 적용(태그 매핑),
       (2) 같은 장르 미사용 트랙 재활용. 없거나 태그 없는 장르 → 기존 LLM 스타일 폴백.
+    action: 어떨때 id(예: sleep, study). 트랙 DB에 저장(라이브러리 필터용).
     Returns: {theme_slug, track_type, songs:[...], produced:[record...], mastered, mix}
     """
 
@@ -368,7 +372,7 @@ def produce(
         produced, lyrics_by_id = _gen_instrumental(
             theme_slug, n, style_prompt or base_style, genre_theme, _log,
             genre_id=genre_id, seen=seen,
-            is_tag_path=not cfg,  # 태그 조합 경로: 길이 힌트 보강 + 재시도 1회 제한
+            is_tag_path=not cfg, action=action,
         )
     else:
         # ① 가사(헌법 3-스테이지) — 주어지면 재사용(검수본), lyric_tone 반영.
@@ -385,7 +389,7 @@ def produce(
         produced, lyrics_by_id = _gen_vocal(
             theme_slug, songs, base_style, genre_theme, _log,
             genre_id=genre_id, seen=seen,
-            is_tag_path=not cfg,  # 태그 조합 경로: 재시도 1회 제한
+            is_tag_path=not cfg, action=action,
         )
 
     if not produced:
@@ -469,6 +473,7 @@ def run_theme(
         do_mix=do_mix,
         model=lyrics_model,
         genre_id=genre_id,
+        action=(theme.get("tag_combo") or {}).get("action") or "",
         progress=progress,
     )
     out = {"theme": theme, "mix": result.get("mix"), "result": result}

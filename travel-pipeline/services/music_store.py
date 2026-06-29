@@ -22,6 +22,7 @@ sunoapi.org 로 생성·R2 보관한 곡의 메타데이터를 Supabase `music_t
     status text,
     used boolean not null default false,   -- #46: 영상에 사용됨(true=소진) / false=재활용 가능
     genre text not null default '',         -- #46: 장르 id(예: citypop). 빈값=레거시(재활용 제외)
+    action text not null default '',       -- 어떨때 id(예: sleep, study). 빈값=레거시(태그 없이 생성)
     created_at timestamptz default now()
   );
   grant all on table music_tracks to service_role, anon, authenticated;
@@ -124,14 +125,15 @@ def list_tracks(theme_slug: str, *, status: str | None = "SUCCESS") -> list[dict
 
 # ── 음원 라이브러리(#48) — 적립곡 목록·조회·통계 ───────────────────────
 _LIBRARY_SELECT = (
-    "id,theme_slug,task_id,audio_id,title,tags,duration,r2_key,status,used,genre,created_at"
+    "id,theme_slug,task_id,audio_id,title,tags,duration,r2_key,status,used,genre,action,created_at"
 )
 
 
 def list_library(
-    *, genre: str | None = None, used: bool | None = None, limit: int = 100, offset: int = 0,
+    *, genre: str | None = None, action: str | None = None, used: bool | None = None,
+    limit: int = 100, offset: int = 0,
 ) -> list[dict]:
-    """적립곡(SUCCESS) 목록을 최신순으로 조회. genre/used 필터 선택. 미설정/오류 시 빈 리스트."""
+    """적립곡(SUCCESS) 목록을 최신순으로 조회. genre/action/used 필터 선택. 미설정/오류 시 빈 리스트."""
     url, key = _supabase_cfg()
     if not (url and key):
         logger.warning("[music-db] SUPABASE 미설정 — 라이브러리 조회 생략")
@@ -147,6 +149,8 @@ def list_library(
         }
         if genre:
             params["genre"] = f"eq.{genre}"
+        if action:
+            params["action"] = f"eq.{action}"
         if used is not None:
             params["used"] = f"eq.{'true' if used else 'false'}"
         with httpx.Client(timeout=30.0) as c:

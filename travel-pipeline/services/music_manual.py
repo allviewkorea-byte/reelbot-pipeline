@@ -198,6 +198,7 @@ def run(job_id: str) -> None:
             style_prompt=theme["style_prompt"], track_type=theme.get("type", "vocal"),
             lyric_tone=theme["lyric_tone"], minutes=3.5,
             genre_id=None if job.get("tag_combo") else job["mood"],
+            action=(job.get("tag_combo") or {}).get("action") or "",
             progress=_produce_progress,
         )
         mix = result.get("mix")
