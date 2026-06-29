@@ -2,12 +2,14 @@
 export interface Track {
   title: string;
   start_sec: number;
+  quote?: string;
 }
 
 export interface ActiveTrack {
   title: string;
   start: number;
   end: number;
+  quote?: string;
 }
 
 // t(초)에 표시할 곡을 찾는다. 다음 곡 시작 = 현재 곡 끝, 마지막 곡은 durationSec 까지.
@@ -23,7 +25,8 @@ export function currentTrack(
       i + 1 < tracks.length ? tracks[i + 1].start_sec || durationSec : durationSec;
     if (t >= start && t < end) {
       const title = (tracks[i].title || "").trim();
-      return title ? { title, start, end } : null;
+      const quote = (tracks[i].quote || "").trim() || undefined;
+      return title ? { title, start, end, quote } : null;
     }
   }
   return null;
