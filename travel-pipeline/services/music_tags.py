@@ -338,6 +338,21 @@ _FOCUS_DEFAULTS: dict[str, list[str]] = {
 }
 
 
+_INST_FIXED_ACTIONS = {"sleep", "baby_sleep", "focus", "meditation"}
+_INST_RANDOM_POOL = ["instrumental", "piano_solo", "guitar_solo", "inst_only", "nature_mix", "music_box"]
+
+
+def _random_format(action: str) -> list[str]:
+    """85% 보컬 / 15% 연주곡. 연주곡 고정 action은 기존 동작 유지."""
+    if action in _INST_FIXED_ACTIONS:
+        if action == "baby_sleep":
+            return ["music_box"]
+        return ["instrumental"]
+    if random.random() < 0.85:
+        return ["vocal"]
+    return [random.choice(_INST_RANDOM_POOL)]
+
+
 def smart_random(partial: dict | None = None) -> dict:
     """빈 축을 맥락에 맞게 자동 채움.
 
@@ -346,10 +361,13 @@ def smart_random(partial: dict | None = None) -> dict:
     잠들때(action=sleep): 미선택 장르·템포·감정을 잠들때 어울리는 풀에서 채움.
     """
     if not partial or not any(partial.values()):
-        return dict(random.choice(_RANDOM_PRESETS))
+        preset = dict(random.choice(_RANDOM_PRESETS))
+        if not preset.get("format"):
+            preset["format"] = _random_format(preset.get("action", ""))
+        return preset
 
     result = dict(partial)
-    action = result.get("action")
+    action = result.get("action") or ""
     action_defaults = (
         _SLEEP_DEFAULTS if action == "sleep"
         else _BABY_SLEEP_DEFAULTS if action == "baby_sleep"
@@ -360,6 +378,9 @@ def smart_random(partial: dict | None = None) -> dict:
     for axis, tags_map in _AXIS_MAP.items():
         existing = result.get(axis)
         if existing:
+            continue
+        if axis == "format" and action not in _INST_FIXED_ACTIONS:
+            result[axis] = _random_format(action)
             continue
         hidden = conflict_hidden_chips(action, result)
         hidden_ids = hidden.get(axis, set())
