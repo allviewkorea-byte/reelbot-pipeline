@@ -199,35 +199,61 @@ def _gen_instrumental(
     theme_slug: str, n: int, style: str, genre_theme: str, log,
     *, genre_id: str | None = None, seen: set[str] | None = None,
     is_tag_path: bool = False, action: str = "",
+    theme_dict: dict | None = None,
 ) -> tuple[list[dict], dict[str, str]]:
     """연주 경로: 가사 없이 style 만으로 연주곡 N회 생성(instrumental=True, 부분 실패 허용).
 
     가사 없음 → lyrics_by_id 는 빈 dict(믹스 JSON 에 가사 미포함).
     #46: 곡마다 먼저 장르 재활용 풀을 확인 — 미사용 트랙이 있으면 Suno 호출 없이 재활용.
     is_tag_path: 태그 조합 경로면 True — 길이 힌트 보강 + 재시도 1회 제한(비용 절약).
+    theme_dict: 원본 theme(제목 생성용). 없으면 빈 dict.
     """
     produced: list[dict] = []
     seen = seen if seen is not None else set()
     # 태그 경로: 가사 없는 연주곡은 길이 힌트가 유일한 장치 → _with_length_hint 로 보강.
     effective_style = music_lyrics._with_length_hint(style) if is_tag_path else style
     tag_retries = 1 if is_tag_path else None  # 태그 경로 재시도 1회, 14장르는 기본(2회)
+
+    # 곡별 다양한 제목 + 스타일 변주 생성(LLM). 실패 시 빈 리스트 → 공통 style/Suno 자동 제목 폴백.
+    variations: list[dict] = []
+    try:
+        from services import music_meta
+        td = dict(theme_dict or {})
+        td.setdefault("genre_theme", genre_theme)
+        variations = music_meta.generate_instrumental_variations(n, effective_style, td)
+        if variations:
+            log(f"연주곡 제목+변주 {len(variations)}개 생성")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[produce] 연주곡 변주 생성 실패(공통 style 폴백): %s", e)
+
     for i in range(1, n + 1):
+        var = variations[i - 1] if i <= len(variations) else {}
+        title = var.get("title", "")
+        var_style = var.get("style", "")
+        # 변주 style이 있으면 사용, 없으면 공통 effective_style 폴백.
+        track_style = var_style if var_style else effective_style
+        # 태그 경로 길이 힌트: 변주 style에도 적용.
+        if is_tag_path and var_style:
+            track_style = music_lyrics._with_length_hint(track_style)
+
         # ① 재활용 우선 — 같은 장르 미사용 트랙이 있으면 Suno 건너뜀(크레딧 0).
         recycled = _recycle_track(genre_id, seen, log)
         if recycled is not None:
+            if title:
+                recycled["title"] = title
             produced.append({**recycled})
             continue
         # ② 없으면 Suno 정상 호출(폴백).
         theme = {
             "theme_slug": theme_slug,
             "instrumental": True,
-            "style": effective_style,
-            "title": "",  # #52-A 빈값 → Suno 가 곡 제목 자동 생성(장르명+번호 "시티팝 5" 표시 방지)
+            "style": track_style,
+            "title": title,
             "genre_id": genre_id,  # #46: 둘째 클립이 used=false 로 적립 → 다음에 재활용
             "action": action,
         }
         try:
-            log(f"연주 생성 {i}/{n}")
+            log(f"연주 생성 {i}/{n}: {title or '(자동)'}")
             res = _generate_with_retry(theme, log, max_retries=tag_retries)
         except Exception as e:  # noqa: BLE001 - 1곡 실패가 전체를 막지 않게
             logger.warning("[produce] 연주 %d 생성 실패: %s", i, e)
@@ -235,6 +261,8 @@ def _gen_instrumental(
         # suno 1회 호출 = 2클립. 첫 클립만 사용(used=true), 둘째는 적립(used=false, #46).
         for rec in _consume_generated(res.get("tracks", []), seen):
             if rec.get("audio_id"):
+                if title and not (rec.get("title") or "").strip():
+                    rec["title"] = title
                 produced.append({**rec})
     return produced, {}
 
@@ -291,12 +319,14 @@ def produce(
 
     if is_instrumental:
         # ① 가사 스킵. style_prompt 우선(주제/고정태그), 없으면 base_style.
-        songs: list[dict] = []
+        songs = []
         _log(f"연주 경로 — 가사 스킵, {n}곡 생성")
         produced, lyrics_by_id = _gen_instrumental(
             theme_slug, n, style_prompt or base_style, genre_theme, _log,
             genre_id=genre_id, seen=seen,
             is_tag_path=not cfg, action=action,
+            theme_dict={"slug": theme_slug, "genre": genre_theme,
+                        "genre_theme": genre_theme, "action": action},
         )
     else:
         # ① 가사(헌법 3-스테이지) — 주어지면 재사용(검수본), lyric_tone 반영.
