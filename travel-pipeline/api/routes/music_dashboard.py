@@ -246,6 +246,19 @@ def rerender_status(job_id: str):
     return st
 
 
+@router.get("/queue/{mix_id}/gpt-prompt")
+def regenerate_gpt_prompt(mix_id: str):
+    """폰 GPT 프롬프트를 새로 생성해서 반환. build_thumbnail_prompt()는 내부
+    random.choice로 매번 다른 결과를 내므로 재호출만으로 새 프롬프트. LLM 호출 없음."""
+    from services import music_video
+    row = music_uploads.get_upload(mix_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="큐 항목을 찾을 수 없습니다.")
+    slug = row.get("slug") or ""
+    theme = music_theme.get_theme(slug) or {"slug": slug, "title_kr": row.get("title_kr")}
+    return {"ok": True, "gpt_prompt": music_video.build_thumbnail_prompt(theme, row.get("viz_spec"))}
+
+
 @router.post("/queue/{mix_id}/localize")
 def localize_generate(mix_id: str):
     """다국어 데이터 생성(또는 캐시 반환) — 검수 UI [다국어 ▼] 진입 시 호출. {ok, localizations}."""
