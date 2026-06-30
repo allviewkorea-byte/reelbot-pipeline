@@ -198,31 +198,53 @@ def _thumb_person() -> str:
     ])
 
 
+_FACE_ART_KR = [
+    "정면을 본 사람의 눈 부분에 페인트 붓으로 그은 듯한 가로 스트로크가 있는 모습. 아트적이고 세련된 무드.",
+    "창살·블라인드·나뭇잎 그림자가 얼굴에 드리워져 일부만 보이는 모습. 예술적인 빛과 그림자.",
+    "꽃이나 식물이 얼굴 앞을 부분적으로 가린 모습. 자연스럽고 세련된 구도.",
+    "밝고 화사한 역광으로 얼굴이 살짝 실루엣처럼 보이는 모습. 어둡지 않게, 환하고 아름답게.",
+    "책·컵·손 등 오브제가 자연스럽게 얼굴 일부를 가린 모습. 세련된 일상 스냅 무드.",
+    "살짝 모션 블러로 얼굴이 흐릿하게 예술적으로 표현된 모습. 도시적이고 세련된 분위기.",
+]
+_FACE_ART_EN = [
+    "A person facing the camera with a paint brush stroke across the eyes, artistic and refined mood.",
+    "Venetian blind or leaf shadows falling across the face, only partially visible. Artistic light and shadow.",
+    "Flowers or plants partially obscuring the face from the front. Natural and refined composition.",
+    "Bright, warm backlight making the face a gentle silhouette. Not dark — luminous and beautiful.",
+    "A book, cup, or hand naturally covering part of the face. Refined everyday snapshot mood.",
+    "Slight motion blur making the face artistically soft. Urban and sophisticated atmosphere.",
+]
+
+
 def _thumb_subject() -> str:
     """#27 인물 비중 — 불규칙 등장, 예술적 가림."""
     r = random.random()
-    if r < 0.35:
+    if r < 0.30:
         return "No people — focus entirely on urban scenery, architecture and refined spaces."
-    if r < 0.55:
+    if r < 0.45:
         return "One person seen from the side or back (an extra, not the main subject). Stylish urban backdrop."
-    if r < 0.75:
+    if r < 0.58:
         return "A person wearing sunglasses walking naturally through a city street. Face partially hidden."
-    if r < 0.90:
+    if r < 0.70:
         return "One person with a hat or cap obscuring their face. Urban architecture background, as an extra."
+    if r < 0.92:
+        return random.choice(_FACE_ART_EN)
     return "A cute dog or small animal naturally in the scene (e.g. swimming or strolling)."
 
 
 def _thumb_subject_kr() -> str:
     """#31 인물 비중(한국어) — 불규칙 등장, 예술적 가림."""
     r = random.random()
-    if r < 0.35:
+    if r < 0.30:
         return "사람은 없이 도시 경관·건축·세련된 공간에만 집중."
-    if r < 0.55:
+    if r < 0.45:
         return "옆모습이나 뒷모습의 사람 한 명(엑스트라, 주인공 아님). 세련된 도시 배경."
-    if r < 0.75:
+    if r < 0.58:
         return "선글라스를 낀 사람이 자연스럽게 지나가는 도시 거리. 얼굴은 가려진 채."
-    if r < 0.90:
+    if r < 0.70:
         return "모자나 캡으로 얼굴이 가려진 사람 한 명. 도시 건축 배경, 엑스트라로."
+    if r < 0.92:
+        return random.choice(_FACE_ART_KR)
     return "수영하거나 거니는 강아지 등 작은 동물 한 마리가 자연스럽게."
 
 
@@ -320,14 +342,16 @@ def _thumb_trend_hint() -> str:
 def _thumb_subject_tag() -> str:
     """태그 조합용 인물 비중 — 불규칙 등장, 예술적 가림."""
     r = random.random()
-    if r < 0.35:
+    if r < 0.30:
         return "사람은 없이 도시 경관·건축·세련된 공간에만 집중."
-    if r < 0.55:
+    if r < 0.45:
         return "옆모습이나 뒷모습의 사람 한 명(엑스트라, 주인공 아님). 세련된 도시 배경."
-    if r < 0.75:
+    if r < 0.58:
         return "선글라스를 낀 사람이 자연스럽게 지나가는 도시 거리. 얼굴은 가려진 채."
-    if r < 0.90:
+    if r < 0.70:
         return "모자나 캡으로 얼굴이 가려진 사람 한 명. 도시 건축 배경, 엑스트라로."
+    if r < 0.92:
+        return random.choice(_FACE_ART_KR)
     return "수영하거나 거니는 강아지 등 작은 동물 한 마리가 자연스럽게."
 
 
