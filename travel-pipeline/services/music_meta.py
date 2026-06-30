@@ -488,25 +488,28 @@ def generate_instrumental_variations(
     mood = theme.get("mood") or ""
     slug = theme.get("slug") or theme.get("theme_slug") or ""
 
+    en_count = max(1, round(n * 0.2))
     system = (
         "너는 음악 플레이리스트 디렉터다. 연주곡(가사 없는 음악)의 제목과 "
         "곡별 스타일 변주를 기획한다.\n"
         "규칙:\n"
-        "- 제목: 한국어, 2~5 단어. 시적이고 감각적.\n"
+        f"- 제목: {n}곡 중 약 {en_count}곡은 영어 제목(자연스럽고 시적인 영문), "
+        "나머지는 한국어 제목. 2~5 단어. 시적이고 감각적.\n"
         "- 스타일 변주: 영문, Suno API style 용. 같은 장르 안에서 "
         "템포감·악기 강조·터치·무드를 곡마다 다르게.\n"
         "- ⚠️ 장르 이탈 금지: 기본 장르/악기 정체성을 유지한 채 변주할 것.\n"
-        "- N곡 전부 서로 다른 장면·분위기·소재여야 한다(중복 금지).\n"
+        "- N곡 전부 서로 다른 장면·분위기·소재여야 한다(제목 중복 금지).\n"
         "- 각 줄: 제목 | 스타일변주 (파이프로 구분, 번호·따옴표 없이).\n"
     )
     user = (
         f"곡 수: {n}\n기본 스타일: {style}\n"
         f"장르: {genre}\n행동: {action}\n분위기: {mood}\n슬러그: {slug}\n\n"
         f"위 기본 스타일을 바탕으로, {n}곡 서로 다른 제목과 스타일 변주를 만들어라.\n"
-        "각 줄: 한국어제목 | english style variation\n"
+        f"제목은 한국어와 영어를 섞되, 약 {en_count}곡은 영어 제목으로.\n"
+        "각 줄: 제목 | english style variation\n"
         "예시:\n"
         "고요한 새벽 창가 | slow piano ballad, gentle arpeggios, intimate\n"
-        "비 오는 골목길 | jazz-tinged piano, warm chords, relaxed swing feel\n"
+        "Midnight Whisper | jazz-tinged piano, warm chords, relaxed swing feel\n"
     )
     try:
         raw = music_lyrics._call(system, user, max_tokens=1200, model=_QUOTE_MODEL)
@@ -520,10 +523,19 @@ def generate_instrumental_variations(
             var_style = parts[1].strip() if len(parts) > 1 else ""
             if title:
                 results.append({"title": title, "style": var_style})
-        if len(results) >= n:
-            return results[:n]
-        logger.warning("[music-meta] 연주곡 변주 수 불일치(기대=%d, 생성=%d)", n, len(results))
-        return results
+        seen: set[str] = set()
+        deduped: list[dict] = []
+        for r in results:
+            key = r["title"].strip().lower()
+            if key not in seen:
+                seen.add(key)
+                deduped.append(r)
+        if len(deduped) < len(results):
+            logger.info("[music-meta] 연주곡 제목 중복 제거: %d→%d", len(results), len(deduped))
+        if len(deduped) >= n:
+            return deduped[:n]
+        logger.warning("[music-meta] 연주곡 변주 수 불일치(기대=%d, 생성=%d)", n, len(deduped))
+        return deduped
     except Exception as e:  # noqa: BLE001
         logger.warning("[music-meta] 연주곡 변주 생성 실패: %s", e)
     return []
