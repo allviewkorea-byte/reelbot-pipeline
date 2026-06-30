@@ -187,6 +187,15 @@ const INSTRUMENTAL_FORMATS = new Set([
   "beats_only", "nature_only", "music_box", "white_noise",
 ])
 
+const BEAT_GENRES = new Set([
+  "hiphop", "lofihiphop", "chillhop", "jazzhop", "rnb", "pop", "citypop",
+  "electronic", "synthwave", "house", "deephouse", "triphop",
+])
+const SOLO_FORMATS = new Set(["piano_solo", "guitar_solo", "music_box", "white_noise"])
+
+const PIANO_GENRES = new Set(["piano", "classical", "newage"])
+const BEATS_FORMATS = new Set(["beats_only"])
+
 export function getHiddenChips(
   actionId: string | null,
   combo?: TagCombo | null,
@@ -200,6 +209,23 @@ export function getHiddenChips(
     hidden.format = new Set(INSTRUMENTAL_FORMATS)
   } else if ([...fmtSet].some((f) => INSTRUMENTAL_FORMATS.has(f))) {
     hidden.format = new Set(["vocal"])
+  }
+
+  // genre ↔ format 궁합(명백한 충돌만)
+  const genres = new Set(combo?.genre ?? [])
+  if ([...genres].some((g) => BEAT_GENRES.has(g))) {
+    const prev = hidden.format ?? new Set()
+    hidden.format = new Set([...prev, ...SOLO_FORMATS])
+  }
+  if ([...genres].some((g) => PIANO_GENRES.has(g))) {
+    const prev = hidden.format ?? new Set()
+    hidden.format = new Set([...prev, ...BEATS_FORMATS])
+  }
+  if ([...fmtSet].some((f) => SOLO_FORMATS.has(f))) {
+    hidden.genre = new Set([...(hidden.genre ?? new Set()), ...BEAT_GENRES])
+  }
+  if ([...fmtSet].some((f) => BEATS_FORMATS.has(f))) {
+    hidden.genre = new Set([...(hidden.genre ?? new Set()), ...PIANO_GENRES])
   }
 
   if (!actionId) return hidden

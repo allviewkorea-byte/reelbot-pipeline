@@ -155,6 +155,15 @@ _INTENSE = {"workout", "running", "confidence"}
 _INSTRUMENTAL_FORMATS = {"instrumental", "inst_only", "piano_solo", "guitar_solo",
                          "beats_only", "nature_only", "music_box", "white_noise"}
 
+_BEAT_GENRES = {
+    "hiphop", "lofihiphop", "chillhop", "jazzhop", "rnb", "pop", "citypop",
+    "electronic", "synthwave", "house", "deephouse", "triphop",
+}
+_SOLO_FORMATS = {"piano_solo", "guitar_solo", "music_box", "white_noise"}
+
+_PIANO_GENRES = {"piano", "classical", "newage"}
+_BEATS_FORMATS = {"beats_only"}
+
 
 def conflict_hidden_chips(action_id: str | None, combo: dict | None = None) -> dict[str, set[str]]:
     """행동 + 현재 선택에 따라 숨길 칩 id 집합 반환.
@@ -172,6 +181,20 @@ def conflict_hidden_chips(action_id: str | None, combo: dict | None = None) -> d
         hidden["format"] = set(_INSTRUMENTAL_FORMATS)
     elif fmt_set & _INSTRUMENTAL_FORMATS:
         hidden["format"] = {"vocal"}
+
+    # ── genre ↔ format 궁합(명백한 충돌만) ──
+    genres = (combo or {}).get("genre") or []
+    if isinstance(genres, str):
+        genres = [genres]
+    genre_set = set(genres)
+    if genre_set & _BEAT_GENRES:
+        hidden.setdefault("format", set()).update(_SOLO_FORMATS)
+    if genre_set & _PIANO_GENRES:
+        hidden.setdefault("format", set()).update(_BEATS_FORMATS)
+    if fmt_set & _SOLO_FORMATS:
+        hidden.setdefault("genre", set()).update(_BEAT_GENRES)
+    if fmt_set & _BEATS_FORMATS:
+        hidden.setdefault("genre", set()).update(_PIANO_GENRES)
 
     if not action_id:
         return hidden
@@ -326,7 +349,6 @@ def smart_random(partial: dict | None = None) -> dict:
         return dict(random.choice(_RANDOM_PRESETS))
 
     result = dict(partial)
-    hidden = conflict_hidden_chips(result.get("action"), result)
     action = result.get("action")
     action_defaults = (
         _SLEEP_DEFAULTS if action == "sleep"
@@ -339,6 +361,7 @@ def smart_random(partial: dict | None = None) -> dict:
         existing = result.get(axis)
         if existing:
             continue
+        hidden = conflict_hidden_chips(action, result)
         hidden_ids = hidden.get(axis, set())
         if action_defaults and axis in action_defaults:
             pool = [k for k in action_defaults[axis] if k in tags_map and k not in hidden_ids]
