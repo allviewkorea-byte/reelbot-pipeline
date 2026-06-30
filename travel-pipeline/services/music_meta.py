@@ -352,19 +352,26 @@ Examples:
 """
 
 _QUOTE_MODEL = "claude-sonnet-4-6"
+_QUOTE_BATCH = int(os.getenv("MUSIC_QUOTE_BATCH", "5"))
+
+_PREFIX_RE = re.compile(r"^(?:song\s*\d+[:\-.\s]*|[\d]+[.)\-:\s]+|\*+\s*|-\s*)", re.IGNORECASE)
 
 
-def generate_track_quotes(tracks: list[dict], theme: dict) -> list[str]:
-    """곡별 명언풍 부제 생성(Claude Sonnet 4.6). 실패 시 빈 리스트(폴백=subtitle_en)."""
-    if not tracks:
-        return []
-    try:
-        from services import music_lyrics
-        if not music_lyrics.is_available():
-            return []
-    except Exception:  # noqa: BLE001
-        return []
+def _parse_quotes(raw: str) -> list[str]:
+    """LLM 명언 출력 파싱 — 빈 줄·번호·라벨·불릿 제거."""
+    result: list[str] = []
+    for ln in (raw or "").strip().splitlines():
+        ln = ln.strip().strip('"').strip("'").strip()
+        if not ln:
+            continue
+        ln = _PREFIX_RE.sub("", ln).strip().strip('"').strip("'").strip()
+        if ln:
+            result.append(ln)
+    return result
 
+
+def _build_quote_context(tracks: list[dict], theme: dict) -> list[str]:
+    """곡별 LLM 컨텍스트 줄 생성."""
     lines: list[str] = []
     for i, t in enumerate(tracks, 1):
         lyrics = (t.get("lyrics") or "").strip()
@@ -377,18 +384,74 @@ def generate_track_quotes(tracks: list[dict], theme: dict) -> list[str]:
             title = (t.get("title") or "").strip()
             title_hint = f", title={title}" if title else ""
             lines.append(f"Song {i} (instrumental — use mood/genre/title):\naction={action}, mood={mood}, genre={genre}{title_hint}")
+    return lines
 
-    user = f"Generate exactly {len(tracks)} quotes, one per song. Output each quote on its own line (no numbering, no bullets).\n\n" + "\n\n".join(lines)
 
+def _generate_quotes_batch(
+    context_lines: list[str], *, used: list[str] | None = None,
+) -> list[str]:
+    """context_lines 분량의 명언 1배치 생성. 실패 시 빈 리스트."""
+    from services import music_lyrics
+
+    n = len(context_lines)
+    avoid = ""
+    if used:
+        avoid = (
+            "\n\nAlready used (do NOT repeat or paraphrase these):\n"
+            + "\n".join(f"- {q}" for q in used)
+            + "\n"
+        )
+    user = (
+        f"Generate exactly {n} quote{'s' if n > 1 else ''}, one per song. "
+        f"Output ONLY the quotes, one per line. No numbering, no bullets, no labels, no blank lines.{avoid}\n\n"
+        + "\n\n".join(context_lines)
+    )
+    max_tokens = min(2000, 80 + 60 * n)
+    raw = music_lyrics._call(_QUOTE_SYSTEM, user, max_tokens=max_tokens, model=_QUOTE_MODEL)
+    return _parse_quotes(raw)
+
+
+def generate_track_quotes(tracks: list[dict], theme: dict) -> list[str]:
+    """곡별 명언풍 부제 생성(Claude Sonnet 4.6). 부분 성공 활용, 실패분만 폴백.
+
+    N ≤ 배치크기면 1회 호출. 큰 수는 배치 분할(25곡 롱폼 대비).
+    """
+    if not tracks:
+        return []
     try:
-        raw = music_lyrics._call(_QUOTE_SYSTEM, user, max_tokens=300, model=_QUOTE_MODEL)
-        result = [ln.strip().strip('"').strip("'").strip() for ln in (raw or "").strip().splitlines() if ln.strip()]
-        if len(result) >= len(tracks):
-            return result[:len(tracks)]
-        logger.warning("[music-meta] quote 수 불일치(기대=%d, 생성=%d) — 빈 폴백", len(tracks), len(result))
-    except Exception as e:  # noqa: BLE001
-        logger.warning("[music-meta] quote 생성 실패(subtitle_en 폴백): %s", e)
-    return []
+        from services import music_lyrics
+        if not music_lyrics.is_available():
+            return []
+    except Exception:  # noqa: BLE001
+        return []
+
+    all_lines = _build_quote_context(tracks, theme)
+    n = len(all_lines)
+    batch_size = _QUOTE_BATCH
+
+    if n <= batch_size:
+        try:
+            result = _generate_quotes_batch(all_lines)
+            if result:
+                return result[:n]
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[music-meta] quote 생성 실패(subtitle_en 폴백): %s", e)
+        return []
+
+    quotes: list[str] = []
+    used: list[str] = []
+    for batch_start in range(0, n, batch_size):
+        batch_lines = all_lines[batch_start:batch_start + batch_size]
+        try:
+            batch_quotes = _generate_quotes_batch(batch_lines, used=used if used else None)
+            quotes.extend(batch_quotes)
+            used.extend(batch_quotes)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[music-meta] quote 배치 %d 실패: %s", batch_start // batch_size + 1, e)
+
+    if not quotes:
+        return []
+    return quotes[:n]
 
 
 
