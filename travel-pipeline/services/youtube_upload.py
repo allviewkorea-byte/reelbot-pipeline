@@ -388,6 +388,7 @@ def upload_music_video(
                 "tags": tags,
                 "categoryId": "10",        # 음악
                 "defaultLanguage": "ko",
+                "defaultAudioLanguage": "ko",
             },
             "status": {
                 "privacyStatus": privacy,
@@ -541,6 +542,7 @@ def set_localizations(video_id: str, localizations: dict[str, dict], default_lan
             return {"ok": False, "error": "영상을 찾을 수 없음"}
         snippet = items[0]["snippet"]
         snippet["defaultLanguage"] = default_lang
+        snippet["defaultAudioLanguage"] = default_lang
         loc = {
             lng: {"title": str(d.get("title", ""))[:100], "description": str(d.get("description", ""))}
             for lng, d in localizations.items()
