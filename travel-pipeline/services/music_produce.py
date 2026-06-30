@@ -214,32 +214,40 @@ def _gen_instrumental(
     effective_style = music_lyrics._with_length_hint(style) if is_tag_path else style
     tag_retries = 1 if is_tag_path else None  # 태그 경로 재시도 1회, 14장르는 기본(2회)
 
-    # 곡별 다양한 제목 생성(LLM). 실패 시 빈 리스트 → Suno 자동 제목 폴백.
-    titles: list[str] = []
+    # 곡별 다양한 제목 + 스타일 변주 생성(LLM). 실패 시 빈 리스트 → 공통 style/Suno 자동 제목 폴백.
+    variations: list[dict] = []
     try:
         from services import music_meta
         td = dict(theme_dict or {})
         td.setdefault("genre_theme", genre_theme)
-        titles = music_meta.generate_instrumental_titles(n, effective_style, td)
-        if titles:
-            log(f"연주곡 제목 {len(titles)}개 생성")
+        variations = music_meta.generate_instrumental_variations(n, effective_style, td)
+        if variations:
+            log(f"연주곡 제목+변주 {len(variations)}개 생성")
     except Exception as e:  # noqa: BLE001
-        logger.warning("[produce] 연주곡 제목 생성 실패(Suno 자동 폴백): %s", e)
+        logger.warning("[produce] 연주곡 변주 생성 실패(공통 style 폴백): %s", e)
 
     for i in range(1, n + 1):
+        var = variations[i - 1] if i <= len(variations) else {}
+        title = var.get("title", "")
+        var_style = var.get("style", "")
+        # 변주 style이 있으면 사용, 없으면 공통 effective_style 폴백.
+        track_style = var_style if var_style else effective_style
+        # 태그 경로 길이 힌트: 변주 style에도 적용.
+        if is_tag_path and var_style:
+            track_style = music_lyrics._with_length_hint(track_style)
+
         # ① 재활용 우선 — 같은 장르 미사용 트랙이 있으면 Suno 건너뜀(크레딧 0).
         recycled = _recycle_track(genre_id, seen, log)
         if recycled is not None:
-            if i <= len(titles):
-                recycled["title"] = titles[i - 1]
+            if title:
+                recycled["title"] = title
             produced.append({**recycled})
             continue
         # ② 없으면 Suno 정상 호출(폴백).
-        title = titles[i - 1] if i <= len(titles) else ""
         theme = {
             "theme_slug": theme_slug,
             "instrumental": True,
-            "style": effective_style,
+            "style": track_style,
             "title": title,
             "genre_id": genre_id,  # #46: 둘째 클립이 used=false 로 적립 → 다음에 재활용
             "action": action,

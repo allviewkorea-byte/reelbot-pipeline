@@ -392,10 +392,14 @@ def generate_track_quotes(tracks: list[dict], theme: dict) -> list[str]:
 
 
 
-def generate_instrumental_titles(
+def generate_instrumental_variations(
     n: int, style: str, theme: dict,
-) -> list[str]:
-    """연주곡 N곡의 다양한 한국어 제목 생성(Claude Sonnet 4.6). 실패 시 빈 리스트."""
+) -> list[dict]:
+    """연주곡 N곡의 다양한 한국어 제목 + 곡별 스타일 변주 생성(Claude Sonnet 4.6).
+
+    반환: [{"title": "한국어 제목", "style": "영문 suno style 변주"}, ...]
+    실패 시 빈 리스트 → 폴백(공통 style, Suno 자동 제목).
+    """
     if n <= 0:
         return []
     try:
@@ -411,30 +415,52 @@ def generate_instrumental_titles(
     slug = theme.get("slug") or theme.get("theme_slug") or ""
 
     system = (
-        "너는 음악 트랙 제목 작가다. 연주곡(가사 없는 음악)의 분위기에 맞는 "
-        "짧고 서정적인 한국어 제목을 만든다.\n"
+        "너는 음악 플레이리스트 디렉터다. 연주곡(가사 없는 음악)의 제목과 "
+        "곡별 스타일 변주를 기획한다.\n"
         "규칙:\n"
-        "- 각 제목은 2~5 단어. 시적이고 감각적.\n"
+        "- 제목: 한국어, 2~5 단어. 시적이고 감각적.\n"
+        "- 스타일 변주: 영문, Suno API style 용. 같은 장르 안에서 "
+        "템포감·악기 강조·터치·무드를 곡마다 다르게.\n"
+        "- ⚠️ 장르 이탈 금지: 기본 장르/악기 정체성을 유지한 채 변주할 것.\n"
         "- N곡 전부 서로 다른 장면·분위기·소재여야 한다(중복 금지).\n"
-        "- 번호·따옴표·부연 없이 제목만 한 줄에 하나씩 출력.\n"
+        "- 각 줄: 제목 | 스타일변주 (파이프로 구분, 번호·따옴표 없이).\n"
     )
     user = (
-        f"곡 수: {n}\n스타일: {style}\n"
+        f"곡 수: {n}\n기본 스타일: {style}\n"
         f"장르: {genre}\n행동: {action}\n분위기: {mood}\n슬러그: {slug}\n\n"
-        f"위 분위기에 어울리는 서로 다른 한국어 제목 {n}개를 만들어라. "
-        "한 줄에 하나씩, 번호 없이."
+        f"위 기본 스타일을 바탕으로, {n}곡 서로 다른 제목과 스타일 변주를 만들어라.\n"
+        "각 줄: 한국어제목 | english style variation\n"
+        "예시:\n"
+        "고요한 새벽 창가 | slow piano ballad, gentle arpeggios, intimate\n"
+        "비 오는 골목길 | jazz-tinged piano, warm chords, relaxed swing feel\n"
     )
     try:
-        raw = music_lyrics._call(system, user, max_tokens=600, model=_QUOTE_MODEL)
-        titles = [ln.strip().strip('"').strip("'").strip()
-                  for ln in (raw or "").strip().splitlines() if ln.strip()]
-        if len(titles) >= n:
-            return titles[:n]
-        logger.warning("[music-meta] 연주곡 제목 수 불일치(기대=%d, 생성=%d)", n, len(titles))
-        return titles
+        raw = music_lyrics._call(system, user, max_tokens=1200, model=_QUOTE_MODEL)
+        results: list[dict] = []
+        for ln in (raw or "").strip().splitlines():
+            ln = ln.strip().strip('"').strip("'").strip()
+            if not ln or "|" not in ln:
+                continue
+            parts = ln.split("|", 1)
+            title = parts[0].strip()
+            var_style = parts[1].strip() if len(parts) > 1 else ""
+            if title:
+                results.append({"title": title, "style": var_style})
+        if len(results) >= n:
+            return results[:n]
+        logger.warning("[music-meta] 연주곡 변주 수 불일치(기대=%d, 생성=%d)", n, len(results))
+        return results
     except Exception as e:  # noqa: BLE001
-        logger.warning("[music-meta] 연주곡 제목 생성 실패: %s", e)
+        logger.warning("[music-meta] 연주곡 변주 생성 실패: %s", e)
     return []
+
+
+def generate_instrumental_titles(
+    n: int, style: str, theme: dict,
+) -> list[str]:
+    """하위호환 래퍼 — generate_instrumental_variations의 제목만 반환."""
+    variations = generate_instrumental_variations(n, style, theme)
+    return [v["title"] for v in variations]
 
 
 _BASE_TAGS = ["#playlist", "#playlists", "#플리", "#플레이리스트", "#music", "#musician", "#감성", "#감성음악", "#밝은음악"]
