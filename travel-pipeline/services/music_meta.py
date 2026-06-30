@@ -607,9 +607,9 @@ def _time_bucket(theme: dict, vs: dict) -> str:
 
 
 def build_hashtags(theme: dict, viz_spec: dict | None) -> list[str]:
-    """해시태그 20~50개 자동 조합(중복 없음).
+    """해시태그 10~14개 자동 조합(중복 없음).
 
-    태그 조합이 있으면 태그 기반(강세 3개 + 20~30개). 없으면 기존 풀 기반 30~50개.
+    태그 조합이 있으면 태그 기반(카테고리당 1개). 없으면 기존 풀 기반.
     """
     if _has_tag_combo(theme):
         return _build_hashtags_tag(theme)
@@ -627,30 +627,30 @@ def build_hashtags(theme: dict, viz_spec: dict | None) -> list[str]:
                 seen.add(key)
                 tags.append(t)
 
-    add(_BASE_TAGS)
-    add(_GENRE_TAGS.get(genre_en(theme, vs), _GENRE_TAGS["pop"]))
+    add(_BASE_TAGS[:3])
+    add(_GENRE_TAGS.get(genre_en(theme, vs), _GENRE_TAGS["pop"])[:2])
     for p in _purposes(theme, vs):
         for k, v in _PURPOSE_TAGS.items():
             if k in p:
-                add(v)
+                add(v[:1])
+                break
     tb = _time_bucket(theme, vs)
     if tb:
-        add(_TIME_TAGS[tb])
+        add(_TIME_TAGS[tb][:1])
     mc = str(vs.get("mood_category") or "").lower()
     if mc in _MOOD_TAGS:
-        add(_MOOD_TAGS[mc])
+        add(_MOOD_TAGS[mc][:1])
     loc = str(vs.get("location_en") or "").lower()
     for keys, v in _LOCATION_TAGS:
         if any(k in loc for k in keys):
-            add(v)
-    # 최소 30개 보장 — 부족하면 필러로 채움. 최대 50개.
-    if len(tags) < 30:
+            add(v[:1])
+    if len(tags) < 10:
         add(_FILLER_TAGS)
-    return tags[:50]
+    return tags[:14]
 
 
 def _build_hashtags_tag(theme: dict) -> list[str]:
-    """태그 조합 기반 해시태그. 강세 3개(action·genre·emotion) + 나머지 축 + 필러."""
+    """태그 조합 기반 해시태그. 각 축에서 1개씩 + 부족 시 필러(최대 14개)."""
     from services import music_tags
     combo = theme["tag_combo"]
     labels = music_tags.combo_labels_kr(combo)
@@ -667,28 +667,29 @@ def _build_hashtags_tag(theme: dict) -> list[str]:
                 seen.add(key)
                 tags.append(t)
 
-    add(_BASE_TAGS[:4])
-    for lbl in labels.get("action", []):
-        add([f"#{lbl}", f"#{lbl}듣는음악", f"#{lbl}플리"])
-    for lbl in labels.get("genre", []):
-        add([f"#{lbl}", f"#{lbl}플레이리스트", f"#{lbl}음악"])
-    for lbl in labels.get("emotion", []):
-        add([f"#{lbl}", f"#{lbl}음악"])
-    for lbl in labels.get("situation", []):
-        add([f"#{lbl}", f"#{lbl}음악"])
-    for lbl in labels.get("tempo", []):
+    add(_BASE_TAGS[:2])
+    for lbl in labels.get("action", [])[:1]:
+        add([f"#{lbl}"])
+    for lbl in labels.get("genre", [])[:2]:
+        add([f"#{lbl}"])
+    for lbl in labels.get("emotion", [])[:1]:
+        add([f"#{lbl}"])
+    for lbl in labels.get("situation", [])[:1]:
+        add([f"#{lbl}"])
+    for lbl in labels.get("tempo", [])[:1]:
         add([f"#{lbl}음악"])
-    for lbl in labels.get("charm", []):
+    for lbl in labels.get("charm", [])[:1]:
         add([f"#{lbl}"])
     genre_ids = combo.get("genre") or []
     if isinstance(genre_ids, str):
         genre_ids = [genre_ids]
-    for gid in genre_ids:
+    for gid in genre_ids[:1]:
         en = music_tags.GENRE_TAGS.get(gid, "")
         if en:
             add([f"#{en.replace(' ', '')}"])
-    add(_FILLER_TAGS)
-    return tags[:35]
+    if len(tags) < 10:
+        add(_FILLER_TAGS)
+    return tags[:14]
 
 
 # ── 트랙 리스트 ───────────────────────────────────────────────────────
