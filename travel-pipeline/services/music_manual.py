@@ -100,6 +100,12 @@ def start(mood: str | None = None, track_count: int | None = None, tag_combo: di
     global _active_job
     key = music_genres.normalize_mood_key(mood or _DEFAULT_MOOD)
     tc = _clamp_track_count(track_count if track_count is not None else 1)
+    # 랜덤 경로: 칩 비었으면 미리 채워 metadata에 반영(카드에 채워진 칩 표시).
+    if tag_combo:
+        has_chips = any(tag_combo.get(k) for k in ("genre", "situation", "emotion", "tempo", "format", "charm"))
+        if not has_chips:
+            from services import music_tags
+            tag_combo = music_tags.smart_random(tag_combo)
     with _LOCK:
         if _active_job and _JOBS.get(_active_job, {}).get("status") == "running":
             return {"ok": False, "error": "이미 영상 생성이 진행 중입니다. 완료 후 다시 시도하세요.", "busy_job": _active_job}
