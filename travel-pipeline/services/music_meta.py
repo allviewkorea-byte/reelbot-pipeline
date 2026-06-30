@@ -283,7 +283,16 @@ def _generate_title_copy_tag(theme: dict) -> tuple[str, str]:
     labels = music_tags.combo_labels_kr(combo)
     summary = music_tags.combo_summary_kr(combo)
     style_en = music_tags.tags_to_suno_style(combo)
+    instrumental = music_tags.is_instrumental(combo)
     title_type = "검색형" if _rnd.random() < 0.85 else "감성형"
+    inst_hint = ""
+    if instrumental:
+        inst_hint = (
+            "\n★ 이 곡은 연주곡(가사 없음)입니다. "
+            "제목에 반드시 '연주곡/피아노/기타/비트/인스트루멘탈' 등 "
+            "실제 음악 형식을 반영하세요. "
+            "보컬곡처럼 오해될 표현 금지."
+        )
     try:
         from services import music_lyrics
         user = (
@@ -292,7 +301,9 @@ def _generate_title_copy_tag(theme: dict) -> tuple[str, str]:
             f"태그 영어: {style_en}\n"
             f"행동: {labels.get('action', [''])[0]}\n"
             f"장르: {', '.join(labels.get('genre', []))}\n"
-            f"감정: {', '.join(labels.get('emotion', []))}"
+            f"감정: {', '.join(labels.get('emotion', []))}\n"
+            f"형식: {'연주곡(instrumental)' if instrumental else '보컬곡(vocal)'}"
+            f"{inst_hint}"
         )
         raw = music_lyrics._call(_TITLE_TAG_SYSTEM, user, max_tokens=100)
         line = (raw or "").strip().splitlines()[0].strip().strip('"').strip("'").strip()
