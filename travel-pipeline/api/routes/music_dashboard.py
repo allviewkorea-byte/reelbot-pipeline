@@ -326,6 +326,17 @@ def publish(mix_id: str):
     # 풍부화 메타(#37) — 캐시된 다국어(검수본) 우선, 없으면 즉석 생성. 원본 언어 제목·본문을
     # 기본 스니펫으로 쓰고(𝐏𝐥𝐚𝐲𝐥𝐢𝐬𝐭 시그니처·8섹션·해시태그), 나머지 언어는 localizations 로.
     loc = music_uploads.get_localizations(mix_id) or _build_localizations(theme, row.get("viz_spec"), mix)
+    # 보정: 구버전 캐시(#33)는 description에 해시태그가 빠져 있음 — 있으면 합침(idempotent).
+    from services import music_meta
+    _ht = loc.get("hashtags") or music_meta.build_hashtags(theme, row.get("viz_spec"))
+    _ht_line = " ".join(_ht)
+    if _ht_line:
+        for _d in (loc.get("meta") or {}).values():
+            _desc = str(_d.get("description") or "")
+            if _ht_line not in _desc:
+                _d["description"] = (_desc.rstrip() + "\n\n" + _ht_line).strip()
+        if not loc.get("hashtags"):
+            loc["hashtags"] = _ht
     src_lang = loc.get("source_lang", "ko")
     base_meta = (loc.get("meta") or {}).get(src_lang) or (loc.get("meta") or {}).get("ko") or {}
 
