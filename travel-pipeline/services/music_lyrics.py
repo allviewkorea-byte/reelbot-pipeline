@@ -211,9 +211,12 @@ def _plan_songs_batch(
         "구별되는 곡들을 기획한다. 클리셰·범용 기획을 금지한다.\n\n"
         f"=== 가사 헌법 ===\n{guidelines}"
     )
+    en_count = max(1, round(take * 0.2))
     title_rule = (
-        "각 곡의 title(곡 제목)은 반드시 한글로 작성하라(영어 제목 금지). "
-        "영어 훅 단어는 가사 본문에만 살짝 쓰고, 제목 자체는 한국어여야 한다.\n"
+        f"곡 제목(title) 언어 규칙: {take}곡 중 약 {en_count}곡은 영어 제목(자연스러운 영문, "
+        "분위기에 맞는 시적 표현), 나머지는 한국어 제목으로 작성하라. "
+        "영어 제목과 한국어 제목이 골고루 섞이게 배치할 것. "
+        "⚠️ 같은 영상 내 제목은 전부 서로 달라야 한다(중복 금지).\n"
         if str(language).lower().startswith("ko")
         else ""
     )
@@ -295,6 +298,12 @@ def plan_songs(
         remaining -= take
     if not plans:
         raise RuntimeError("가사 플랜 생성 결과가 비어 있습니다(전 배치 실패).")
+    seen_titles: set[str] = set()
+    for p in plans:
+        title = (p.get("title") or "").strip().lower()
+        if title in seen_titles:
+            p["title"] = p["title"] + " " + (p.get("emotion") or p.get("situation") or "II")
+        seen_titles.add((p.get("title") or "").strip().lower())
     return plans[:n]
 
 
