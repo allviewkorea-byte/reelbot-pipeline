@@ -209,26 +209,24 @@ def _pl(env_key: str, default: str) -> str:
     return (os.getenv(env_key) or default).strip()
 
 
-def _playlist_map() -> dict[str, str]:
-    drive = _pl("PLAYLIST_DRIVE", "PLZrNOKwpF4k0")
-    cafe = _pl("PLAYLIST_CAFE", "PLcNZY43Ms0_E")
-    latenight = _pl("PLAYLIST_LATENIGHT", "PLJ4wcfQLMbKQ")
-    energy = _pl("PLAYLIST_ENERGY", "PLT7NryPLY43s")
-    rest = _pl("PLAYLIST_REST", "PLTjRC7ZWEzhs")
-    return {
-        # 드라이브
-        "citypop": drive, "sunset_drive": drive, "morning_drive": drive,
-        # 카페
-        "cafe": cafe, "cafe_bgm": cafe, "lofi": cafe,
-        # 늦은 밤
-        "jazz": latenight, "rnb_soul": latenight, "ballad": latenight,
-        "breakup": latenight, "bar_lounge": latenight,
-        # 에너지
-        "workout": energy, "kpop": energy, "pop": energy, "hiphop": energy,
-        # 휴식
-        "sleep_study": rest, "spa_meditation": rest, "library_study": rest,
-        "hotel_lobby": rest,
-    }
+_PLAYLISTS = {
+    "sleep": lambda: _pl("PLAYLIST_SLEEP", "PLfINU1S2uFfo"),
+    "focus": lambda: _pl("PLAYLIST_FOCUS", "PLNIiY6A05fMM"),
+    "drive": lambda: _pl("PLAYLIST_DRIVE", "PLZrNOKwpF4k0"),
+    "cafe": lambda: _pl("PLAYLIST_CAFE", "PLcNZY43Ms0_E"),
+    "cafe_bgm": lambda: _pl("PLAYLIST_CAFE_BGM", "PLXynadl7wJfY"),
+    "energy": lambda: _pl("PLAYLIST_ENERGY", "PLT7NryPLY43s"),
+    "rest": lambda: _pl("PLAYLIST_REST", "PLNyKKy7h1SHc"),
+    "romance": lambda: _pl("PLAYLIST_ROMANCE", "PLeNMP0Qqclic"),
+    "latenight": lambda: _pl("PLAYLIST_LATENIGHT", "PLJ4wcfQLMbKQ"),
+    "travel": lambda: _pl("PLAYLIST_TRAVEL", "PLGOCcTR2EIxM"),
+    "comfort": lambda: _pl("PLAYLIST_COMFORT", "PLE-mN861qjiE"),
+    "energyboost": lambda: _pl("PLAYLIST_ENERGYBOOST", "PLRB22-HZL9h0"),
+}
+
+
+def _get_playlist(key: str) -> str:
+    return _PLAYLISTS[key]()
 
 
 def add_to_playlist(youtube, video_id: str, playlist_id: str) -> bool:
@@ -256,10 +254,93 @@ def add_to_playlist(youtube, video_id: str, playlist_id: str) -> bool:
 
 
 def _genre_playlist_id(theme: dict) -> str | None:
-    """주제 → 장르 id → 재생목록 id. genre_id 우선, 없으면 분류(best-effort). 매핑 없으면 None."""
+    """tag_combo 8축 기반 12개 재생목록 매칭. 매칭 안 되면 None(재생목록 미배정)."""
+    combo = theme.get("tag_combo")
+    if not combo:
+        return _legacy_playlist(theme)
+
+    action = combo.get("action") or ""
+    genres = combo.get("genre") or []
+    if isinstance(genres, str):
+        genres = [genres]
+    situations = combo.get("situation") or []
+    if isinstance(situations, str):
+        situations = [situations]
+    emotions = combo.get("emotion") or []
+    if isinstance(emotions, str):
+        emotions = [emotions]
+    formats = combo.get("format") or []
+    if isinstance(formats, str):
+        formats = [formats]
+
+    genres_s = set(genres)
+    situations_s = set(situations)
+    emotions_s = set(emotions)
+
+    _INSTRUMENTAL_FORMATS = {"instrumental", "piano_solo", "guitar_solo", "inst_only", "beats_only", "nature_mix", "nature_only"}
+    is_inst = bool(set(formats) & _INSTRUMENTAL_FORMATS)
+
+    # 우선순위 1 — 발라드/이별
+    if genres_s & {"ballad", "kballad", "sensballad"} or situations_s & {"breakup", "lights_off"}:
+        return _get_playlist("latenight")
+
+    # 우선순위 2 — 위로
+    if emotions_s & {"lonely", "sad", "depressed", "desolate", "comfort"} or situations_s & {"alone", "rain", "cloudy"}:
+        return _get_playlist("comfort")
+
+    # 우선순위 3 — 카페 (action 기준 + 형식 분기)
+    if action in ("cafe", "walk"):
+        return _get_playlist("cafe_bgm") if is_inst else _get_playlist("cafe")
+
+    # 우선순위 4 — action 직접 매칭
+    _FOCUS = {"study", "focus", "coding", "reading"}
+    _DRIVE = {"drive", "drive_scenic", "commute_morning", "commute_evening"}
+    _ENERGY = {"workout", "running", "cleaning", "startup"}
+    _REST = {"rest", "yoga", "stretching", "pilates", "zone_out"}
+    _ROMANCE = {"date", "couple", "singing"}
+    _SLEEP = {"sleep", "baby_sleep", "meditation"}
+
+    if action in _FOCUS:
+        return _get_playlist("focus")
+    if action in _DRIVE:
+        return _get_playlist("drive")
+    if action in _ENERGY:
+        return _get_playlist("energy")
+    if action in _REST:
+        return _get_playlist("rest")
+    if action in _ROMANCE:
+        return _get_playlist("romance")
+    if action in _SLEEP:
+        return _get_playlist("sleep")
+    if action == "travel":
+        return _get_playlist("travel")
+
+    # 우선순위 5 — 에너지 부스트 (action이 위에서 안 걸렸거나 confidence)
+    if action == "confidence" or emotions_s & {"hopeful", "passionate", "positive", "excited", "refreshed"}:
+        return _get_playlist("energyboost")
+
+    # 우선순위 6 — 설렘 보조 (emotion 기준)
+    if emotions_s & {"excited", "heartbeat"}:
+        return _get_playlist("romance")
+
+    return None
+
+
+def _legacy_playlist(theme: dict) -> str | None:
+    """tag_combo 없는 옛날 14장르 영상용 폴백. classify_theme → 12개 매핑."""
     from services import music_genres
     genre_id = (theme.get("genre_id") or music_genres.classify_theme(theme) or "").strip().lower()
-    return _playlist_map().get(genre_id)
+    _LEGACY_MAP = {
+        "citypop": "drive", "sunset_drive": "drive", "morning_drive": "drive",
+        "cafe": "cafe", "cafe_bgm": "cafe", "lofi": "cafe",
+        "jazz": "latenight", "rnb_soul": "latenight", "ballad": "latenight",
+        "breakup": "latenight", "bar_lounge": "latenight",
+        "workout": "energy", "kpop": "energy", "pop": "energy", "hiphop": "energy",
+        "sleep_study": "sleep", "spa_meditation": "rest", "library_study": "focus",
+        "hotel_lobby": "rest",
+    }
+    pl_key = _LEGACY_MAP.get(genre_id)
+    return _get_playlist(pl_key) if pl_key else None
 
 
 # ── 음악 채널(Revezen) 업로드 — 백곰과 분리, additive ──────────────────────

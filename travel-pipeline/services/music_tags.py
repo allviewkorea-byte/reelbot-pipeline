@@ -43,6 +43,7 @@ ACTION_TAGS: dict[str, dict] = {
     "yoga": {"label_kr": "요가할때", "prompt_en": "for yoga, serene and balanced"},
     "baby_sleep": {"label_kr": "아기재울때", "prompt_en": "for putting a baby to sleep, gentle lullaby, music box"},
     "focus": {"label_kr": "집중할때", "prompt_en": "for deep focus, concentration"},
+    "travel": {"label_kr": "여행갈때", "prompt_en": "for traveling, wanderlust, journey"},
 }
 
 # ── 축2~8 (칩 기반) ──────────────────────────────────────────────────
