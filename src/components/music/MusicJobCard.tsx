@@ -106,7 +106,7 @@ export function MusicJobCard({ job, onChanged }: { job: MusicJob; onChanged: () 
             <span>{relTime(job.created_at)}</span>
             <span>
               {job.metadata?.tag_combo
-                ? comboLabelsKr(job.metadata.tag_combo as TagCombo).slice(0, 4).join(" · ")
+                ? comboLabelsKr(job.metadata.tag_combo as TagCombo).join(" · ")
                 : typeof job.metadata?.mood === "string" ? job.metadata.mood : null}
               {job.metadata?.track_count != null ? ` · ${String(job.metadata.track_count)}곡` : ""}
             </span>
