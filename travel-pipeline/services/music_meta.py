@@ -374,7 +374,9 @@ def generate_track_quotes(tracks: list[dict], theme: dict) -> list[str]:
             mood = theme.get("mood") or ""
             action = (theme.get("tag_combo") or {}).get("action") or theme.get("situation") or ""
             genre = theme.get("genre") or ""
-            lines.append(f"Song {i} (instrumental — use mood/genre):\naction={action}, mood={mood}, genre={genre}")
+            title = (t.get("title") or "").strip()
+            title_hint = f", title={title}" if title else ""
+            lines.append(f"Song {i} (instrumental — use mood/genre/title):\naction={action}, mood={mood}, genre={genre}{title_hint}")
 
     user = f"Generate exactly {len(tracks)} quotes, one per song. Output each quote on its own line (no numbering, no bullets).\n\n" + "\n\n".join(lines)
 
@@ -388,6 +390,51 @@ def generate_track_quotes(tracks: list[dict], theme: dict) -> list[str]:
         logger.warning("[music-meta] quote 생성 실패(subtitle_en 폴백): %s", e)
     return []
 
+
+
+def generate_instrumental_titles(
+    n: int, style: str, theme: dict,
+) -> list[str]:
+    """연주곡 N곡의 다양한 한국어 제목 생성(Claude Sonnet 4.6). 실패 시 빈 리스트."""
+    if n <= 0:
+        return []
+    try:
+        from services import music_lyrics
+        if not music_lyrics.is_available():
+            return []
+    except Exception:  # noqa: BLE001
+        return []
+
+    action = (theme.get("tag_combo") or {}).get("action") or theme.get("situation") or ""
+    genre = theme.get("genre") or theme.get("genre_theme") or ""
+    mood = theme.get("mood") or ""
+    slug = theme.get("slug") or theme.get("theme_slug") or ""
+
+    system = (
+        "너는 음악 트랙 제목 작가다. 연주곡(가사 없는 음악)의 분위기에 맞는 "
+        "짧고 서정적인 한국어 제목을 만든다.\n"
+        "규칙:\n"
+        "- 각 제목은 2~5 단어. 시적이고 감각적.\n"
+        "- N곡 전부 서로 다른 장면·분위기·소재여야 한다(중복 금지).\n"
+        "- 번호·따옴표·부연 없이 제목만 한 줄에 하나씩 출력.\n"
+    )
+    user = (
+        f"곡 수: {n}\n스타일: {style}\n"
+        f"장르: {genre}\n행동: {action}\n분위기: {mood}\n슬러그: {slug}\n\n"
+        f"위 분위기에 어울리는 서로 다른 한국어 제목 {n}개를 만들어라. "
+        "한 줄에 하나씩, 번호 없이."
+    )
+    try:
+        raw = music_lyrics._call(system, user, max_tokens=600, model=_QUOTE_MODEL)
+        titles = [ln.strip().strip('"').strip("'").strip()
+                  for ln in (raw or "").strip().splitlines() if ln.strip()]
+        if len(titles) >= n:
+            return titles[:n]
+        logger.warning("[music-meta] 연주곡 제목 수 불일치(기대=%d, 생성=%d)", n, len(titles))
+        return titles
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[music-meta] 연주곡 제목 생성 실패: %s", e)
+    return []
 
 
 _BASE_TAGS = ["#playlist", "#playlists", "#플리", "#플레이리스트", "#music", "#musician", "#감성", "#감성음악", "#밝은음악"]
