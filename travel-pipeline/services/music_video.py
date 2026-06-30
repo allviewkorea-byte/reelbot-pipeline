@@ -199,22 +199,30 @@ def _thumb_person() -> str:
 
 
 def _thumb_subject() -> str:
-    """#27 인물 비중 — 80% 풍경(사람 없음) / 15% 먼 인물(얼굴 강조 X) / 5% 애견·동물."""
+    """#27 인물 비중 — 불규칙 등장, 예술적 가림."""
     r = random.random()
-    if r < 0.80:
-        return "No people — focus entirely on the landscape, architecture and nature."
-    if r < 0.95:
-        return "A distant figure as a small part of the scene, seen from afar, no face emphasis."
+    if r < 0.35:
+        return "No people — focus entirely on urban scenery, architecture and refined spaces."
+    if r < 0.55:
+        return "One person seen from the side or back (an extra, not the main subject). Stylish urban backdrop."
+    if r < 0.75:
+        return "A person wearing sunglasses walking naturally through a city street. Face partially hidden."
+    if r < 0.90:
+        return "One person with a hat or cap obscuring their face. Urban architecture background, as an extra."
     return "A cute dog or small animal naturally in the scene (e.g. swimming or strolling)."
 
 
 def _thumb_subject_kr() -> str:
-    """#31 인물 비중(한국어) — 80% 풍경 / 15% 먼 인물(얼굴X) / 5% 애견·동물."""
+    """#31 인물 비중(한국어) — 불규칙 등장, 예술적 가림."""
     r = random.random()
-    if r < 0.80:
-        return "사람은 없이 풍경·건축·자연에만 집중."
-    if r < 0.95:
-        return "멀리 작게 보이는 사람 한둘(얼굴은 보이지 않게, 거리감 있게)."
+    if r < 0.35:
+        return "사람은 없이 도시 경관·건축·세련된 공간에만 집중."
+    if r < 0.55:
+        return "옆모습이나 뒷모습의 사람 한 명(엑스트라, 주인공 아님). 세련된 도시 배경."
+    if r < 0.75:
+        return "선글라스를 낀 사람이 자연스럽게 지나가는 도시 거리. 얼굴은 가려진 채."
+    if r < 0.90:
+        return "모자나 캡으로 얼굴이 가려진 사람 한 명. 도시 건축 배경, 엑스트라로."
     return "수영하거나 거니는 강아지 등 작은 동물 한 마리가 자연스럽게."
 
 
@@ -310,12 +318,16 @@ def _thumb_trend_hint() -> str:
 
 
 def _thumb_subject_tag() -> str:
-    """태그 조합용 인물 비중 — 50~70% 불규칙 등장(얼굴 안 보이는 인물), 나머지 풍경."""
+    """태그 조합용 인물 비중 — 불규칙 등장, 예술적 가림."""
     r = random.random()
-    if r < 0.40:
-        return "사람은 없이 풍경·건축·자연에만 집중."
+    if r < 0.35:
+        return "사람은 없이 도시 경관·건축·세련된 공간에만 집중."
+    if r < 0.55:
+        return "옆모습이나 뒷모습의 사람 한 명(엑스트라, 주인공 아님). 세련된 도시 배경."
+    if r < 0.75:
+        return "선글라스를 낀 사람이 자연스럽게 지나가는 도시 거리. 얼굴은 가려진 채."
     if r < 0.90:
-        return "멀리 작게 보이는 사람 한둘(얼굴은 보이지 않게, 거리감 있게)."
+        return "모자나 캡으로 얼굴이 가려진 사람 한 명. 도시 건축 배경, 엑스트라로."
     return "수영하거나 거니는 강아지 등 작은 동물 한 마리가 자연스럽게."
 
 
@@ -353,15 +365,11 @@ def build_thumbnail_prompt(theme: dict, viz_spec: dict | None = None) -> str:
         if pooled:
             return f"{pooled}{mood_line}"
         return (
-            f"가로형 롱폼사이즈 (1920x1080, 16:9 비율), 파일 사이즈 4MB 이하의 "
-            f"플레이리스트 썸네일 배경 이미지. "
             f"{location_label}, {pool['scene']}, {pool['time']}. "
             f"{bright_force}"
-            f"맑은 날의 사실적인 풍경 사진, {pool['tone']}, {pool['light']}, "
+            f"{pool['tone']}, {pool['light']}, "
             f"깊이감 있는 원근감, {pool['accent']}. "
-            f"{_thumb_subject_tag()} "
-            f"실제 사진처럼 선명하고 고급스럽게.{mood_line} "
-            f"사람 얼굴은 보이지 않게, 글자 없음, 영어 없음, 로고 없음, 워터마크 없음."
+            f"{_thumb_subject_tag()}{mood_line}"
         )
 
     pooled = _genre_image_prompt(theme)
@@ -378,15 +386,11 @@ def build_thumbnail_prompt(theme: dict, viz_spec: dict | None = None) -> str:
         bright = bucket in ("citypop", "cafe", "workout", "summer")
         bright_force = "맑은 한낮의 환한 자연광, 화창한 날씨, " if bright else ""
         return (
-            f"가로형 롱폼사이즈 (1920x1080, 16:9 비율), 파일 사이즈 4MB 이하의 "
-            f"플레이리스트 썸네일 배경 이미지. "
             f"{location_label}, {pool['scene']}, {pool['time']}. "
             f"{bright_force}"
-            f"맑은 날의 사실적인 풍경 사진, {pool['tone']}, {pool['light']}, "
+            f"{pool['tone']}, {pool['light']}, "
             f"깊이감 있는 원근감, {pool['accent']}. "
-            f"{_thumb_subject_kr()} "
-            f"실제 사진처럼 선명하고 고급스럽게. "
-            f"사람 얼굴은 보이지 않게, 글자 없음, 영어 없음, 로고 없음, 워터마크 없음."
+            f"{_thumb_subject_kr()}"
         )
 
     # viz_spec 없음 → #17 동작(회귀 0).
