@@ -280,19 +280,9 @@ def _genre_playlist_id(theme: dict) -> str | None:
     _INSTRUMENTAL_FORMATS = {"instrumental", "piano_solo", "guitar_solo", "inst_only", "beats_only", "nature_mix", "nature_only"}
     is_inst = bool(set(formats) & _INSTRUMENTAL_FORMATS)
 
-    # 우선순위 1 — 발라드/이별
-    if genres_s & {"ballad", "kballad", "sensballad"} or situations_s & {"breakup", "lights_off"}:
-        return _get_playlist("latenight")
-
-    # 우선순위 2 — 위로
-    if emotions_s & {"lonely", "sad", "depressed", "desolate", "comfort"} or situations_s & {"alone", "rain", "cloudy"}:
-        return _get_playlist("comfort")
-
-    # 우선순위 3 — 카페 (action 기준 + 형식 분기)
-    if action in ("cafe", "walk"):
-        return _get_playlist("cafe_bgm") if is_inst else _get_playlist("cafe")
-
-    # 우선순위 4 — action 직접 매칭
+    # where 설계 원칙: 사람들은 '뭐 할 때(action)'로 검색한다 → action이 주축.
+    # action이 있고 매칭되면 action이 이긴다. genre/situation/emotion 규칙은
+    # action이 없거나 매칭 실패했을 때만 작동하는 폴백이다.
     _FOCUS = {"study", "focus", "coding", "reading"}
     _DRIVE = {"drive", "drive_scenic", "commute_morning", "commute_evening"}
     _ENERGY = {"workout", "running", "cleaning", "startup"}
@@ -300,6 +290,11 @@ def _genre_playlist_id(theme: dict) -> str | None:
     _ROMANCE = {"date", "couple", "singing"}
     _SLEEP = {"sleep", "baby_sleep", "meditation"}
 
+    # 우선순위 1 — 카페 (action 기준 + 형식 분기)
+    if action in ("cafe", "walk"):
+        return _get_playlist("cafe_bgm") if is_inst else _get_playlist("cafe")
+
+    # 우선순위 2 — action 직접 매칭
     if action in _FOCUS:
         return _get_playlist("focus")
     if action in _DRIVE:
@@ -315,11 +310,23 @@ def _genre_playlist_id(theme: dict) -> str | None:
     if action == "travel":
         return _get_playlist("travel")
 
-    # 우선순위 5 — 에너지 부스트 (action이 위에서 안 걸렸거나 confidence)
-    if action == "confidence" or emotions_s & {"hopeful", "passionate", "positive", "excited", "refreshed"}:
+    # 우선순위 3 — 에너지 부스트 (action = confidence)
+    if action == "confidence":
         return _get_playlist("energyboost")
 
-    # 우선순위 6 — 설렘 보조 (emotion 기준)
+    # 우선순위 4 — 발라드/이별 (action 미매칭 폴백)
+    if genres_s & {"ballad", "kballad", "sensballad"} or situations_s & {"breakup", "lights_off"}:
+        return _get_playlist("latenight")
+
+    # 우선순위 5 — 위로 (action 미매칭 폴백)
+    if emotions_s & {"lonely", "sad", "depressed", "desolate", "comfort"} or situations_s & {"alone", "rain", "cloudy"}:
+        return _get_playlist("comfort")
+
+    # 우선순위 6 — 에너지 부스트 (emotion 기준 폴백)
+    if emotions_s & {"hopeful", "passionate", "positive", "excited", "refreshed"}:
+        return _get_playlist("energyboost")
+
+    # 우선순위 7 — 설렘 보조 (emotion 기준 폴백)
     if emotions_s & {"excited", "heartbeat"}:
         return _get_playlist("romance")
 
