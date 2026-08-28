@@ -1,4 +1,4 @@
-"""다국어 번역(#32) — 가사·제목·설명을 10개 언어로 번역 + 해시태그 생성.
+"""다국어 번역(#32) — 가사·제목·설명을 11개 언어로 번역 + 해시태그 생성.
 
 글로벌 채널 정체성: 공개 업로드 시 자막·메타데이터를 다국어로. Claude(music_lyrics._call)
 재사용. ANTHROPIC_API_KEY 없으면 원본 언어만 돌려준다(회귀 안전). **테스트 1곡 생성과 무관**
@@ -12,7 +12,7 @@ import re
 
 logger = logging.getLogger(__name__)
 
-# 지원 언어(원본 제외 9개 + 원본 = 항상 10트랙). UI 탭 순서와 일치.
+# 번역 대상 10개. 원본(ko)까지 합쳐 ALL_LANGS = 11개. UI 탭 순서와 일치.
 TARGET_LANGS = ["en", "ja", "zh", "es", "pt", "ar", "hi", "th", "tl", "vi"]
 LANG_NAMES = {
     "ko": "Korean", "en": "English", "ja": "Japanese", "zh": "Chinese (Simplified)",
@@ -24,9 +24,37 @@ ALL_LANGS = ["ko"] + TARGET_LANGS  # UI: KR EN JA ZH ES PT AR HI TH TL VI
 _KOREAN = re.compile(r"[가-힣]")
 
 
-def detect_source_lang(text: str) -> str:
-    """가사 원본 언어 감지 — 한글 있으면 ko, 아니면 en(팝송 기본)."""
-    return "ko" if _KOREAN.search(text or "") else "en"
+def detect_source_lang(text: str, default: str = "ko") -> str:
+    """가사 원본 언어 감지 — 한글 있으면 ko, 없으면 en(팝송). 텍스트가 비면 default.
+
+    호출부가 `lyrics or title_kr or "ko-"` 처럼 센티넬로 '기본 ko' 를 표현했지만, "ko-"
+    에는 한글이 없어 오히려 en 으로 판정됐다. 그 결과 인스트곡(가사 없음) + title_kr 누락
+    시 원본 한국어 메타가 en 키로 저장되고 유튜브 defaultLanguage 까지 en 이 됐다.
+    빈 입력의 기본값은 센티넬이 아니라 이 인자로 표현한다.
+    """
+    if not (text or "").strip():
+        return default
+    return "ko" if _KOREAN.search(text) else "en"
+
+
+def missing_langs(meta: dict | None) -> list[str]:
+    """meta({lang:{title,description}}) 에서 빠졌거나 값이 빈 언어 목록. 완전하면 [].
+
+    캐시 완전성 판정용. 이전 기준은 `len(meta) >= 2` 라서 11개 중 9개가 번역 실패해도
+    '완성' 으로 간주돼 누락이 영구 고착됐다. title·description 이 모두 채워진 언어만
+    확보된 것으로 본다.
+    """
+    m = meta if isinstance(meta, dict) else {}
+    out: list[str] = []
+    for lng in ALL_LANGS:
+        d = m.get(lng)
+        if not (
+            isinstance(d, dict)
+            and str(d.get("title") or "").strip()
+            and str(d.get("description") or "").strip()
+        ):
+            out.append(lng)
+    return out
 
 
 def _is_available() -> bool:
@@ -57,18 +85,26 @@ def _translate_map(text: str, source: str, targets: list[str]) -> dict[str, str]
         return {}
 
 
-def translate_lyrics(lyrics_text: str, source_lang: str | None = None) -> dict[str, str]:
-    """가사 → 원본 + 9개 번역 = 10개 언어. {lang: 가사}.
+def translate_lyrics(
+    lyrics_text: str,
+    source_lang: str | None = None,
+    *,
+    skip_langs: set[str] | None = None,
+) -> dict[str, str]:
+    """가사 → 원본 + 최대 10개 번역 = 11개 언어(ALL_LANGS). {lang: 가사}.
 
-    #작업지시서 2026-06: 9개 언어를 단일 GPT 콜로 번역하면 출력 JSON 이 길어 뒤쪽 언어
+    #작업지시서 2026-06: 10개 언어를 단일 GPT 콜로 번역하면 출력 JSON 이 길어 뒤쪽 언어
     (일본어 등)가 잘려 누락됐다 → **언어별 1콜**로 분리(generate_localizations 패턴).
     각 콜이 짧아 truncation 원천 제거, 한 언어 실패가 다른 언어에 영향 없음(부분 성공).
+
+    skip_langs: 이미 확보된 언어(캐시 repair 시) — 재번역하지 않는다.
     """
     src = (source_lang or detect_source_lang(lyrics_text)).strip()
     result = {src: lyrics_text}
     if not lyrics_text.strip():
         return result
-    for lng in [t for t in ALL_LANGS if t != src]:
+    skip = skip_langs or set()
+    for lng in [t for t in ALL_LANGS if t != src and t not in skip]:
         one = _translate_map(lyrics_text, src, [lng])  # 언어 1개씩 → JSON 잘림 없음
         if one.get(lng, "").strip():
             result[lng] = one[lng]
@@ -100,13 +136,17 @@ def generate_localizations(
     *,
     base_title: str | None = None,
     base_description: str | None = None,
+    skip_langs: set[str] | None = None,
 ) -> dict[str, dict]:
-    """제목·설명 10개 언어 → {lang: {title, description}}. GPT 없으면 원본만.
+    """제목·설명 11개 언어(ALL_LANGS) → {lang: {title, description}}. GPT 없으면 원본만.
 
     base_title/base_description 을 주면(#37 music_meta 의 풍부한 제목·본문) 그것을 원본으로
     번역한다. 미지정 시 기존 _base_meta(간단 메타)로 폴백(회귀 안전).
+
+    skip_langs: 이미 확보된 언어(캐시 repair 시) — 재번역하지 않으며 결과에도 담지 않는다
+    (호출부가 캐시본을 merge 한다).
     """
-    src = detect_source_lang(lyrics or theme.get("title_kr", "") or "ko-")
+    src = detect_source_lang(lyrics or theme.get("title_kr", ""))
     if base_title is not None and base_description is not None:
         base_title, base_desc = base_title, base_description
     else:
@@ -115,7 +155,8 @@ def generate_localizations(
     # #37-B: 풍부화 본문(8섹션)은 길어, 10개 언어를 한 번에 번역하면 출력 JSON 이 잘려
     # 파싱 실패 → src 만 남는 버그가 있었다. 언어별 1콜로 분리해 각 콜이 토큰 한도에
     # 충분히 들어가게 하고, 한 언어 실패가 나머지를 막지 않도록 격리한다.
-    targets = [lng for lng in ALL_LANGS if lng != src]
+    skip = skip_langs or set()
+    targets = [lng for lng in ALL_LANGS if lng != src and lng not in skip]
     for t in targets:
         d = _translate_one_meta(base_title, base_desc, src, t)
         if d:

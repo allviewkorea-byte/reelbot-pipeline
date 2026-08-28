@@ -1009,7 +1009,7 @@ def make_video(
                     _lyrics = "\n".join(
                         (t.get("lyrics") or "").strip() for t in tracks if (t.get("lyrics") or "").strip()
                     )
-                    src = music_translate.detect_source_lang(_lyrics or title_kr or "ko-")
+                    src = music_translate.detect_source_lang(_lyrics or title_kr)
                     _bt = music_meta.build_title(theme, viz_spec)
                     _bd = music_meta.build_description(theme, viz_spec, tracks, None)
                     loc = {
