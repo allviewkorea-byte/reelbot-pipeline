@@ -161,23 +161,53 @@ def _load_mix(slug: str, mix_id: str) -> dict:
     return mix
 
 
-def _build_localizations(theme: dict, viz_spec: dict | None, mix: dict) -> dict:
+def _build_localizations(
+    theme: dict, viz_spec: dict | None, mix: dict, *, existing: dict | None = None
+) -> dict:
     """다국어 데이터 생성(#37 풍부화 제목·본문 + 번역 + 해시태그). GPT 없으면 원본만(회귀 안전).
 
     제목: 𝐏𝐥𝐚𝐲𝐥𝐢𝐬𝐭 시그니처 + 감정 카피. 본문: 8섹션(채널 설정 반영, 빈 값 생략).
-    해시태그(한국어+영어 30~50개)는 모든 언어 본문 끝에 공통으로 붙인다.
+    해시태그(music_meta.build_hashtags, 10~14개)는 모든 언어 본문 끝에 공통으로 붙인다.
+
+    existing: 기존 localizations 캐시. 주면 **이미 채워진 언어는 재번역하지 않고 그대로
+    보존**하고 빠진 언어만 번역한다(repair). 검수 UI 에서 대표가 수정·저장한 번역이
+    덮어써지지 않게 하려는 목적도 겸한다.
     """
     from services import music_channel, music_meta, music_translate
     lyrics = mix.get("lyrics") or ""
     tracks = mix.get("tracks") or []
     config = music_channel.get_channel_config()
-    src = music_translate.detect_source_lang(lyrics or theme.get("title_kr", "") or "ko-")
+    src = music_translate.detect_source_lang(lyrics or theme.get("title_kr", ""))
+    prev = existing if isinstance(existing, dict) else {}
+    # 원본 언어가 달라진 캐시는 재사용하지 않는다. detect_source_lang 의 "ko-" 센티넬
+    # 버그 시절 캐시는 한국어 본문이 source_lang="en" 으로 박혀 있어, 그대로 merge 하면
+    # 한국어가 en 키에 남은 채 '11/11 완성' 으로 굳는다 → 통째로 다시 만든다.
+    if prev and prev.get("source_lang") and prev.get("source_lang") != src:
+        logger.info(
+            "[music-dashboard] 캐시 source_lang 불일치(%s→%s) — 다국어 전체 재생성",
+            prev.get("source_lang"), src,
+        )
+        prev = {}
+    prev_meta = prev.get("meta") if isinstance(prev.get("meta"), dict) else {}
+    prev_lyrics = prev.get("lyrics") if isinstance(prev.get("lyrics"), dict) else {}
+    # 확보된 것으로 인정할 기존 값만 추린다(빈 문자열·형식 불일치는 재번역 대상).
+    keep_meta = {
+        lng: d
+        for lng, d in prev_meta.items()
+        if isinstance(d, dict)
+        and str(d.get("title") or "").strip()
+        and str(d.get("description") or "").strip()
+    }
+    keep_lyrics = {
+        lng: t for lng, t in prev_lyrics.items() if isinstance(t, str) and t.strip()
+    }
     base_title = music_meta.build_title(theme, viz_spec)
     base_body = music_meta.build_description(theme, viz_spec, tracks, config)  # 감성 멘트+트랙리스트+고정정보, 해시태그 제외
     hashtags = music_meta.build_hashtags(theme, viz_spec)
     hashtag_line = " ".join(hashtags)
     meta_raw = music_translate.generate_localizations(
         theme, viz_spec, lyrics, base_title=base_title, base_description=base_body,
+        skip_langs=set(keep_meta),
     )
     meta = {
         lng: {
@@ -186,10 +216,16 @@ def _build_localizations(theme: dict, viz_spec: dict | None, mix: dict) -> dict:
         }
         for lng, d in meta_raw.items()
     }
+    meta.update(keep_meta)  # 기존 번역(해시태그 이미 포함)이 이긴다 — 검수 수정본 보존.
+    if lyrics.strip():
+        lyr = music_translate.translate_lyrics(lyrics, src, skip_langs=set(keep_lyrics))
+        lyr.update(keep_lyrics)
+    else:
+        lyr = dict(keep_lyrics)
     return {
         "source_lang": src,
         "meta": meta,
-        "lyrics": music_translate.translate_lyrics(lyrics, src) if lyrics.strip() else {},
+        "lyrics": lyr,
         "hashtags": hashtags,
     }
 
@@ -248,25 +284,40 @@ def rerender_status(job_id: str):
 
 @router.post("/queue/{mix_id}/localize")
 def localize_generate(mix_id: str):
-    """다국어 데이터 생성(또는 캐시 반환) — 검수 UI [다국어 ▼] 진입 시 호출. {ok, localizations}."""
+    """다국어 데이터 생성(또는 캐시 반환) — 검수 UI [다국어 ▼] 진입 시 호출.
+
+    {ok, localizations, cached, repaired}. 캐시는 **ALL_LANGS 11개가 전부** 채워졌을 때만
+    그대로 재사용한다. 이전 기준 `len(meta) >= 2` 는 11개 중 9개가 번역 실패해도 '완성'
+    으로 봐서 누락이 영구 고착됐다. 일부만 있으면 **빠진 언어만** 다시 번역해 기존
+    번역 위에 merge 한다(repair).
+    """
     row = music_uploads.get_upload(mix_id)
     if not row:
         raise HTTPException(status_code=404, detail="해당 mix_id 의 큐 항목이 없습니다.")
-    # 캐시는 '실제 다국어(2개 언어 이상)'일 때만 재사용. #37-B 이전에 번역 실패로 원본 언어
-    # 1개만 저장된 캐시는 무시하고 재생성한다(GPT 가용 시).
+    from services import music_lyrics, music_translate
     cached = row.get("localizations")
-    if isinstance(cached, dict) and isinstance(cached.get("meta"), dict):
-        from services import music_lyrics
-        if len(cached["meta"]) >= 2 or not music_lyrics.is_available():
-            return {"ok": True, "localizations": cached, "cached": True}
+    cached = cached if isinstance(cached, dict) and isinstance(cached.get("meta"), dict) else None
+    missing = music_translate.missing_langs(cached.get("meta") if cached else None)
+    # 완전하거나, 번역 불가 환경(ANTHROPIC_API_KEY 없음)이면 있는 그대로 반환(회귀 안전).
+    if cached and (not missing or not music_lyrics.is_available()):
+        return {"ok": True, "localizations": cached, "cached": True, "repaired": []}
     slug = row.get("slug") or ""
     theme = music_theme.get_theme(slug) or {
         "slug": slug, "title_kr": row.get("title_kr"), "genre": row.get("genre"), "mood": row.get("mood"),
     }
     mix = _load_mix(slug, mix_id)
-    loc = _build_localizations(theme, row.get("viz_spec"), mix)
+    loc = _build_localizations(theme, row.get("viz_spec"), mix, existing=cached)
     music_uploads.set_localizations(mix_id, loc)
-    return {"ok": True, "localizations": loc, "cached": False}
+    if cached:
+        logger.info(
+            "[music-dashboard] 다국어 repair mix_id=%s 누락=%s", mix_id, ",".join(missing)
+        )
+    return {
+        "ok": True,
+        "localizations": loc,
+        "cached": False,
+        "repaired": missing if cached else [],
+    }
 
 
 class LocalizationsBody(BaseModel):
@@ -405,7 +456,9 @@ def publish(mix_id: str):
         lyrics_by_lang = loc.get("lyrics") or {}
         if lyrics_by_lang and mix.get("tracks"):
             total = mix.get("total_sec") or 0.0
-            srt = music_subtitles.build_srt_by_lang(mix["tracks"], total, lyrics_by_lang)
+            srt = music_subtitles.build_srt_by_lang(
+                mix["tracks"], total, lyrics_by_lang, source_lang=src_lang
+            )
             ml["captions"] = upload_captions(vid, srt)
     except Exception as e:  # noqa: BLE001 - 다국어 실패는 영상 공개를 막지 않음
         logger.warning("[music-dashboard] 다국어 적용 실패(영상은 공개됨): %s", e)

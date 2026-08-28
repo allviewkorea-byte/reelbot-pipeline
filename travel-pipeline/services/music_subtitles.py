@@ -59,8 +59,20 @@ def generate_srt_from_tracks(tracks: list[dict], total_sec: float, lyrics_overri
     return "\n".join(out).strip() + ("\n" if out else "")
 
 
-def build_srt_by_lang(tracks: list[dict], total_sec: float, lyrics_by_lang: dict[str, str]) -> dict[str, str]:
-    """언어별 SRT — 원본 언어는 tracks 구간 동기화, 번역은 전체 분배(러프)."""
+def build_srt_by_lang(
+    tracks: list[dict],
+    total_sec: float,
+    lyrics_by_lang: dict[str, str],
+    source_lang: str | None = None,
+) -> dict[str, str]:
+    """언어별 SRT — 원본 언어는 tracks 구간 동기화, 번역은 전체 분배(러프).
+
+    source_lang: 원본 언어 코드(localizations["source_lang"]). 이전에는
+    `next(iter(lyrics_by_lang))` 로 원본을 추정했으나, 이 dict 는 Supabase **jsonb** 에서
+    읽어온 것이고 jsonb 는 키 순서를 보존하지 않는다(길이→바이트순 정렬). 11개 2글자
+    코드는 항상 ar, en, es, ... 순이 되어 원본이 아닌 **아랍어**가 원본으로 잡혔다.
+    미지정 시에는 추정하지 않고 원본 우선 적용을 생략한다.
+    """
     result: dict[str, str] = {}
     # 원본(가장 정확): tracks 의 라인 단위 구간.
     base = generate_srt_from_tracks(tracks, total_sec)
@@ -68,8 +80,10 @@ def build_srt_by_lang(tracks: list[dict], total_sec: float, lyrics_by_lang: dict
         if not (text or "").strip():
             continue
         result[lang] = generate_srt_from_tracks(tracks, total_sec, lyrics_override=text)
-    # 원본 언어 SRT 가 비어있지 않으면 우선순위로 둔다(라인 정렬 정확).
-    if base.strip() and lyrics_by_lang:
-        src = next(iter(lyrics_by_lang))
-        result.setdefault(src, base)
+    # 원본 언어는 항상 base(트랙별 [start, 다음 start] 구간 동기화)로 덮어쓴다.
+    # override 경로는 전체 라인을 첫 곡~끝 구간에 균등 분배하는 러프 방식이라 원본에
+    # 쓸 이유가 없다. 기존 코드는 setdefault 라서 loop 가 이미 채운 값을 못 이겼고,
+    # 그래서 정확한 base 가 계산만 되고 버려졌다(원본 언어도 러프 자막을 받았다).
+    if base.strip() and source_lang:
+        result[source_lang] = base
     return result
