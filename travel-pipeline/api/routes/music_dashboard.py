@@ -230,6 +230,48 @@ def _build_localizations(
     }
 
 
+def _ensure_localizations(
+    mix_id: str,
+    cached: dict | None,
+    load,
+    *,
+    expected_src: str | None = None,
+) -> tuple[dict, list[str], bool]:
+    """캐시 완전성 검사 → 필요하면 **빠진 언어만** repair. (localizations, repaired, from_cache).
+
+    검수 UI 진입(localize_generate)과 공개 발행(publish)이 공유하는 단일 경로. 캐시는
+    ALL_LANGS 11개가 전부 채워졌을 때만 그대로 재사용하고, 일부만 있으면 기존 번역
+    (검수 수정본 포함)을 보존한 채 누락분만 번역해 merge 후 저장한다.
+
+    load: 빌드가 필요할 때만 호출되는 콜백 → (theme, viz_spec, mix). 캐시 적중 시
+      _load_mix(R2 다운로드) 비용을 치르지 않기 위해 지연 평가한다.
+    expected_src: 새로 감지한 원본 언어. 캐시의 source_lang 과 다르면 완전하더라도
+      재생성한다(detect_source_lang "ko-" 센티넬 버그 시절 캐시는 한국어 본문이
+      source_lang="en" 으로 박혀 있어, 그대로 쓰면 유튜브 defaultLanguage 가 en 이 된다).
+      호출부가 theme·mix 를 이미 들고 있을 때만 넘긴다.
+    """
+    from services import music_lyrics, music_translate
+    cached = cached if isinstance(cached, dict) and isinstance(cached.get("meta"), dict) else None
+    missing = music_translate.missing_langs(cached.get("meta") if cached else None)
+    stale = bool(
+        expected_src and cached and cached.get("source_lang")
+        and cached.get("source_lang") != expected_src
+    )
+    # 번역 불가 환경(ANTHROPIC_API_KEY 없음)에서는 캐시가 불완전해도 그대로 쓴다.
+    # 재생성해봐야 원본 언어 1개로 쪼그라들어 오히려 손해다(회귀 안전).
+    if cached and (not music_lyrics.is_available() or (not missing and not stale)):
+        return cached, [], True
+    theme, viz_spec, mix = load()
+    loc = _build_localizations(theme, viz_spec, mix, existing=cached)
+    music_uploads.set_localizations(mix_id, loc)
+    if cached:
+        logger.info(
+            "[music-dashboard] 다국어 repair mix_id=%s 누락=%s stale=%s",
+            mix_id, ",".join(missing) or "-", stale,
+        )
+    return loc, (missing if cached else []), False
+
+
 @router.delete("/queue/{mix_id}/thumbnail")
 def remove_thumbnail(mix_id: str):
     """업로드한 이미지 제거(#33 C) — thumbnail_r2_key 해제. 다시 업로드 후 [재렌더] 가능."""
@@ -294,30 +336,16 @@ def localize_generate(mix_id: str):
     row = music_uploads.get_upload(mix_id)
     if not row:
         raise HTTPException(status_code=404, detail="해당 mix_id 의 큐 항목이 없습니다.")
-    from services import music_lyrics, music_translate
-    cached = row.get("localizations")
-    cached = cached if isinstance(cached, dict) and isinstance(cached.get("meta"), dict) else None
-    missing = music_translate.missing_langs(cached.get("meta") if cached else None)
-    # 완전하거나, 번역 불가 환경(ANTHROPIC_API_KEY 없음)이면 있는 그대로 반환(회귀 안전).
-    if cached and (not missing or not music_lyrics.is_available()):
-        return {"ok": True, "localizations": cached, "cached": True, "repaired": []}
-    slug = row.get("slug") or ""
-    theme = music_theme.get_theme(slug) or {
-        "slug": slug, "title_kr": row.get("title_kr"), "genre": row.get("genre"), "mood": row.get("mood"),
-    }
-    mix = _load_mix(slug, mix_id)
-    loc = _build_localizations(theme, row.get("viz_spec"), mix, existing=cached)
-    music_uploads.set_localizations(mix_id, loc)
-    if cached:
-        logger.info(
-            "[music-dashboard] 다국어 repair mix_id=%s 누락=%s", mix_id, ",".join(missing)
-        )
-    return {
-        "ok": True,
-        "localizations": loc,
-        "cached": False,
-        "repaired": missing if cached else [],
-    }
+
+    def _load() -> tuple[dict, dict | None, dict]:
+        slug = row.get("slug") or ""
+        theme = music_theme.get_theme(slug) or {
+            "slug": slug, "title_kr": row.get("title_kr"), "genre": row.get("genre"), "mood": row.get("mood"),
+        }
+        return theme, row.get("viz_spec"), _load_mix(slug, mix_id)
+
+    loc, repaired, from_cache = _ensure_localizations(mix_id, row.get("localizations"), _load)
+    return {"ok": True, "localizations": loc, "cached": from_cache, "repaired": repaired}
 
 
 class LocalizationsBody(BaseModel):
@@ -376,7 +404,23 @@ def publish(mix_id: str):
 
     # 풍부화 메타(#37) — 캐시된 다국어(검수본) 우선, 없으면 즉석 생성. 원본 언어 제목·본문을
     # 기본 스니펫으로 쓰고(𝐏𝐥𝐚𝐲𝐥𝐢𝐬𝐭 시그니처·8섹션·해시태그), 나머지 언어는 localizations 로.
-    loc = music_uploads.get_localizations(mix_id) or _build_localizations(theme, row.get("viz_spec"), mix)
+    # 캐시가 있어도 그대로 믿지 않는다 — ALL_LANGS 11개 완전성·source_lang 일치를 검사해
+    # 누락분만 repair 후 저장한다(localize_generate 와 동일 경로). 공개 직전이 마지막 교정
+    # 기회이고, 여기서 빠진 언어는 그대로 유튜브에 누락으로 박힌다.
+    from services import music_translate as _mtranslate
+    loc, _repaired, _ = _ensure_localizations(
+        mix_id,
+        music_uploads.get_localizations(mix_id),
+        lambda: (theme, row.get("viz_spec"), mix),
+        expected_src=_mtranslate.detect_source_lang(
+            (mix.get("lyrics") or "") or theme.get("title_kr", "")
+        ),
+    )
+    if _repaired:
+        logger.warning(
+            "[music-dashboard] 공개 직전 다국어 repair mix_id=%s 누락=%s",
+            mix_id, ",".join(_repaired),
+        )
     # 보정: 구버전 캐시(#33)는 description에 해시태그가 빠져 있음 — 있으면 합침(idempotent).
     from services import music_meta
     _ht = loc.get("hashtags") or music_meta.build_hashtags(theme, row.get("viz_spec"))
