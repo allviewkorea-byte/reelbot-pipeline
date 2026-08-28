@@ -67,6 +67,34 @@ py -m uvicorn api.server:app --port 8000           # ⚠️ py 필수 (--reload 
 
 ---
 
+## PR·머지 규칙
+
+1. **작업 완료 시 항상 PR 생성** (`mcp__github__create_pull_request`).
+   제목에 작업 항목 명시. 본문에 **반드시** 포함:
+   - 변경 파일 목록 + 각 파일 변경 라인 수
+   - 검증 결과 (`py_compile` / 테스트 / `tsc`)
+   - 불변파일 4종(`MusicViz.tsx`, `render.mjs`, `globals.css`, `design/page.tsx`) **0줄 확인**
+   - 지시 범위를 넘어 판단한 것이 있으면 **명시**
+2. **PR 번호를 보고하고 대기.**
+3. **force push 절대 금지.** `main`에서 깨끗이 분기 또는 기존 브랜치에 add commit만.
+   **머지된 브랜치에는 새 작업을 쌓지 않는다** (최신 `main`에서 다시 분기).
+
+### 자율 머지 허용 (지시 없이 `merge_pull_request` 가능)
+- 주석·docstring·문서(md)만 변경
+- 테스트 파일만 추가
+- 이미 승인된 작업의 오타 수정
+
+### 반드시 검수 대기 (대표 지시 전 머지 금지)
+- 파이프라인 / 렌더 / 업로드 / Suno 호출 로직
+- DB 스키마 변경 (SQL + GRANT 선행 필요)
+- 불변파일 인접 코드
+- 곡 개수 로직 (Suno 1회=2클립, N곡=2N곡)
+- **위 어디에도 해당하는지 애매하면 → 검수 대기**
+
+머지 시 `merge_method`는 **`merge`**(squash 아님) 사용.
+
+---
+
 ## 인프라 (2026-06 기준)
 
 | 영역 | 구성 |
