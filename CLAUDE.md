@@ -15,11 +15,33 @@ AI 기반 한국어 감성 사연(썰) 숏폼 영상 자동 제작 파이프라�
 ## 🚨 디자인 시스템 — 절대 불변 제약 (모든 PR, 예외 없음)
 
 ### 절대 금지
-- 🛑 **`src/app/sayeon/page.tsx` 수정 절대 금지** (백곰 운영 엔진). 조사 시 읽기만 허용.
-- `globals.css`의 `@theme inline` 블록 **수정 금지**
-- `src/components/ui/*` (shadcn) **수정 금지**
+- 🛑 **불변파일 6종 수정 절대 금지** — 목록은 아래 "🔒 불변파일 6종"(경로를 여기 다시 적지 말 것).
+  `sayeon/page.tsx`(백곰 운영 엔진)는 조사 시 **읽기만** 허용, `globals.css`는 `@theme inline` 블록이 특히 위험.
 - 새 색상·폰트·간격 토큰 정의 금지 — 기존 토큰만 호출
 - keyframes·글로우는 styled-jsx(컴포넌트 스코프). globals 금지. React Flow 금지(순수 SVG).
+
+### 🔒 불변파일 6종 — **단일 정의** (다른 섹션은 여기를 참조)
+
+모든 PR에서 **diff 0줄**이어야 한다. 이 목록이 유일한 정의이며, 다른 섹션은 개수·경로를
+다시 적지 말고 "불변파일 6종"으로만 부른다.
+
+| # | 경로 | 비고 |
+|---|---|---|
+| 1 | `travel-pipeline/remotion/src/MusicViz.tsx` | 음악 영상 렌더 컴포넌트 |
+| 2 | `travel-pipeline/remotion/render.mjs` | Remotion 렌더 엔트리 |
+| 3 | `src/app/globals.css` | 특히 `@theme inline` 블록 |
+| 4 | `src/app/music/design/page.tsx` | 음악 디자인 페이지 |
+| 5 | `src/components/ui/*` | shadcn 원본 |
+| 6 | `src/app/sayeon/page.tsx` | 백곰 운영 엔진. 조사 시 **읽기만** 허용 |
+
+확인 명령:
+```bash
+git diff --numstat -- \
+  travel-pipeline/remotion/src/MusicViz.tsx travel-pipeline/remotion/render.mjs \
+  src/app/globals.css src/app/music/design/page.tsx \
+  'src/components/ui/*' src/app/sayeon/page.tsx
+# 출력이 비어 있어야 통과
+```
 
 ### 디자인 토큰 (참고)
 ```css
@@ -33,7 +55,7 @@ AI 기반 한국어 감성 사연(썰) 숏폼 영상 자동 제작 파이프라�
 ### PR마다 확인
 ```
 - [ ] tsc 통과 / lint 신규 0 / build 통과
-- [ ] globals.css diff 0줄 / components/ui/* diff 0줄 / sayeon/page.tsx diff 0줄
+- [ ] 불변파일 6종 diff 0줄 (→ 위 "🔒 불변파일 6종" 참조)
 - [ ] 기존 라우트 보존
 ```
 
@@ -58,26 +80,30 @@ py -m uvicorn api.server:app --port 8000           # ⚠️ py 필수 (--reload 
 
 ---
 
-## PR & 브랜치 규칙
-- 항상 `main`에서 분기 (기존 PR 브랜치 재사용 금지).
+## PR·브랜치·머지 규칙
+
+### 브랜치
+- **미머지 브랜치에는 add commit 허용** — 진행 중인 작업은 같은 브랜치에 이어 쌓는다.
+- **머지된 브랜치는 재사용 금지** — 최신 `main`에서 다시 분기한다(브랜치 이름은 재사용 가능).
+  머지된 PR은 새 작업을 추적할 수 없다.
+- **force push 는 어떤 경우에도 금지** (`--force`, `--force-with-lease` 모두). 머지된 브랜치를
+  최신 `main`으로 다시 맞출 때는 fast-forward 가 되는지 먼저 확인한다:
+  `git merge-base --is-ancestor <브랜치 HEAD> origin/main`
+
+### 작업 단위
 - PR 1개당 기능 1개. 큰 작업은 **조사 → 설계 → 작게 쪼갠 PR**.
 - 작업 전 관련 파일 직접 읽기 (추정 금지). 모든 작업지시서에 **0단계 사전조사** 포함.
 - 새 Supabase 테이블은 **GRANT 필수**: `grant all on table X to service_role, anon, authenticated;`
 - 트렌드 영역 **가짜/더미 데이터 금지** (빈 그릇만).
 
----
-
-## PR·머지 규칙
-
+### PR 생성
 1. **작업 완료 시 항상 PR 생성** (`mcp__github__create_pull_request`).
    제목에 작업 항목 명시. 본문에 **반드시** 포함:
    - 변경 파일 목록 + 각 파일 변경 라인 수
    - 검증 결과 (`py_compile` / 테스트 / `tsc`)
-   - 불변파일 4종(`MusicViz.tsx`, `render.mjs`, `globals.css`, `design/page.tsx`) **0줄 확인**
+   - **불변파일 6종 0줄 확인** (→ "🔒 불변파일 6종" 참조)
    - 지시 범위를 넘어 판단한 것이 있으면 **명시**
 2. **PR 번호를 보고하고 대기.**
-3. **force push 절대 금지.** `main`에서 깨끗이 분기 또는 기존 브랜치에 add commit만.
-   **머지된 브랜치에는 새 작업을 쌓지 않는다** (최신 `main`에서 다시 분기).
 
 ### 자율 머지 허용 (지시 없이 `merge_pull_request` 가능)
 - 주석·docstring·문서(md)만 변경
