@@ -257,7 +257,14 @@ def _ensure_localizations(
     """
     from services import music_lyrics, music_translate
     cached = cached if isinstance(cached, dict) and isinstance(cached.get("meta"), dict) else None
-    missing = music_translate.missing_langs(cached.get("meta") if cached else None)
+    # meta 뿐 아니라 **가사(lyrics)** 완전성도 함께 본다. 제목·설명 11개가 성공하면
+    # 가사가 비어 있어도 '완성' 으로 판정돼 repair 가 영영 돌지 않던 문제(자막 누락).
+    # 인스트곡은 원본 가사가 없으므로 missing_langs 가 가사 검사를 건너뛴다(비용 안전).
+    missing = music_translate.missing_langs(
+        cached.get("meta") if cached else None,
+        cached.get("lyrics") if cached else None,
+        (cached or {}).get("source_lang"),
+    )
     stale = bool(
         expected_src and cached and cached.get("source_lang")
         and cached.get("source_lang") != expected_src
@@ -270,10 +277,21 @@ def _ensure_localizations(
     loc = _build_localizations(theme, viz_spec, mix, existing=cached)
     music_uploads.set_localizations(mix_id, loc)
     if cached:
-        logger.info(
+        logger.warning(
             "[music-dashboard] 다국어 repair mix_id=%s 누락=%s stale=%s",
             mix_id, ",".join(missing) or "-", stale,
         )
+        # 가사 쪽 누락을 따로 남긴다 — 대표가 다국어 탭을 여는 것만으로 C 동작을 확인.
+        _prev_ly = cached.get("lyrics") if isinstance(cached.get("lyrics"), dict) else {}
+        _ly_missing = [
+            lng for lng in music_translate.ALL_LANGS
+            if not (isinstance(_prev_ly.get(lng), str) and _prev_ly[lng].strip())
+        ]
+        if _ly_missing and len(_ly_missing) < len(music_translate.ALL_LANGS):
+            logger.warning(
+                "[music-dashboard] 가사 repair mix_id=%s 누락=%s",
+                mix_id, ",".join(_ly_missing),
+            )
     return loc, (missing if cached else []), False
 
 
