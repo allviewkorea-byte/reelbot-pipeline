@@ -700,16 +700,44 @@ def _hhmmss(sec: float) -> str:
     return f"{h:02d}:{m:02d}:{ss:02d}"
 
 
-def build_tracklist(tracks: list[dict]) -> list[str]:
-    """[HH:MM:SS] 곡제목 줄 목록. start_sec 없으면 duration 누적으로 계산."""
-    lines: list[str] = []
+def _mmss(sec: float) -> str:
+    """곡 길이 표기 (M:SS). 1시간 넘는 곡은 없으므로 시 단위 불필요."""
+    s = int(round(max(0.0, sec)))
+    return f"{s // 60}:{s % 60:02d}"
+
+
+def build_tracklist(tracks: list[dict], total_sec: float | None = None) -> list[str]:
+    """[HH:MM:SS] 곡제목 (M:SS) 줄 목록. start_sec 없으면 duration 누적으로 계산.
+
+    곡 길이는 duration → (다음 곡 start − 현재 start) → (마지막 곡: total_sec − start)
+    순으로 구한다. 셋 다 실패하면 **괄호를 생략**한다 — (0:00) 같은 거짓 값은 절대
+    표시하지 않는다. 트랙리스트는 번역 대상이 아니라 모든 언어에 동일하게 나간다.
+    """
+    items = list(tracks or [])
+    # 1패스: 시작 시각 확정(기존 로직과 동일 — start_sec 없으면 duration 누적).
+    starts: list[float] = []
     acc = 0.0
-    for i, t in enumerate(tracks or []):
-        name = (t.get("title") or "").strip() or f"Track {i + 1}"
+    for t in items:
         start = t.get("start_sec")
         cur = float(start) if start is not None else acc
-        lines.append(f"[{_hhmmss(cur)}] {name}")
+        starts.append(cur)
         acc = cur + float(t.get("duration") or 0.0)
+    # 2패스: 줄 조립(길이는 구해지는 경우에만 괄호로 덧붙임).
+    lines: list[str] = []
+    for i, t in enumerate(items):
+        name = (t.get("title") or "").strip() or f"Track {i + 1}"
+        cur = starts[i]
+        try:
+            length = float(t.get("duration") or 0.0)
+        except (TypeError, ValueError):
+            length = 0.0
+        if length <= 0:
+            if i + 1 < len(items):
+                length = starts[i + 1] - cur
+            elif total_sec:
+                length = float(total_sec) - cur
+        suffix = f" ({_mmss(length)})" if length > 0 else ""
+        lines.append(f"[{_hhmmss(cur)}] {name}{suffix}")
     return lines
 
 
@@ -722,29 +750,57 @@ def build_description(
     *,
     hashtags: list[str] | None = None,
     channel_name: str | None = None,
+    total_sec: float | None = None,
 ) -> str:
     """본문 3블록: 감성 멘트 → 트랙리스트 → 고정 정보. 빈 소셜·Spotify 는 생략.
 
     hashtags 를 주면 마지막에 해시태그 섹션 추가(독립 호출/검증용). 다국어 번역 경로는
     본문만 만들고 해시태그를 언어별로 별도 append 한다.
+
+    내부적으로 build_description_parts + assemble_description(lang="ko") 로 조립한다.
+    출력은 리팩터 전과 문자 단위로 동일하다.
+    """
+    parts = build_description_parts(
+        theme, viz_spec, tracks, config, channel_name=channel_name, total_sec=total_sec
+    )
+    return assemble_description(parts, "ko", hashtags=hashtags)
+
+
+def build_description_parts(
+    theme: dict,
+    viz_spec: dict | None,
+    tracks: list[dict],
+    config: dict | None,
+    *,
+    channel_name: str | None = None,
+    total_sec: float | None = None,
+) -> dict:
+    """본문을 번역 대상/비대상으로 분리.
+
+    returns {
+        "intro": str,       # 감성 멘트 — ★번역 대상(유일)
+        "tracklist": str,   # 트랙리스트 — 번역 금지(타임스탬프+곡제목 고유명사)
+        "info_head": str,   # 📍 where;.. / AI고지 / Spotify / 소셜 — 번역 금지
+        "copyright": str,   # Copyright 줄 — 번역 금지
+    }
+    고정 안내문은 포함하지 않는다(언어별로 music_i18n.fixed_outro 사용).
+    조립은 assemble_description 이 담당하며, 조립 순서·구분선·이모지·줄바꿈은
+    기존 build_description 과 동일하다.
     """
     vs = viz_spec or {}
     cfg = config or {}
     where = str(vs.get("location_en") or "").strip() or "City View"
     flag = _flag(vs)
     emoji = _emoji(theme, vs)
-    blocks: list[str] = []
 
-    # [1] 감성 멘트(LLM, 폴백 결정적)
-    vibe = generate_vibe_intro(theme, viz_spec)
-    blocks.append(vibe)
+    # [1] 감성 멘트(LLM, 폴백 결정적) — 유일한 번역 대상
+    intro = generate_vibe_intro(theme, viz_spec)
 
-    # [2] Track list
-    tl = build_tracklist(tracks)
-    if tl:
-        blocks.append("🎵 Track list\n\n" + "\n".join(tl))
+    # [2] Track list — 번역 금지
+    tl = build_tracklist(tracks, total_sec)
+    tracklist = ("🎵 Track list\n\n" + "\n".join(tl)) if tl else ""
 
-    # [3] 고정 정보 블록
+    # [3] 고정 정보 블록(머리 부분) — 번역 금지
     info: list[str] = []
     info.append(f"📍 where;{where} {flag} {emoji}")
     ai = (cfg.get("ai_disclosure") or "").strip()
@@ -762,17 +818,36 @@ def build_description(
         social.append(f"🎵 TikTok: @{cfg['tiktok'].strip().lstrip('@')}")
     if social:
         info.extend(social)
-    info.append(
-        "\n🎵 가장 마음에 드는 노래는 무엇인가요?\n"
-        "댓글로 알려주시면 다음 플리에 큰 도움이 됩니다 💚\n\n"
-        "🔔 채널 구독하시면 매주 새로운 음악을 받아보실 수 있습니다 🔔"
-    )
-    info.append(f"Copyright Ⓒ {channel_name or _channel_name()} All rights reserved.")
-    blocks.append("\n".join(info))
+    return {
+        "intro": intro,
+        "tracklist": tracklist,
+        "info_head": "\n".join(info),
+        "copyright": f"Copyright Ⓒ {channel_name or _channel_name()} All rights reserved.",
+    }
 
-    # [4] 해시태그(옵션)
+
+def assemble_description(
+    parts: dict, lang: str = "ko", *, hashtags: list[str] | None = None
+) -> str:
+    """조각 + 언어별 고정 안내문 → 본문. 조립 규칙은 기존 build_description 과 동일.
+
+    고정 안내문 앞의 빈 줄(리스트 원소 선행 "\n")까지 원본 그대로 재현한다.
+    """
+    from services.music_i18n import fixed_outro
+
+    blocks: list[str] = [parts.get("intro") or ""]
+    if parts.get("tracklist"):
+        blocks.append(parts["tracklist"])
+    blocks.append(
+        "\n".join(
+            [
+                parts.get("info_head") or "",
+                "\n" + fixed_outro(lang),
+                parts.get("copyright") or "",
+            ]
+        )
+    )
     if hashtags:
         blocks.append(" ".join(hashtags))
-
     sep = f"\n\n{SEP}\n\n"
     return sep.join(blocks).strip()

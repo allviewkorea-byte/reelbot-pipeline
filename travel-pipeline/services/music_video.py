@@ -1011,12 +1011,15 @@ def make_video(
                     )
                     src = music_translate.detect_source_lang(_lyrics or title_kr)
                     _bt = music_meta.build_title(theme, viz_spec)
-                    _bd = music_meta.build_description(theme, viz_spec, tracks, None)
+                    _parts = music_meta.build_description_parts(
+                        theme, viz_spec, tracks, None, total_sec=duration
+                    )
+                    _bd = music_meta.assemble_description(_parts, src)
                     loc = {
                         "source_lang": src,
                         "meta": music_translate.generate_localizations(
                             theme, viz_spec, _lyrics,
-                            base_title=_bt, base_description=_bd,
+                            base_title=_bt, base_description=_bd, parts=_parts,
                         ),
                         "lyrics": music_translate.translate_lyrics(_lyrics, src) if _lyrics.strip() else {},
                         "hashtags": music_translate.generate_hashtags(theme, viz_spec),

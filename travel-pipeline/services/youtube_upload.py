@@ -438,6 +438,7 @@ def upload_music_video(
     title: str | None = None,
     description: str | None = None,
     tags: list[str] | None = None,
+    synthetic_media: bool | None = None,
 ) -> dict:
     """음악 영상(mp4)을 음악 채널(Revezen)에 업로드. Returns {video_id, video_url}.
 
@@ -446,6 +447,11 @@ def upload_music_video(
     thumbnail_path 가 있으면 썸네일도 첨부. mp4_path 는 R2 URL/로컬 경로 모두 가능.
     title/description/tags 를 주면(#37 풍부화 메타) 그것을 쓰고, 없으면 build_music_metadata.
     업로드 성공 시 music_uploads 에 기록(실패해도 업로드는 성공).
+
+    synthetic_media: AI 표시(status.containsSyntheticMedia). 우선순위는 백곰 upload_video 와
+    동일하게 전달 인자(대시보드 토글) > env(YOUTUBE_SYNTHETIC_MEDIA) > False.
+    이전에는 이 함수에 인자도 env 폴백도 없어 음악 영상에는 AI 표시가 **한 번도** 전달되지
+    않았다(유튜브 스튜디오 AI use 미선택). 백곰 경로에만 구현돼 있던 것을 여기에도 맞춘다.
     """
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaFileUpload
@@ -483,6 +489,19 @@ def upload_music_video(
                 "selfDeclaredMadeForKids": False,
             },
         }
+        # AI 표시 — 인자(대시보드 토글) > env > False. 값의 출처도 함께 로그로 남긴다.
+        if synthetic_media is None:
+            _raw_env = (os.getenv("YOUTUBE_SYNTHETIC_MEDIA") or "").strip().lower()
+            synthetic = _raw_env in ("1", "true", "on", "yes")
+            _src = f"env(YOUTUBE_SYNTHETIC_MEDIA={_raw_env or '미설정'})" if _raw_env else "기본값(False)"
+        else:
+            synthetic = bool(synthetic_media)
+            _src = "대시보드 토글"
+        if synthetic:
+            body["status"]["containsSyntheticMedia"] = True
+        logger.warning(
+            "[youtube-debug] containsSyntheticMedia=%s (출처: %s)", synthetic, _src
+        )
         logger.warning("[music-youtube] 업로드 시작: title=%s privacy=%s", title, privacy)
         media = MediaFileUpload(str(local), mimetype="video/mp4", chunksize=-1, resumable=True)
         response = youtube.videos().insert(part="snippet,status", body=body, media_body=media).execute()
@@ -594,12 +613,15 @@ def upload_captions(video_id: str, srt_by_lang: dict[str, str]) -> dict:
 
     uploaded: list[str] = []
     failed: dict[str, str] = {}
+    skipped: list[str] = []  # SRT 자체가 비어 업로드 시도조차 안 한 언어(번역 누락 신호)
     if not srt_by_lang:
-        return {"uploaded": [], "failed": {}}
+        logger.warning("[music-youtube] 자막 SRT 가 하나도 없음 — 업로드 생략")
+        return {"uploaded": [], "failed": {}, "skipped": []}
     youtube = _music_youtube_client()
     with tempfile.TemporaryDirectory(prefix="srt_") as tmp:
         for lang, srt in srt_by_lang.items():
             if not (srt or "").strip():
+                skipped.append(lang)
                 continue
             try:
                 path = Path(tmp) / f"{lang}.srt"
@@ -611,37 +633,116 @@ def upload_captions(video_id: str, srt_by_lang: dict[str, str]) -> dict:
             except Exception as e:  # noqa: BLE001 - 언어별 격리
                 failed[lang] = str(e)[:200]
                 logger.warning("[music-youtube] 자막 업로드 실패(%s): %s", lang, e)
-    logger.warning("[music-youtube] 자막 %d개 업로드(실패 %d)", len(uploaded), len(failed))
-    return {"uploaded": uploaded, "failed": failed}
+    # 실패·건너뜀을 구분해 남긴다 — 조용히 사라지면 원인 추적이 불가능하다.
+    if skipped:
+        logger.warning(
+            "[music-youtube] 자막 건너뜀(SRT 비어 있음) %d개: %s — 해당 언어 가사 번역 누락 의심",
+            len(skipped), ",".join(sorted(skipped)),
+        )
+    if failed:
+        logger.warning(
+            "[music-youtube] 자막 업로드 실패 %d개: %s",
+            len(failed), "; ".join(f"{k}({v[:80]})" for k, v in sorted(failed.items())),
+        )
+    logger.warning(
+        "[music-youtube] 자막 %d개 업로드(실패 %d, 건너뜀 %d) 성공=%s",
+        len(uploaded), len(failed), len(skipped), ",".join(sorted(uploaded)) or "-",
+    )
+    return {"uploaded": uploaded, "failed": failed, "skipped": skipped}
+
+
+# 유튜브 description 상한은 5000자. 여유 100자를 두고 자른다.
+_MAX_DESCRIPTION = 4900
+
+
+def _clamp_description(desc: str, lng: str) -> str:
+    """description 길이 가드. 초과분은 마지막 줄바꿈 기준으로 잘라 문장이 덜 끊기게 한다.
+
+    30곡 롱폼을 태국어·힌디어로 번역하면 5000자를 넘길 수 있고, 넘기면 videos.update
+    전체가 400 으로 떨어져 **전 언어가 날아간다**. 언어별로 미리 잘라 그 사고를 막는다.
+    """
+    if len(desc) <= _MAX_DESCRIPTION:
+        return desc
+    orig = len(desc)
+    cut = desc[:_MAX_DESCRIPTION]
+    nl = cut.rfind("\n")
+    if nl > _MAX_DESCRIPTION // 2:  # 너무 앞에서 끊기면 줄바꿈 대신 문자 단위로
+        cut = cut[:nl]
+    cut = cut.rstrip()
+    logger.warning("[music-youtube] %s description 길이 초과로 절단(%d자)", lng, orig)
+    return cut
 
 
 def set_localizations(video_id: str, localizations: dict[str, dict], default_lang: str = "ko") -> dict:
-    """제목·설명 다국어 적용(videos.update localizations). {ok, error}.
+    """제목·설명 다국어 적용(videos.update localizations). {ok, error, applied, failed}.
 
     localizations: {lang: {title, description}}. 기존 snippet 보존 + defaultLanguage 설정.
+
+    한 언어라도 무효하면 videos.update 전체가 400 이 되어 **전 언어를 잃는다**. 그래서
+    1차로 전체를 한 번에 시도하고(성공하면 API 1회로 끝), 실패하면 언어를 하나씩 누적
+    적용해 **성공한 언어만이라도 살린다**(upload_captions 의 언어별 격리와 같은 취지).
+    반환에 applied/failed 가 추가됐지만 기존 호출부가 보는 ok/error 키는 유지한다.
     """
     if not localizations:
-        return {"ok": False, "error": "localizations 비어있음"}
+        return {"ok": False, "error": "localizations 비어있음", "applied": [], "failed": {}}
     try:
         youtube = _music_youtube_client()
         resp = youtube.videos().list(part="snippet", id=video_id).execute()
         items = resp.get("items", [])
         if not items:
-            return {"ok": False, "error": "영상을 찾을 수 없음"}
+            return {"ok": False, "error": "영상을 찾을 수 없음", "applied": [], "failed": {}}
         snippet = items[0]["snippet"]
         snippet["defaultLanguage"] = default_lang
         snippet["defaultAudioLanguage"] = default_lang
         loc = {
-            lng: {"title": str(d.get("title", ""))[:100], "description": str(d.get("description", ""))}
+            lng: {
+                "title": str(d.get("title", ""))[:100],
+                "description": _clamp_description(str(d.get("description", "")), lng),
+            }
             for lng, d in localizations.items()
             if isinstance(d, dict) and d.get("title")
         }
+    except Exception as e:  # noqa: BLE001 - 준비 단계 실패(인증·조회)
+        logger.warning("[music-youtube] localizations 준비 실패: %s", e)
+        return {"ok": False, "error": str(e)[:200], "applied": [], "failed": {}}
+    if not loc:
+        return {"ok": False, "error": "적용할 언어 없음(title 빈 값)", "applied": [], "failed": {}}
+
+    def _update(payload: dict) -> None:
         youtube.videos().update(
             part="snippet,localizations",
-            body={"id": video_id, "snippet": snippet, "localizations": loc},
+            body={"id": video_id, "snippet": snippet, "localizations": payload},
         ).execute()
+
+    # 1차 — 전체 일괄(정상 경로, API 1회).
+    try:
+        _update(loc)
         logger.warning("[music-youtube] localizations %d개 언어 적용", len(loc))
-        return {"ok": True, "error": None}
+        return {"ok": True, "error": None, "applied": sorted(loc), "failed": {}}
     except Exception as e:  # noqa: BLE001
-        logger.warning("[music-youtube] localizations 실패: %s", e)
-        return {"ok": False, "error": str(e)[:200]}
+        logger.warning(
+            "[music-youtube] localizations 일괄 적용 실패 — 언어별 개별 적용으로 폴백: %s", e
+        )
+
+    # 2차 — 언어를 하나씩 누적 적용. 마지막으로 성공한 payload 가 영상의 최종 상태다.
+    applied: dict[str, dict] = {}
+    failed: dict[str, str] = {}
+    for lng in sorted(loc):
+        trial = dict(applied)
+        trial[lng] = loc[lng]
+        try:
+            _update(trial)
+            applied = trial
+        except Exception as e:  # noqa: BLE001 - 언어별 격리
+            failed[lng] = str(e)[:200]
+            logger.warning("[music-youtube] localizations 적용 실패(%s): %s", lng, e)
+    if applied:
+        logger.warning(
+            "[music-youtube] localizations 부분 적용: 성공 %d개(%s) / 실패 %d개(%s)",
+            len(applied), ",".join(sorted(applied)),
+            len(failed), ",".join(sorted(failed)) or "-",
+        )
+        return {"ok": True, "error": None, "applied": sorted(applied), "failed": failed}
+    err = "; ".join(f"{k}: {v}" for k, v in list(failed.items())[:3])[:200] or "전 언어 실패"
+    logger.warning("[music-youtube] localizations 전 언어 실패: %s", err)
+    return {"ok": False, "error": err, "applied": [], "failed": failed}
