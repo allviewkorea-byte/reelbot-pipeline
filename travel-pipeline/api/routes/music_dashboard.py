@@ -202,12 +202,17 @@ def _build_localizations(
         lng: t for lng, t in prev_lyrics.items() if isinstance(t, str) and t.strip()
     }
     base_title = music_meta.build_title(theme, viz_spec)
-    base_body = music_meta.build_description(theme, viz_spec, tracks, config)  # 감성 멘트+트랙리스트+고정정보, 해시태그 제외
+    # 본문을 번역 대상(감성멘트)/비대상(트랙리스트·고정정보·Copyright)으로 쪼개 넘긴다.
+    # 고정 안내문은 music_i18n 상수로 언어별 재조립되므로 번역 대상에서 빠진다.
+    parts = music_meta.build_description_parts(
+        theme, viz_spec, tracks, config, total_sec=mix.get("total_sec")
+    )
+    base_body = music_meta.assemble_description(parts, src)  # 폴백·하위호환용 원본 본문
     hashtags = music_meta.build_hashtags(theme, viz_spec)
     hashtag_line = " ".join(hashtags)
     meta_raw = music_translate.generate_localizations(
         theme, viz_spec, lyrics, base_title=base_title, base_description=base_body,
-        skip_langs=set(keep_meta),
+        skip_langs=set(keep_meta), parts=parts,
     )
     meta = {
         lng: {
@@ -361,9 +366,19 @@ def localize_save(mix_id: str, body: LocalizationsBody):
     return {"ok": True}
 
 
+class PublishBody(BaseModel):
+    """공개 업로드 옵션. 프론트 프록시가 채널 토글에서 주입한다(미지정 시 백엔드 env 폴백)."""
+
+    synthetic_media: bool | None = None
+
+
 @router.post("/queue/{mix_id}/publish")
-def publish(mix_id: str):
-    """썸네일 게이트 → 유튜브 공개 업로드 → status=uploaded. 썸네일 없으면 400."""
+def publish(mix_id: str, body: PublishBody | None = None):
+    """썸네일 게이트 → 유튜브 공개 업로드 → status=uploaded. 썸네일 없으면 400.
+
+    body.synthetic_media: 대시보드 "AI 표시" 토글 값. None 이면 youtube_upload 가
+    env(YOUTUBE_SYNTHETIC_MEDIA) 로 폴백한다.
+    """
     row = music_uploads.get_upload(mix_id)
     if not row:
         raise HTTPException(status_code=404, detail="해당 mix_id 의 큐 항목이 없습니다.")
@@ -479,6 +494,7 @@ def publish(mix_id: str):
             new_mp4_url, theme, mix, privacy="public", thumbnail_path=yt_thumb,
             title=base_meta.get("title") or None,
             description=base_meta.get("description") or None,
+            synthetic_media=(body.synthetic_media if body else None),
         )
     except HTTPException:
         raise
@@ -503,6 +519,14 @@ def publish(mix_id: str):
             srt = music_subtitles.build_srt_by_lang(
                 mix["tracks"], total, lyrics_by_lang, source_lang=src_lang
             )
+            # 가사 번역이 빠진 언어는 SRT 자체가 안 만들어져 조용히 사라진다 → 먼저 남긴다.
+            _no_srt = [lng for lng in _mtranslate.ALL_LANGS if not (srt.get(lng) or "").strip()]
+            if _no_srt:
+                logger.warning(
+                    "[music-dashboard] 자막 미생성 언어 %d개: %s (가사 번역 누락 — "
+                    "localizations.lyrics 확인 필요)",
+                    len(_no_srt), ",".join(_no_srt),
+                )
             ml["captions"] = upload_captions(vid, srt)
     except Exception as e:  # noqa: BLE001 - 다국어 실패는 영상 공개를 막지 않음
         logger.warning("[music-dashboard] 다국어 적용 실패(영상은 공개됨): %s", e)

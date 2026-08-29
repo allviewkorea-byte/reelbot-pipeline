@@ -137,8 +137,15 @@ def generate_localizations(
     base_title: str | None = None,
     base_description: str | None = None,
     skip_langs: set[str] | None = None,
+    parts: dict | None = None,
 ) -> dict[str, dict]:
     """제목·설명 11개 언어(ALL_LANGS) → {lang: {title, description}}. GPT 없으면 원본만.
+
+    parts(music_meta.build_description_parts 결과)를 주면 **산문만 번역**한다 —
+    제목 + parts["intro"] 만 LLM 을 태우고 트랙리스트·고정정보·Copyright 는 원본을
+    그대로 재사용, 고정 안내문은 music_i18n 상수로 채운다. 본문 전체를 번역하던
+    기존 방식 대비 출력 토큰이 크게 줄어 모델 출력 상한 압박·JSON 잘림이 사라진다.
+    parts 가 없으면 기존 동작 그대로(회귀 안전).
 
     base_title/base_description 을 주면(#37 music_meta 의 풍부한 제목·본문) 그것을 원본으로
     번역한다. 미지정 시 기존 _base_meta(간단 메타)로 폴백(회귀 안전).
@@ -147,6 +154,8 @@ def generate_localizations(
     (호출부가 캐시본을 merge 한다).
     """
     src = detect_source_lang(lyrics or theme.get("title_kr", ""))
+    if parts:
+        return _localize_from_parts(parts, base_title or "", src, skip_langs=skip_langs)
     if base_title is not None and base_description is not None:
         base_title, base_desc = base_title, base_description
     else:
@@ -161,6 +170,35 @@ def generate_localizations(
         d = _translate_one_meta(base_title, base_desc, src, t)
         if d:
             out[t] = d
+    return out
+
+
+def _localize_from_parts(
+    parts: dict, base_title: str, src: str, *, skip_langs: set[str] | None = None
+) -> dict[str, dict]:
+    """산문(제목 + 감성멘트)만 번역하고 나머지 조각은 원본으로 재조립.
+
+    언어별 1콜(제목·intro 동시) — 번역 payload 가 감성멘트 몇 줄로 줄어든다.
+    트랙리스트는 **어떤 언어에서도 번역하지 않는다**(영상 내 곡 제목과 일치해야 함).
+    해시태그는 호출부(_build_localizations)의 언어별 append 경로를 그대로 쓴다.
+    """
+    from services import music_meta
+
+    intro = parts.get("intro") or ""
+    out: dict[str, dict] = {
+        src: {"title": base_title, "description": music_meta.assemble_description(parts, src)}
+    }
+    skip = skip_langs or set()
+    for t in [lng for lng in ALL_LANGS if lng != src and lng not in skip]:
+        d = _translate_one_meta(base_title, intro, src, t)
+        if not d:
+            continue  # 언어별 격리 — 실패한 언어만 빠진다(캐시 repair 가 나중에 채움)
+        tp = dict(parts)
+        tp["intro"] = d.get("description") or intro
+        out[t] = {
+            "title": d["title"],
+            "description": music_meta.assemble_description(tp, t),
+        }
     return out
 
 
@@ -179,7 +217,8 @@ def _translate_one_meta(base_title: str, base_desc: str, src: str, target: str) 
             'Return STRICT JSON only: {"title": "...", "description": "..."}. No markdown.'
         )
         user = f"TITLE:\n{base_title}\n\nDESCRIPTION:\n{base_desc}"
-        data = music_lyrics._extract_json(music_lyrics._call(system, user, max_tokens=16000))
+        # parts 경로에선 payload 가 제목+감성멘트뿐이라 4000 이면 충분하다.
+        data = music_lyrics._extract_json(music_lyrics._call(system, user, max_tokens=4000))
         if isinstance(data, dict) and data.get("title") and data.get("description"):
             return {"title": str(data["title"])[:100], "description": str(data["description"])}
     except Exception as e:  # noqa: BLE001 - 언어별 격리
