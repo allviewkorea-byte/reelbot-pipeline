@@ -24,8 +24,15 @@ _TABLE = "music_uploads"
 _KST = timezone(timedelta(hours=9))
 _SELECT = (
     "slug,mix_id,title_kr,genre,mood,tag_combo,mp4_url,gpt_prompt,thumbnail_r2_key,character_r2_key,viz_spec,"
-    "localizations,show_playlist,status,youtube_video_id,youtube_url,created_at"
+    "localizations,show_playlist,status,youtube_video_id,youtube_url,channel,created_at"
 )
+
+
+def _resolve_channel(channel: str | None) -> str:
+    """music_channel.resolve_channel 지연 호출(순환 import 회피)."""
+    from services.music_channel import resolve_channel
+
+    return resolve_channel(channel)
 
 
 def _headers(key: str, *, upsert: bool = False, patch: bool = False) -> dict:
@@ -49,8 +56,13 @@ def record_pending(
     gpt_prompt: str = "",
     thumbnail_r2_key: str | None = None,
     viz_spec: dict | None = None,
+    channel: str | None = None,
 ) -> dict:
     """영상 생성 완료 → 검토 대기(pending) 행 upsert(mix_id 기준). {stored, error}.
+
+    channel=None 이면 키를 아예 넣지 않아 DB default('rooftop_music')가 적용된다.
+    (렌더 경로 music_video.py 는 수정 금지 파일이라 채널을 못 넘긴다 → 호출부가
+     렌더 직후 set_channel 로 보정한다. music_manual.run / music_library.run 참조.)
 
     thumbnail_r2_key: 첫프레임 자동 썸네일(#20) 키. 주면 공개 업로드 게이트가 자동 충족.
     viz_spec: 곡 분석 결과(#20) 캐시 — 같은 mix 재렌더 시 재사용.
@@ -76,6 +88,8 @@ def record_pending(
         record["thumbnail_r2_key"] = thumbnail_r2_key
     if viz_spec is not None:
         record["viz_spec"] = viz_spec
+    if channel:
+        record["channel"] = _resolve_channel(channel)
     try:
         with httpx.Client(timeout=30.0) as c:
             r = c.post(
@@ -121,8 +135,12 @@ def delete_pending(mix_id: str) -> dict:
         return {"deleted": 0, "error": msg}
 
 
-def list_pending() -> list[dict]:
-    """검토 대기(status=pending) 목록 최신순. 미설정/오류 시 빈 리스트."""
+def list_pending(*, channel: str | None = None) -> list[dict]:
+    """검토 대기(status=pending) 목록 최신순. 미설정/오류 시 빈 리스트.
+
+    channel=None → DEFAULT_CHANNEL(where). 마이그레이션이 기존 행을 where 로 백필하므로
+    지금 시점의 결과 집합은 변하지 않는다.
+    """
     url, key = _supabase_cfg()
     if not (url and key):
         return []
@@ -131,7 +149,12 @@ def list_pending() -> list[dict]:
             r = c.get(
                 f"{url}/rest/v1/{_TABLE}",
                 headers=_headers(key),
-                params={"status": "eq.pending", "select": _SELECT, "order": "created_at.desc"},
+                params={
+                    "status": "eq.pending",
+                    "channel": f"eq.{_resolve_channel(channel)}",
+                    "select": _SELECT,
+                    "order": "created_at.desc",
+                },
             )
             r.raise_for_status()
             rows = r.json()
@@ -170,11 +193,14 @@ def get_viz_spec(mix_id: str) -> dict | None:
     return spec if isinstance(spec, dict) and spec else None
 
 
-def count_today_kst() -> int:
+def count_today_kst(*, channel: str | None = None) -> int:
     """오늘(KST 자정 이후) 생성된 music_uploads row 수 — cron 중복 생성 스킵 판단용(#28).
 
     created_at >= KST 자정(UTC 환산) 으로 필터. Prefer: count=exact 의 Content-Range 로
     총개수만 받는다(전체 fetch 회피). 미설정/오류 시 0(→ 호출부가 생성 진행, 안전).
+
+    channel=None → DEFAULT_CHANNEL(where). ※ cron 선점 로직(api/routes/music.py:147)은
+    이번에 건드리지 않는다(3단계) — 인자만 받을 수 있게 열어둔다.
     """
     url, key = _supabase_cfg()
     if not (url and key):
@@ -187,7 +213,12 @@ def count_today_kst() -> int:
             r = c.get(
                 f"{url}/rest/v1/{_TABLE}",
                 headers={**_headers(key), "Prefer": "count=exact"},
-                params={"created_at": f"gte.{since}", "select": "mix_id", "limit": "1"},
+                params={
+                    "created_at": f"gte.{since}",
+                    "channel": f"eq.{_resolve_channel(channel)}",
+                    "select": "mix_id",
+                    "limit": "1",
+                },
             )
             r.raise_for_status()
             cr = r.headers.get("content-range", "")  # 예: "0-0/3"
@@ -202,8 +233,11 @@ def count_today_kst() -> int:
         return 0
 
 
-def list_uploaded(limit: int = 12) -> list[dict]:
-    """공개 업로드 완료(status=uploaded) 목록 최신순 — 대시보드 '최근 업로드' 마퀴용."""
+def list_uploaded(limit: int = 12, *, channel: str | None = None) -> list[dict]:
+    """공개 업로드 완료(status=uploaded) 목록 최신순 — 대시보드 '최근 업로드' 마퀴용.
+
+    channel=None → DEFAULT_CHANNEL(where).
+    """
     url, key = _supabase_cfg()
     if not (url and key):
         return []
@@ -214,6 +248,7 @@ def list_uploaded(limit: int = 12) -> list[dict]:
                 headers=_headers(key),
                 params={
                     "status": "eq.uploaded", "select": _SELECT,
+                    "channel": f"eq.{_resolve_channel(channel)}",
                     "order": "created_at.desc", "limit": str(limit),
                 },
             )
@@ -223,6 +258,33 @@ def list_uploaded(limit: int = 12) -> list[dict]:
     except Exception as e:  # noqa: BLE001
         logger.warning("[music-uploads] 업로드 목록 조회 실패: %s", _http_err(e))
         return []
+
+
+def set_channel(mix_id: str, channel: str | None) -> dict:
+    """채널 축 보정(PATCH). {stored, error}.
+
+    렌더 경로(music_video.make_video → record_pending)는 수정 금지 파일이라 채널을
+    넘길 수 없다. 그래서 렌더를 시킨 쪽(music_manual.run / music_library.run)이
+    렌더 직후 mix_id 로 이 함수를 불러 채널을 박는다. best-effort — 실패해도 영상은
+    이미 만들어졌으므로 흐름을 막지 않는다(where 큐에 남을 뿐).
+    """
+    ch = _resolve_channel(channel)
+    url, key = _supabase_cfg()
+    if not (url and key):
+        return {"stored": False, "error": "supabase 미설정"}
+    try:
+        with httpx.Client(timeout=30.0) as c:
+            r = c.patch(
+                f"{url}/rest/v1/{_TABLE}?mix_id=eq.{mix_id}",
+                headers=_headers(key, patch=True),
+                json={"channel": ch},
+            )
+            r.raise_for_status()
+        return {"stored": True, "error": None}
+    except Exception as e:  # noqa: BLE001
+        msg = _http_err(e)
+        logger.warning("[music-uploads] channel 보정 실패(mix_id=%s): %s", mix_id, msg)
+        return {"stored": False, "error": msg}
 
 
 def set_thumbnail(mix_id: str, thumbnail_r2_key: str) -> dict:

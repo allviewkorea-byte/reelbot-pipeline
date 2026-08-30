@@ -6,6 +6,54 @@ export const MUSIC_CHANNEL_ID = "rooftop_music"
 export const MUSIC_CHANNEL_NAME =
   process.env.NEXT_PUBLIC_MUSIC_CHANNEL_NAME || "Revezen"
 
+// ── 채널 축(운동 채널 2단계) ─────────────────────────────────────────
+// 백엔드 music_channel.CHANNELS 와 같은 키를 쓴다. 미지정 = where(회귀 0).
+// ※ lib/channels.ts(여행 시절 잔재)와 무관 — 그쪽은 건드리지 않는다.
+export const DEFAULT_MUSIC_CHANNEL = MUSIC_CHANNEL_ID // "rooftop_music"
+export const WORKOUT_CHANNEL_ID = "workout_music"
+
+export interface MusicChannelInfo {
+  id: string
+  name: string
+  icon: string
+  /** 유튜브 업로드 가능 여부 — 운동 채널은 토큰 분리(3단계) 전까지 불가. */
+  canUpload: boolean
+}
+
+export const MUSIC_CHANNELS: Record<string, MusicChannelInfo> = {
+  [DEFAULT_MUSIC_CHANNEL]: {
+    id: DEFAULT_MUSIC_CHANNEL,
+    name: MUSIC_CHANNEL_NAME,
+    icon: "🎵",
+    canUpload: true,
+  },
+  [WORKOUT_CHANNEL_ID]: {
+    id: WORKOUT_CHANNEL_ID,
+    name: "2주안에몸매만들기",
+    icon: "💪",
+    canUpload: false, // 유튜브 토큰 채널별 분리는 3단계
+  },
+}
+
+/** 미등록·빈값 → where. 백엔드 resolve_channel 과 같은 규칙(프론트에서도 안전 기본). */
+export function resolveMusicChannel(channel: string | null | undefined): string {
+  const c = (channel || "").trim()
+  return c && c in MUSIC_CHANNELS ? c : DEFAULT_MUSIC_CHANNEL
+}
+
+/** where 채널이면 쿼리를 붙이지 않는다 — 기존 URL 과 완전히 동일하게 유지(회귀 0). */
+export function withChannel(path: string, channel: string | null | undefined): string {
+  const c = resolveMusicChannel(channel)
+  if (c === DEFAULT_MUSIC_CHANNEL) return path
+  return `${path}${path.includes("?") ? "&" : "?"}channel=${encodeURIComponent(c)}`
+}
+
+/** API 호출용 — where 면 빈 문자열, 아니면 채널 파라미터 1개. */
+export function channelParam(channel: string | null | undefined): string {
+  const c = resolveMusicChannel(channel)
+  return c === DEFAULT_MUSIC_CHANNEL ? "" : `channel=${encodeURIComponent(c)}`
+}
+
 // 큰 수 → 한국어 단위(백곰 fmtCount 패턴 차용, import 금지·자체 구현).
 export function fmtCount(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—"

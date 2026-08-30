@@ -196,6 +196,14 @@ def run(job_id: str) -> None:
 
         job["video_url"] = video.get("video_url")
         job["mix_id"] = video.get("video_id")
+        # 채널 보정 — record_pending 은 렌더 경로(music_video, 수정 금지)에서 불려 채널을
+        # 못 받는다. 렌더를 시킨 이쪽이 mix_id 로 사후에 박는다. best-effort.
+        if job.get("channel") and job.get("mix_id"):
+            try:
+                from services import music_uploads
+                music_uploads.set_channel(job["mix_id"], job["channel"])
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[music-library] 채널 보정 실패(무시): %s", e)
         job["status"] = "done"
         _step("완료")
         try:

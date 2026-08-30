@@ -7,6 +7,7 @@ import { isPipSupported, togglePip } from "@/lib/pip"
 import { cn } from "@/lib/utils"
 import { ACTION_TAGS, comboLabelsKr } from "@/lib/music-tags"
 import type { TagCombo } from "@/lib/music-tags"
+import { MUSIC_CHANNELS, resolveMusicChannel } from "@/lib/music"
 
 const ACTION_LABEL = new Map(ACTION_TAGS.map((t) => [t.id, t.label_kr]))
 
@@ -31,6 +32,7 @@ export interface QueueItem {
   viz_spec?: VizSpec | null
   status?: string
   show_playlist?: boolean // #39 영상별 PLAY LIST 표시(미지정=표시)
+  channel?: string // 채널 축(2단계). 미지정=where. 유튜브 업로드 가능 여부를 가른다.
 }
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -178,6 +180,9 @@ export function MusicQueueCard({ item, onChanged, onOpenViewer }: { item: QueueI
   const [publishing, setPublishing] = useState(false)
   const [published, setPublished] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
+  // 채널별 업로드 가능 여부 — 운동 채널은 유튜브 토큰 분리(3단계) 전까지 업로드 불가.
+  // 그냥 두면 백엔드 _verify_music_channel 이 차단해 원인 모를 에러로 보인다.
+  const canUpload = MUSIC_CHANNELS[resolveMusicChannel(item.channel)].canUpload
   // #39 영상별 PLAY LIST 표시 토글(미지정=표시). 변경 시 즉시 DB 저장 → [재렌더]로 반영.
   const [showPlaylist, setShowPlaylist] = useState(item.show_playlist ?? true)
   const [savingPl, setSavingPl] = useState(false)
@@ -660,11 +665,23 @@ export function MusicQueueCard({ item, onChanged, onOpenViewer }: { item: QueueI
             <button
               type="button"
               onClick={publish}
-              disabled={!hasThumb || publishing}
-              className={cn("inline-flex h-10 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-medium", hasThumb ? "bg-emerald-600 text-white hover:opacity-90" : "border border-border text-muted-foreground")}
-              title={hasThumb ? "유튜브 공개 업로드" : "이미지를 먼저 업로드하세요"}
+              disabled={!canUpload || !hasThumb || publishing}
+              className={cn(
+                "inline-flex h-10 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-medium",
+                canUpload && hasThumb
+                  ? "bg-emerald-600 text-white hover:opacity-90"
+                  : "border border-border text-muted-foreground",
+              )}
+              title={
+                !canUpload
+                  ? "이 채널은 유튜브 연동 준비 중입니다(3단계 이후 가능)"
+                  : hasThumb
+                    ? "유튜브 공개 업로드"
+                    : "이미지를 먼저 업로드하세요"
+              }
             >
-              {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Globe className="h-4 w-4" />} 공개 업로드
+              {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Globe className="h-4 w-4" />}{" "}
+              {canUpload ? "공개 업로드" : "업로드 준비 중"}
             </button>
           )}
           <button

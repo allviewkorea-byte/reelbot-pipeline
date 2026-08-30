@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type TouchEvent as ReactTouchEvent } from "react"
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState, type TouchEvent as ReactTouchEvent } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
 import { ArrowLeft, Loader2, Music, Music2, Clapperboard, Shuffle, X } from "lucide-react"
@@ -9,7 +9,10 @@ import { MusicQueueCard, TestCard, type QueueItem } from "@/components/music/Mus
 import { SwipeVideoViewer } from "@/components/music/SwipeVideoViewer"
 import { MusicJobCard } from "@/components/music/MusicJobCard"
 import type { MusicJob } from "@/lib/music-jobs"
-import { estimateProductionTime, fmtMinutes } from "@/lib/music"
+import {
+  MUSIC_CHANNELS, channelParam, estimateProductionTime, fmtMinutes, resolveMusicChannel, withChannel,
+} from "@/lib/music"
+import { useSearchParams } from "next/navigation"
 import { MUSIC_GENRES } from "@/lib/music-genres"
 import { TagComboSelector } from "@/components/music/TagComboSelector"
 import type { TagCombo } from "@/lib/music-tags"
@@ -33,6 +36,18 @@ function matchesCategory(item: QueueItem, catKey: string): boolean {
 }
 
 export default function MusicQueueGridPage() {
+  return (
+    <Suspense fallback={null}>
+      <MusicQueueGridPageInner />
+    </Suspense>
+  )
+}
+
+function MusicQueueGridPageInner() {
+  const searchParams = useSearchParams()
+  // 선택된 채널 — URL 쿼리가 단일 진실. 미지정·미등록 → where(회귀 0).
+  const channel = resolveMusicChannel(searchParams.get("channel"))
+  const chInfo = MUSIC_CHANNELS[channel]
   const [items, setItems] = useState<QueueItem[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState("all")
@@ -57,15 +72,15 @@ export default function MusicQueueGridPage() {
   const prevJobIdsRef = useRef<Set<string>>(new Set())
 
   const load = useCallback(() => {
-    fetch("/api/music/queue")
+    fetch(`/api/music/queue${channelParam(channel) ? `?${channelParam(channel)}` : ""}`)
       .then((r) => r.json())
       .then((d) => setItems(Array.isArray(d?.queue) ? d.queue : []))
       .catch(() => setItems([]))
       .finally(() => setLoading(false))
-  }, [])
+  }, [channel])
 
   const loadJobs = useCallback(() => {
-    fetch("/api/music/jobs/active")
+    fetch(`/api/music/jobs/active${channelParam(channel) ? `?${channelParam(channel)}` : ""}`)
       .then((r) => r.json())
       .then((d) => {
         const jobs: MusicJob[] = Array.isArray(d?.jobs) ? d.jobs : []
@@ -91,7 +106,7 @@ export default function MusicQueueGridPage() {
         setActiveJobs(jobs)
       })
       .catch(() => {})
-  }, [])
+  }, [channel])
 
   useEffect(() => { load() }, [load])
 
@@ -133,7 +148,7 @@ export default function MusicQueueGridPage() {
     setManualJobId(null)
     try {
       const tc = Math.max(1, Math.min(100, Math.floor(Number(manualCount)) || 1)) // #42 곡수 1~100 클램프
-      const payload: Record<string, unknown> = { mood: testMood, track_count: tc }
+      const payload: Record<string, unknown> = { mood: testMood, track_count: tc, channel }
       if (tagCombo) payload.tag_combo = tagCombo
       const res = await fetch("/api/music/manual-render", {
         method: "POST",
@@ -179,7 +194,7 @@ export default function MusicQueueGridPage() {
       setManualJobId(null)
       setCancelRequested(false)
     }
-  }, [testMood, manualCount, tagCombo, load, loadJobs])
+  }, [testMood, manualCount, tagCombo, channel, load, loadJobs])
 
   // #26-C 진행 중 취소 — 현재 스텝 완료 후 큐 적재 없이 종료(즉시 중단 아님).
   const cancelManual = useCallback(async () => {
@@ -237,22 +252,22 @@ export default function MusicQueueGridPage() {
       <header className="pl-10 md:pl-0">
         {/* 모바일: 버튼 가로 한 줄(좌/우 정렬, 줄바꿈 없음). 데스크탑은 아래 인라인 행 사용. */}
         <div className="mb-3 flex items-center justify-between gap-2 md:hidden">
-          <Link href="/music" className="inline-flex min-h-[44px] items-center gap-1.5 whitespace-nowrap rounded-lg border border-border px-3 text-sm text-muted-foreground hover:bg-white/5 hover:text-foreground">
+          <Link href={withChannel("/music", channel)} className="inline-flex min-h-[44px] items-center gap-1.5 whitespace-nowrap rounded-lg border border-border px-3 text-sm text-muted-foreground hover:bg-white/5 hover:text-foreground">
             <ArrowLeft className="h-4 w-4" /> 대시보드
           </Link>
-          <Link href="/music/design" className="inline-flex min-h-[44px] items-center gap-1.5 whitespace-nowrap rounded-lg border border-border px-3 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground">
+          <Link href={withChannel("/music/design", channel)} className="inline-flex min-h-[44px] items-center gap-1.5 whitespace-nowrap rounded-lg border border-border px-3 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground">
             디자인 본부
           </Link>
         </div>
         <div className="flex items-center gap-3">
-          <Link href="/music" className="hidden items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-white/5 hover:text-foreground md:inline-flex">
+          <Link href={withChannel("/music", channel)} className="hidden items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-white/5 hover:text-foreground md:inline-flex">
             <ArrowLeft className="h-4 w-4" /> 대시보드
           </Link>
           <div>
-            <h1 className="text-xl font-semibold text-foreground">검토 대기 ({items.length})</h1>
+            <h1 className="text-xl font-semibold text-foreground">{chInfo.icon} {chInfo.name} · 검토 대기 ({items.length})</h1>
             <p className="text-sm text-muted-foreground">카드에서 바로 재생·썸네일·공개를 처리하세요.</p>
           </div>
-          <Link href="/music/design" className="ml-auto hidden items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground md:inline-flex">
+          <Link href={withChannel("/music/design", channel)} className="ml-auto hidden items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground md:inline-flex">
             디자인 본부
           </Link>
         </div>
