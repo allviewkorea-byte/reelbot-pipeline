@@ -70,7 +70,9 @@ def _generate_with_retry(theme: dict, log, *, max_retries: int | None = None) ->
 #       이번엔 항상 새로 생성(보컬 트랙도 genre/used 는 기록 → 향후 재활용 여지).
 
 
-def _recycle_track(genre_id: str | None, seen: set[str], log) -> dict | None:
+def _recycle_track(
+    genre_id: str | None, seen: set[str], log, *, channel: str | None = None
+) -> dict | None:
     """장르 풀에서 미사용 트랙 1개를 꺼내 used=true 마킹 후 rec 으로 반환(없으면 None).
 
     rec 은 신규 생성 클립과 같은 형태({audio_id, r2_key, duration, title, tags}). r2_key 는
@@ -80,7 +82,7 @@ def _recycle_track(genre_id: str | None, seen: set[str], log) -> dict | None:
         return None
     # 어떤 실패든(검색·마킹·예외) None 반환 → 호출부가 Suno 정상 호출(폴백). 절대 막지 않음.
     try:
-        row = music_store.find_unused_track(genre_id, exclude_ids=seen)
+        row = music_store.find_unused_track(genre_id, exclude_ids=seen, channel=channel)
         if not row:
             return None
         audio_id = row.get("audio_id") or row.get("id")
@@ -139,7 +141,7 @@ def _consume_generated(all_clips: list[dict], seen: set[str]) -> list[dict]:
 def _gen_vocal(
     theme_slug: str, songs: list[dict], base_style: str, genre_theme: str, log,
     *, genre_id: str | None = None, seen: set[str] | None = None,
-    is_tag_path: bool = False, action: str = "",
+    is_tag_path: bool = False, action: str = "", channel: str | None = None,
 ) -> tuple[list[dict], dict[str, str]]:
     """보컬 경로: 곡별 가사로 보컬곡 생성(부분 실패 허용) + 가사 원문 R2 보존.
 
@@ -165,6 +167,7 @@ def _gen_vocal(
             "vocalGender": gender,
             "genre_id": genre_id,  # #46: 트랙에 장르 기록(used=false로 적립)
             "action": action,
+            "channel": channel,  # 채널 축 — 적립될 재활용 풀을 가른다
         }
         try:
             log(f"보컬 생성 {i}/{len(valid)} [{gender}]: {s.get('title')}")
@@ -198,7 +201,7 @@ def _gen_vocal(
 def _gen_instrumental(
     theme_slug: str, n: int, style: str, genre_theme: str, log,
     *, genre_id: str | None = None, seen: set[str] | None = None,
-    is_tag_path: bool = False, action: str = "",
+    is_tag_path: bool = False, action: str = "", channel: str | None = None,
     theme_dict: dict | None = None,
 ) -> tuple[list[dict], dict[str, str]]:
     """연주 경로: 가사 없이 style 만으로 연주곡 N회 생성(instrumental=True, 부분 실패 허용).
@@ -237,7 +240,7 @@ def _gen_instrumental(
             track_style = music_lyrics._with_length_hint(track_style)
 
         # ① 재활용 우선 — 같은 장르 미사용 트랙이 있으면 Suno 건너뜀(크레딧 0).
-        recycled = _recycle_track(genre_id, seen, log)
+        recycled = _recycle_track(genre_id, seen, log, channel=channel)
         if recycled is not None:
             if title:
                 recycled["title"] = title
@@ -251,6 +254,7 @@ def _gen_instrumental(
             "title": title,
             "genre_id": genre_id,  # #46: 둘째 클립이 used=false 로 적립 → 다음에 재활용
             "action": action,
+            "channel": channel,  # 채널 축 — 적립될 재활용 풀을 가른다
         }
         try:
             log(f"연주 생성 {i}/{n}: {title or '(자동)'}")
@@ -286,9 +290,13 @@ def produce(
     model: str | None = None,
     genre_id: str | None = None,
     action: str = "",
+    channel: str | None = None,
     progress=None,
 ) -> dict:
     """주제 → N곡 생성 → 마스터 → 믹스. 완성 오디오 메타 반환.
+
+    channel: 채널 축. 재활용 풀 조회(find_unused_track)와 신규 트랙 적립(upsert_track)이
+    이 채널로 갈린다. None → DEFAULT_CHANNEL(where) — 기존 호출부 무수정, 회귀 0.
 
     track_type 으로 분기:
       - "instrumental": 가사 스킵, style_prompt(없으면 base_style)로 연주곡 N회 생성.
@@ -324,7 +332,7 @@ def produce(
         produced, lyrics_by_id = _gen_instrumental(
             theme_slug, n, style_prompt or base_style, genre_theme, _log,
             genre_id=genre_id, seen=seen,
-            is_tag_path=not cfg, action=action,
+            is_tag_path=not cfg, action=action, channel=channel,
             theme_dict={"slug": theme_slug, "genre": genre_theme,
                         "genre_theme": genre_theme, "action": action},
         )
@@ -343,7 +351,7 @@ def produce(
         produced, lyrics_by_id = _gen_vocal(
             theme_slug, songs, base_style, genre_theme, _log,
             genre_id=genre_id, seen=seen,
-            is_tag_path=not cfg, action=action,
+            is_tag_path=not cfg, action=action, channel=channel,
         )
 
     if not produced:
@@ -390,6 +398,7 @@ def run_theme(
     video: bool = False,
     video_seconds: float | None = None,
     upload: bool = False,
+    channel: str | None = None,
     progress=None,
 ) -> dict:
     """주제 1개 → 음원 믹스 1개(얇은 오케스트레이터).
@@ -416,6 +425,7 @@ def run_theme(
     result = produce(
         slug,
         n=count,
+        channel=channel,
         genre_theme=theme.get("genre") or "music",
         base_style=theme.get("style_prompt") or DEFAULT_BASE_STYLE,
         style_prompt=theme.get("style_prompt"),

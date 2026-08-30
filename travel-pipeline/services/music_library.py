@@ -32,10 +32,12 @@ _TRACK_MIN, _TRACK_MAX = 1, 100
 # ── 조회 (목록·통계) ───────────────────────────────────────────────────
 def list_library(
     *, genre: str | None = None, action: str | None = None, used: bool | None = None,
-    limit: int = 100, offset: int = 0,
+    limit: int = 100, offset: int = 0, channel: str | None = None,
 ) -> list[dict]:
-    """적립곡 목록 + 재생 URL(play_url) 부착. 최신순."""
-    rows = music_store.list_library(genre=genre, action=action, used=used, limit=limit, offset=offset)
+    """적립곡 목록 + 재생 URL(play_url) 부착. 최신순. channel=None → where 채널."""
+    rows = music_store.list_library(
+        genre=genre, action=action, used=used, limit=limit, offset=offset, channel=channel
+    )
     out: list[dict] = []
     for r in rows:
         out.append({
@@ -48,15 +50,16 @@ def list_library(
             "duration": r.get("duration"),
             "r2_key": r.get("r2_key") or "",
             "used": bool(r.get("used")),
+            "channel": r.get("channel") or "",
             "created_at": r.get("created_at"),
             "play_url": r2_storage.music_object_url(r.get("r2_key") or ""),
         })
     return out
 
 
-def stats() -> list[dict]:
-    """장르별 적립 현황 [{genre, total, unused}] (최다순)."""
-    return music_store.library_stats()
+def stats(*, channel: str | None = None) -> list[dict]:
+    """장르별 적립 현황 [{genre, total, unused}] (최다순). channel=None → where 채널."""
+    return music_store.library_stats(channel=channel)
 
 
 # ── 영상 만들기 (비동기 잡) ────────────────────────────────────────────
@@ -86,7 +89,7 @@ def cancel(job_id: str) -> dict:
     return {"ok": True}
 
 
-def start(track_ids: list[str], mood: str | None = None) -> dict:
+def start(track_ids: list[str], mood: str | None = None, *, channel: str | None = None) -> dict:
     """선택곡 영상 제작 시작(동시 1개). {ok, job_id} 또는 {ok:False, error}."""
     global _active_job
     ids = [str(t).strip() for t in (track_ids or []) if str(t).strip()]
@@ -103,11 +106,15 @@ def start(track_ids: list[str], mood: str | None = None) -> dict:
             "track_ids": ids, "mood": (mood or "").strip().lower() or None,
             "video_url": None, "mix_id": None, "error": None, "cancelled": False,
             "created_at": time.time(),
+            "channel": channel,  # run() 이 트랙 조회에 사용(None → where)
         }
         _active_job = job_id
     try:
         from services import music_jobs
-        music_jobs.start_job("library_render", job_id=job_id, metadata={"track_ids": ids, "mood": mood})
+        music_jobs.start_job(
+            "library_render", job_id=job_id,
+            metadata={"track_ids": ids, "mood": mood}, channel=channel,
+        )
     except Exception as e:  # noqa: BLE001
         logger.debug("[music-library] job 추적 시작 실패(무시): %s", e)
     return {"ok": True, "job_id": job_id}
@@ -133,7 +140,7 @@ def run(job_id: str) -> None:
 
     try:
         track_ids: list[str] = job["track_ids"]
-        rows = music_store.get_tracks_by_ids(track_ids)
+        rows = music_store.get_tracks_by_ids(track_ids, channel=job.get("channel"))
         # SUCCESS + r2_key 있는 것만 사용.
         rows = [r for r in rows if (r.get("status") == "SUCCESS") and r.get("r2_key") and r.get("audio_id")]
         if not rows:
