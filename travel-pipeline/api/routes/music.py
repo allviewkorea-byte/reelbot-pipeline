@@ -187,6 +187,7 @@ class TestRenderBody(BaseModel):
     mood: str | None = None  # citypop/cafe/ballad/workout/sleep (없으면 기본 citypop)
     track_count: int | None = None  # #42 수동 생성 곡수 1~100(미지정→1). test_render 는 무시.
     tag_combo: dict | None = None  # ③-A 태그 조합(8축). 있으면 mood 무시, style 을 태그로 생성.
+    channel: str | None = None  # 채널 축(미지정→where). 적립 풀·검토 큐가 이 값으로 갈린다.
 
 
 @router.post("/test-render")
@@ -219,6 +220,7 @@ def manual_render(background: BackgroundTasks, body: TestRenderBody | None = Non
         mood=body.mood if body else None,
         track_count=body.track_count if body else None,
         tag_combo=body.tag_combo if body else None,
+        channel=body.channel if body else None,
     )
     if not started.get("ok"):
         raise HTTPException(status_code=409, detail=started.get("error") or "이미 진행 중")
@@ -260,12 +262,13 @@ def genre_prompt(genre: str = ""):
 class LibraryCreateBody(BaseModel):
     track_ids: list[str] = []
     mood: str | None = None  # 장르 자동 판별(첫 트랙) 또는 직접 지정
+    channel: str | None = None  # 채널 축(미지정→where)
 
 
 @router.get("/library")
 def library_list(
     genre: str | None = None, action: str | None = None, used: str | None = None,
-    limit: int = 100, offset: int = 0,
+    limit: int = 100, offset: int = 0, channel: str | None = None,
 ):
     """적립곡 목록(#48) — status=SUCCESS, 최신순. genre/action/used 필터 + 페이지네이션.
 
@@ -274,15 +277,17 @@ def library_list(
     """
     from services import music_library
     used_flag = None if used is None else (str(used).lower() == "true")
-    items = music_library.list_library(genre=genre, action=action, used=used_flag, limit=limit, offset=offset)
+    items = music_library.list_library(
+        genre=genre, action=action, used=used_flag, limit=limit, offset=offset, channel=channel,
+    )
     return {"items": items}
 
 
 @router.get("/library/stats")
-def library_stats():
-    """장르별 적립 현황(#48) — [{genre, total, unused}]."""
+def library_stats(channel: str | None = None):
+    """장르별 적립 현황(#48) — [{genre, total, unused}]. channel 미지정→where."""
     from services import music_library
-    return {"stats": music_library.stats()}
+    return {"stats": music_library.stats(channel=channel)}
 
 
 @router.post("/library/create-video")
@@ -296,6 +301,7 @@ def library_create_video(background: BackgroundTasks, body: LibraryCreateBody | 
     started = music_library.start(
         track_ids=body.track_ids if body else [],
         mood=body.mood if body else None,
+        channel=body.channel if body else None,
     )
     if not started.get("ok"):
         code = 409 if started.get("busy_job") else 400
@@ -322,17 +328,20 @@ def library_create_status(job_id: str):
 
 
 @router.get("/jobs/active")
-def jobs_active():
-    """진행 중(+미확인 실패) 작업 목록 — 대시보드 파이프라인·검토대기 진행 카드용(#36)."""
+def jobs_active(channel: str | None = None):
+    """진행 중(+미확인 실패) 작업 목록 — 대시보드 파이프라인·검토대기 진행 카드용(#36).
+
+    channel 미지정→where.
+    """
     from services import music_jobs
-    return {"jobs": music_jobs.list_active()}
+    return {"jobs": music_jobs.list_active(channel=channel)}
 
 
 @router.get("/jobs/history")
-def jobs_history(limit: int = 20):
-    """최근 완료/실패 작업 — 대시보드 통계용(#36)."""
+def jobs_history(limit: int = 20, channel: str | None = None):
+    """최근 완료/실패 작업 — 대시보드 통계용(#36). channel 미지정→where."""
     from services import music_jobs
-    return {"jobs": music_jobs.list_history(limit)}
+    return {"jobs": music_jobs.list_history(limit, channel=channel)}
 
 
 @router.get("/jobs/{job_id}")

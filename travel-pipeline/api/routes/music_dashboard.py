@@ -39,15 +39,15 @@ def _with_thumb_url(row: dict) -> dict:
 
 
 @router.get("/queue")
-def queue():
-    """검토 대기(pending) 목록 — 최신순."""
-    return {"queue": [_with_thumb_url(r) for r in music_uploads.list_pending()]}
+def queue(channel: str | None = None):
+    """검토 대기(pending) 목록 — 최신순. channel 미지정→where."""
+    return {"queue": [_with_thumb_url(r) for r in music_uploads.list_pending(channel=channel)]}
 
 
 @router.get("/recent")
-def recent_uploaded():
-    """공개 업로드 완료 영상 최신순 — 대시보드 '최근 업로드' 마퀴용(썸네일 URL 동봉)."""
-    return {"videos": [_with_thumb_url(r) for r in music_uploads.list_uploaded(12)]}
+def recent_uploaded(channel: str | None = None):
+    """공개 업로드 완료 영상 최신순 — 대시보드 '최근 업로드' 마퀴용. channel 미지정→where."""
+    return {"videos": [_with_thumb_url(r) for r in music_uploads.list_uploaded(12, channel=channel)]}
 
 
 @router.delete("/queue/{mix_id}")

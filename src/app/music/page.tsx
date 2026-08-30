@@ -1,11 +1,15 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { Suspense, useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
 import { Users, Eye, BarChart3, Video, ClipboardList, Play, Square, Loader2, Settings, Palette, Music2 } from "lucide-react"
 import { PLATFORM_BADGE, PLATFORM_LABELS, TRACK_BADGE, TRACK_LABELS } from "@/lib/channels"
-import { MUSIC_CHANNEL_ID, MUSIC_CHANNEL_NAME, fmtCount, estimateProductionTime, fmtMinutes, type MusicMetrics } from "@/lib/music"
+import {
+  MUSIC_CHANNELS, MUSIC_CHANNEL_ID, channelParam, fmtCount,
+  estimateProductionTime, fmtMinutes, resolveMusicChannel, withChannel, type MusicMetrics,
+} from "@/lib/music"
+import { useSearchParams } from "next/navigation"
 import { MusicPipeline } from "@/components/music/MusicPipeline"
 import { MusicMarquee } from "@/components/music/MusicMarquee"
 import { MusicTrendPanel } from "@/components/music/MusicTrendPanel"
@@ -23,6 +27,18 @@ interface ChannelStatus {
 const DEFAULT_STATUS: ChannelStatus = { isActive: false, mode: "semi", syntheticMedia: false, dailyCap: 3, trackCount: 1 }
 
 export default function MusicDashboardPage() {
+  return (
+    <Suspense fallback={null}>
+      <MusicDashboardPageInner />
+    </Suspense>
+  )
+}
+
+function MusicDashboardPageInner() {
+  const searchParams = useSearchParams()
+  // 선택된 채널 — URL 쿼리가 단일 진실. 미지정·미등록 → where(회귀 0).
+  const channel = resolveMusicChannel(searchParams.get("channel"))
+  const chInfo = MUSIC_CHANNELS[channel]
   const [status, setStatus] = useState<ChannelStatus>(DEFAULT_STATUS)
   const [stats, setStats] = useState<MusicMetrics | null>(null)
   const [queueCount, setQueueCount] = useState(0)
@@ -41,14 +57,15 @@ export default function MusicDashboardPage() {
   useEffect(() => {
     loadStatus()
     fetch("/api/music/metrics").then((r) => r.json()).then(setStats).catch(() => setStats(null))
-    fetch("/api/music/queue").then((r) => r.json()).then((d) => setQueueCount(Array.isArray(d?.queue) ? d.queue.length : 0)).catch(() => {})
-  }, [loadStatus])
+    const _cp = channelParam(channel)
+    fetch(`/api/music/queue${_cp ? `?${_cp}` : ""}`).then((r) => r.json()).then((d) => setQueueCount(Array.isArray(d?.queue) ? d.queue.length : 0)).catch(() => {})
+  }, [loadStatus, channel])
 
   // #36 운영 가시성 — 진행 중 작업 폴링(4초) → 파이프라인 실시간 시각화.
   useEffect(() => {
     let alive = true
     const tick = () => {
-      fetch("/api/music/jobs/active")
+      fetch(`/api/music/jobs/active${channelParam(channel) ? `?${channelParam(channel)}` : ""}`)
         .then((r) => r.json())
         .then((d) => { if (alive) setActiveJobs(Array.isArray(d?.jobs) ? d.jobs : []) })
         .catch(() => {})
@@ -56,7 +73,7 @@ export default function MusicDashboardPage() {
     tick()
     const id = setInterval(tick, 4000)
     return () => { alive = false; clearInterval(id) }
-  }, [])
+  }, [channel])
 
   const patch = useCallback(
     async (body: Partial<{ isActive: boolean; mode: string; syntheticMedia: boolean; dailyCap: number; trackCount: number }>) => {
@@ -98,7 +115,7 @@ export default function MusicDashboardPage() {
         <div className="min-w-0 pl-10 md:pl-0">
           <div className="flex items-start justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2 md:flex-nowrap">
-              <h1 className="truncate text-lg font-semibold text-foreground">{MUSIC_CHANNEL_NAME}</h1>
+              <h1 className="truncate text-lg font-semibold text-foreground">{chInfo.name}</h1>
               <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${PLATFORM_BADGE.youtube}`}>
                 {PLATFORM_LABELS.youtube}
               </span>
@@ -116,7 +133,7 @@ export default function MusicDashboardPage() {
             </div>
             {/* #51-fix 모바일 전용: 채널 설정을 제목 옆(우)으로. PC 는 아래 툴바에 있음. */}
             <Link
-              href="/music/settings"
+              href={withChannel("/music/settings", channel)}
               title="채널 설정(슬로건·소셜·AI 명시) — 공개 업로드 본문에 반영"
               className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border px-2.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground md:hidden"
             >
@@ -202,7 +219,7 @@ export default function MusicDashboardPage() {
 
           {/* 채널 설정(#37) — PC 전용(모바일은 제목 옆) */}
           <Link
-            href="/music/settings"
+            href={withChannel("/music/settings", channel)}
             title="채널 설정(슬로건·소셜·AI 명시) — 공개 업로드 본문에 반영"
             className="hidden items-center gap-1.5 rounded-lg border border-border px-2.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground md:flex"
           >
@@ -213,7 +230,7 @@ export default function MusicDashboardPage() {
           <div className="flex flex-wrap items-center gap-2 md:contents">
           {/* 디자인 본부(#35-A) — PLAY LIST·Where 폰트/테두리 */}
           <Link
-            href="/music/design"
+            href={withChannel("/music/design", channel)}
             title="디자인 본부 — PLAY LIST·Where 폰트·크기·색·테두리"
             className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
           >
@@ -222,7 +239,7 @@ export default function MusicDashboardPage() {
           </Link>
           {/* 음원 라이브러리(#48) — 적립곡 큐레이션 → 선택 영상 만들기 */}
           <Link
-            href="/music/library"
+            href={withChannel("/music/library", channel)}
             title="음원 라이브러리 — 적립곡 미리듣기·선택 → Suno 없이 바로 영상 만들기"
             className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
           >
@@ -231,7 +248,7 @@ export default function MusicDashboardPage() {
           </Link>
           {/* 검토 대기 (백곰 캐릭터 시트 자리 — 보라 강조) */}
           <Link
-            href="/music/queue"
+            href={withChannel("/music/queue", channel)}
             className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
           >
             <ClipboardList className="h-4 w-4" />

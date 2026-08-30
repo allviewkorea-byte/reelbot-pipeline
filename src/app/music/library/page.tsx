@@ -1,7 +1,8 @@
 "use client"
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
+import { useSearchParams } from "next/navigation"
 import { toast } from "sonner"
 import {
   ArrowLeft, Loader2, Music2, Play, Pause, Clapperboard,
@@ -10,7 +11,9 @@ import {
 import { cn } from "@/lib/utils"
 import { MUSIC_GENRES } from "@/lib/music-genres"
 import { ACTION_TAGS } from "@/lib/music-tags"
-import { estimateProductionTime, fmtMinutes } from "@/lib/music"
+import {
+  channelParam, estimateProductionTime, fmtMinutes, resolveMusicChannel, withChannel,
+} from "@/lib/music"
 
 interface LibraryItem {
   id: string
@@ -50,6 +53,18 @@ function fmtDuration(sec: number | null): string {
 }
 
 export default function MusicLibraryPage() {
+  // useSearchParams 는 Suspense 경계가 필요하다(정적 생성 bail-out 방지).
+  return (
+    <Suspense fallback={null}>
+      <MusicLibraryPageInner />
+    </Suspense>
+  )
+}
+
+function MusicLibraryPageInner() {
+  const searchParams = useSearchParams()
+  // 선택된 채널 — URL 쿼리가 단일 진실. 미지정·미등록 → where(회귀 0).
+  const channel = resolveMusicChannel(searchParams.get("channel"))
   const [items, setItems] = useState<LibraryItem[]>([])
   const [stats, setStats] = useState<GenreStat[]>([])
   const [loading, setLoading] = useState(true)
@@ -78,20 +93,24 @@ export default function MusicLibraryPage() {
     if (action !== "all") qs.set("action", action)
     if (status !== "all") qs.set("used", status === "used" ? "true" : "false")
     qs.set("limit", "200")
+    // 채널 축(2단계) — where 면 파라미터를 붙이지 않아 기존 요청과 완전히 동일하다.
+    const cp = channelParam(channel)
+    if (cp) qs.set("channel", channel)
     fetch(`/api/music/library?${qs.toString()}`)
       .then((r) => r.json())
       .then((d) => setItems(Array.isArray(d?.items) ? d.items : []))
       .catch(() => setItems([]))
       .finally(() => setLoading(false))
-  }, [genre, action, status])
+  }, [genre, action, status, channel])
 
   useEffect(() => { load() }, [load])
   useEffect(() => {
-    fetch("/api/music/library/stats")
+    const cp = channelParam(channel)
+    fetch(`/api/music/library/stats${cp ? `?${cp}` : ""}`)
       .then((r) => r.json())
       .then((d) => setStats(Array.isArray(d?.stats) ? d.stats : []))
       .catch(() => setStats([]))
-  }, [])
+  }, [channel])
 
   // ── 선택 ───────────────────────────────────────────────────────────
   const toggle = useCallback((id: string) => {
@@ -207,7 +226,7 @@ export default function MusicLibraryPage() {
       const res = await fetch("/api/music/library/create-video", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ track_ids: ids }),
+        body: JSON.stringify({ track_ids: ids, channel }),
       })
       const data = await res.json()
       if (!res.ok || !data?.job_id) throw new Error(data?.detail || "영상 만들기 시작 실패")
@@ -242,7 +261,7 @@ export default function MusicLibraryPage() {
       setJobId(null)
       setCancelRequested(false)
     }
-  }, [selectedOrder, load])
+  }, [selectedOrder, channel, load])
 
   const handleCancel = useCallback(async () => {
     if (!jobId || cancelRequested) return
@@ -261,7 +280,7 @@ export default function MusicLibraryPage() {
       {/* 헤더 */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
-          <Link href="/music" className="shrink-0 rounded-lg border border-border p-1.5 text-muted-foreground hover:text-foreground">
+          <Link href={withChannel("/music", channel)} className="shrink-0 rounded-lg border border-border p-1.5 text-muted-foreground hover:text-foreground">
             <ArrowLeft className="h-4 w-4" />
           </Link>
           <h1 className="flex items-center gap-2 truncate text-lg font-semibold text-foreground">

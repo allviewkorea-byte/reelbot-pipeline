@@ -1,10 +1,18 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
-import { useEffect, useState } from "react"
+import { usePathname, useSearchParams } from "next/navigation"
+import { useEffect, useState, Suspense } from "react"
 import { Settings, PlayCircle, Menu, Plus, Activity } from "lucide-react"
 import { cn } from "@/lib/utils"
+import {
+  DEFAULT_MUSIC_CHANNEL,
+  MUSIC_CHANNELS,
+  WORKOUT_CHANNEL_ID,
+  channelParam,
+  resolveMusicChannel,
+  withChannel,
+} from "@/lib/music"
 import { Separator } from "@/components/ui/separator"
 import { HealthIndicator } from "@/components/video/HealthIndicator"
 import { BAEKGOM_CHANNEL_ID } from "@/lib/content-plan"
@@ -73,13 +81,14 @@ function useSystemIssue(): boolean {
   return hasIssue
 }
 
-// 음악 채널 검토 대기 수(주황 배지). /api/music/queue 길이.
-function useMusicQueueCount(): number {
+// 음악 채널 검토 대기 수(주황 배지). /api/music/queue 길이. 채널별로 갈린다.
+function useMusicQueueCount(channel: string): number {
   const [count, setCount] = useState(0)
   useEffect(() => {
     let alive = true
     const load = () => {
-      fetch("/api/music/queue")
+      const qp = channelParam(channel)
+      fetch(`/api/music/queue${qp ? `?${qp}` : ""}`)
         .then((r) => r.json())
         .then((d) => {
           if (alive) setCount(Array.isArray(d?.queue) ? d.queue.length : 0)
@@ -97,7 +106,7 @@ function useMusicQueueCount(): number {
       clearInterval(timer)
       window.removeEventListener("focus", onFocus)
     }
-  }, [])
+  }, [channel])
   return count
 }
 
@@ -174,18 +183,39 @@ function ChannelCard({
 // 음악 채널명(비밀 아님 → NEXT_PUBLIC 허용). 기본 "음악 채널".
 const MUSIC_CHANNEL_NAME = process.env.NEXT_PUBLIC_MUSIC_CHANNEL_NAME || "음악 채널"
 
+// useSearchParams 는 Suspense 경계를 요구한다(정적 프리렌더 bail-out 방지).
+// fallback 을 빈 값이 아니라 **where 채널 상태**로 렌더해, 정적 HTML 에서도 사이드바가
+// 지금과 똑같이 보이고 하이드레이션 후 선택 채널로 바뀐다(레이아웃 시프트 없음).
 export function Sidebar() {
+  return (
+    <Suspense fallback={<SidebarBody activeChannel={DEFAULT_MUSIC_CHANNEL} />}>
+      <SidebarWithChannel />
+    </Suspense>
+  )
+}
+
+function SidebarWithChannel() {
+  const searchParams = useSearchParams()
+  // 선택된 음악 채널 — URL 쿼리가 단일 진실. 미지정·미등록 → where(회귀 0).
+  return <SidebarBody activeChannel={resolveMusicChannel(searchParams.get("channel"))} />
+}
+
+function SidebarBody({ activeChannel }: { activeChannel: string }) {
   const pathname = usePathname()
   const baekgomLive = useChannelActive(BAEKGOM_CHANNEL_ID)
-  const musicQueue = useMusicQueueCount()
+  // 채널별 검토 대기 수 — music_uploads.channel 로 갈린다(2단계 SQL).
+  const whereQueue = useMusicQueueCount(DEFAULT_MUSIC_CHANNEL)
+  const workoutQueue = useMusicQueueCount(WORKOUT_CHANNEL_ID)
   const systemIssue = useSystemIssue()
   const [mobileOpen, setMobileOpen] = useState(false)
 
   // 백곰 관제 대시보드 = /dashboard(루트 / 도 리다이렉트). 상단 '대시보드' 메뉴와
   // 중복이므로 별도 대시보드 메뉴는 두지 않고 이 항목으로 통합.
   const baekgomActive = pathname === "/dashboard" || pathname === "/"
-  // 음악 채널 = /music (검토 대기 큐) + /music/guide.
-  const musicActive = pathname === "/music" || pathname.startsWith("/music/")
+  // 음악 채널 = /music (검토 대기 큐) + /music/guide. 채널은 쿼리로 구분한다.
+  const inMusic = pathname === "/music" || pathname.startsWith("/music/")
+  const musicActive = inMusic && activeChannel === DEFAULT_MUSIC_CHANNEL
+  const workoutActive = inMusic && activeChannel === WORKOUT_CHANNEL_ID
   const systemActive = pathname === "/system" || pathname.startsWith("/system/")
   const settingsActive =
     pathname === "/settings" || pathname.startsWith("/settings/")
@@ -259,7 +289,18 @@ export function Sidebar() {
               name={MUSIC_CHANNEL_NAME}
               status="idle"
               statusText="유튜브 · 검토 대기"
-              badge={musicQueue > 0 ? { label: `검토 ${musicQueue}`, tone: "review" } : undefined}
+              badge={whereQueue > 0 ? { label: `검토 ${whereQueue}`, tone: "review" } : undefined}
+              onNavigate={closeMobile}
+            />
+            {/* 운동 채널 — 같은 /music 화면을 ?channel= 로 전환한다(2단계). */}
+            <ChannelCard
+              href={withChannel("/music", WORKOUT_CHANNEL_ID)}
+              active={workoutActive}
+              icon={MUSIC_CHANNELS[WORKOUT_CHANNEL_ID].icon}
+              name={MUSIC_CHANNELS[WORKOUT_CHANNEL_ID].name}
+              status="idle"
+              statusText="유튜브 · 검토 대기"
+              badge={workoutQueue > 0 ? { label: `검토 ${workoutQueue}`, tone: "review" } : undefined}
               onNavigate={closeMobile}
             />
 
