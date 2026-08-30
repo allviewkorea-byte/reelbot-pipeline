@@ -193,6 +193,8 @@ export function MusicQueueCard({ item, onChanged, onOpenViewer }: { item: QueueI
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewData, setPreviewData] = useState<{ title: string; description: string } | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
+  const [displayPrompt, setDisplayPrompt] = useState(item.gpt_prompt || "")
+  const [promptLoading, setPromptLoading] = useState(false)
 
   const togglePlaylist = useCallback(async () => {
     const next = !showPlaylist
@@ -239,22 +241,20 @@ export function MusicQueueCard({ item, onChanged, onOpenViewer }: { item: QueueI
   }
 
   const copyPrompt = async () => {
-    // #52-B iOS Safari 는 clipboard 가 사용자 제스처 직후에만 허용 → fetch 후 복사하면 차단.
-    // ① 클릭 즉시(제스처 컨텍스트) 저장값을 먼저 복사한다.
-    const fallback = item.gpt_prompt || ""
-    const okNow = await writeClipboard(fallback)
+    // ① 클릭 즉시(iOS Safari 제스처 컨텍스트) 현재 화면 프롬프트를 클립보드에 복사.
+    const okNow = await writeClipboard(displayPrompt)
     if (okNow) {
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     }
-    // ② 백그라운드로 장르별 새 프롬프트를 받아 재복사 시도(실패해도 저장값은 이미 복사됨).
+    // ② 백그라운드로 새 프롬프트를 받아 화면에 표시(LLM 호출 없음, build_thumbnail_prompt 재실행).
+    setPromptLoading(true)
     try {
-      if (item.genre) {
-        const r = await fetch(`/api/music/genre-prompt?genre=${encodeURIComponent(item.genre)}`)
-        const d = await r.json().catch(() => null)
-        if (d?.prompt) await writeClipboard(d.prompt as string)
-      }
-    } catch { /* 네트워크 실패 → 이미 복사된 저장값 유지 */ }
+      const r = await fetch(`/api/music/queue/${encodeURIComponent(item.mix_id)}/gpt-prompt`)
+      const d = await r.json().catch(() => null)
+      if (d?.gpt_prompt) setDisplayPrompt(d.gpt_prompt as string)
+    } catch { /* 네트워크 실패 → 기존 프롬프트 유지 */ }
+    setPromptLoading(false)
     if (!okNow) toast.error("복사 실패 — 텍스트를 직접 선택해 복사하세요.")
   }
 
@@ -342,7 +342,12 @@ export function MusicQueueCard({ item, onChanged, onOpenViewer }: { item: QueueI
       const src = loc?.source_lang || "ko"
       const entry = meta?.[src] || meta?.["ko"]
       if (entry) {
-        setPreviewData({ title: entry.title || "", description: entry.description || "" })
+        let desc = entry.description || ""
+        const hashtagLine = loc?.hashtags?.length ? loc.hashtags.join(" ") : ""
+        if (hashtagLine && !desc.includes(hashtagLine)) {
+          desc = desc + "\n\n" + hashtagLine
+        }
+        setPreviewData({ title: entry.title || "", description: desc })
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "미리보기 생성 실패")
@@ -498,16 +503,21 @@ export function MusicQueueCard({ item, onChanged, onOpenViewer }: { item: QueueI
           </div>
         </div>
 
-        {/* GPT 프롬프트 복사 */}
-        <button
-          type="button"
-          onClick={copyPrompt}
-          className="flex items-center justify-between gap-2 rounded-md border border-border bg-secondary/30 px-2.5 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
-          title={item.gpt_prompt || ""}
-        >
-          <span className="truncate">GPT 프롬프트 복사</span>
-          {copied ? <Check className="h-3.5 w-3.5 shrink-0 text-emerald-400" /> : <Copy className="h-3.5 w-3.5 shrink-0" />}
-        </button>
+        {/* GPT 프롬프트 복사 — 클릭 시 현재 프롬프트 복사 + 새 프롬프트 화면 갱신 */}
+        <div className="flex flex-col gap-1 rounded-md border border-border bg-secondary/30 px-2.5 py-1.5">
+          <button
+            type="button"
+            onClick={copyPrompt}
+            disabled={promptLoading}
+            className="flex items-center justify-between gap-2 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <span className="truncate">{promptLoading ? "새 프롬프트 생성 중…" : "GPT 프롬프트 복사"}</span>
+            {promptLoading ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : copied ? <Check className="h-3.5 w-3.5 shrink-0 text-emerald-400" /> : <Copy className="h-3.5 w-3.5 shrink-0" />}
+          </button>
+          {displayPrompt && (
+            <p className="whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground/80">{displayPrompt}</p>
+          )}
+        </div>
 
         {/* 썸네일 업로드 */}
         <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
