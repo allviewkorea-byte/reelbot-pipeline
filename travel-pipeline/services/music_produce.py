@@ -456,7 +456,10 @@ def run_theme(
         from services.youtube_upload import upload_music_video  # 지연 import
         if progress:
             progress("유튜브 업로드(비공개)...")
+        # 채널 축 — run_theme(channel=...) 로 받은 값을 그대로 전달. None(where)이면
+        # 기존 동작(느슨한 검증), 다른 채널이면 엄격 검증이 걸린다.
         out["upload"] = upload_music_video(
-            out["video"]["video_url"], theme, result["mix"]
+            out["video"]["video_url"], theme, result["mix"],
+            channel=(channel if channel and channel != "rooftop_music" else None),
         )
     return out

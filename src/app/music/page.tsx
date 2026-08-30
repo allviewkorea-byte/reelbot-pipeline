@@ -56,8 +56,8 @@ function MusicDashboardPageInner() {
 
   useEffect(() => {
     loadStatus()
-    fetch("/api/music/metrics").then((r) => r.json()).then(setStats).catch(() => setStats(null))
     const _cp = channelParam(channel)
+    fetch(`/api/music/metrics${_cp ? `?${_cp}` : ""}`).then((r) => r.json()).then(setStats).catch(() => setStats(null))
     fetch(`/api/music/queue${_cp ? `?${_cp}` : ""}`).then((r) => r.json()).then((d) => setQueueCount(Array.isArray(d?.queue) ? d.queue.length : 0)).catch(() => {})
   }, [loadStatus, channel])
 

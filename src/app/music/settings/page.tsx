@@ -3,13 +3,80 @@
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
-import { ArrowLeft, Loader2, Save } from "lucide-react"
+import { ArrowLeft, Loader2, Save, ExternalLink, CheckCircle2, AlertTriangle } from "lucide-react"
+import { API_BASE } from "@/lib/proxy"
 import {
+  MUSIC_CHANNELS,
   MUSIC_CHANNEL_ID,
   MUSIC_CHANNEL_NAME,
   DEFAULT_MUSIC_CONFIG,
   type MusicChannelConfig,
 } from "@/lib/music"
+
+interface YtStatus {
+  connected: boolean
+  channel: string
+  channel_id: string
+  channel_id_env: string
+  channel_id_env_key: string
+}
+
+// 채널별 유튜브 연결 카드 — 연결 상태 표시 + 연결(재인증) 버튼.
+// 인증은 구글로 리다이렉트돼야 하므로 프록시가 아니라 백엔드 URL 로 직접 이동한다.
+function YoutubeConnectCard({ channelKey }: { channelKey: string }) {
+  const info = MUSIC_CHANNELS[channelKey]
+  const [st, setSt] = useState<YtStatus | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let alive = true
+    fetch(`/api/music/youtube/status?channel=${encodeURIComponent(channelKey)}`)
+      .then((r) => r.json())
+      .then((d) => { if (alive) setSt(d) })
+      .catch(() => { if (alive) setSt(null) })
+      .finally(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
+  }, [channelKey])
+
+  const hasEnv = Boolean(st?.channel_id_env)
+  const connected = Boolean(st?.connected)
+  const authUrl = `${API_BASE}/api/music/youtube/auth?channel=${encodeURIComponent(channelKey)}`
+
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5">
+      <span className="text-lg">{info.icon}</span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium text-foreground">{info.name}</p>
+        {loading ? (
+          <p className="text-xs text-muted-foreground">확인 중…</p>
+        ) : !hasEnv ? (
+          <p className="flex items-center gap-1 text-xs text-amber-400">
+            <AlertTriangle className="h-3 w-3" />
+            {st?.channel_id_env_key || "채널 ID env"} 미설정 — 환경변수를 먼저 넣어주세요
+          </p>
+        ) : connected ? (
+          <p className="flex items-center gap-1 text-xs text-emerald-400">
+            <CheckCircle2 className="h-3 w-3" /> 연결됨 · {st?.channel_id}
+          </p>
+        ) : (
+          <p className="text-xs text-amber-400">유튜브 연결 필요</p>
+        )}
+      </div>
+      <a
+        href={hasEnv ? authUrl : undefined}
+        aria-disabled={!hasEnv}
+        className={
+          hasEnv
+            ? "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground hover:border-primary/40"
+            : "pointer-events-none inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-border px-3 text-xs text-muted-foreground/50"
+        }
+        title={hasEnv ? "구글 인증 화면으로 이동합니다" : "채널 ID 환경변수가 먼저 필요합니다"}
+      >
+        <ExternalLink className="h-4 w-4" /> {connected ? "재연결" : "연결"}
+      </a>
+    </div>
+  )
+}
 
 const FIELDS: { key: keyof MusicChannelConfig; label: string; placeholder: string; hint?: string; area?: boolean }[] = [
   { key: "slogan_en", label: "채널 슬로건 (영문)", placeholder: "예: Out of Office, Into the music", hint: "본문 [1] 환영 멘트 아래에 표시 · 비우면 출력 안 함" },
@@ -81,6 +148,20 @@ export default function MusicSettingsPage() {
           </Link>
         </div>
       </header>
+
+      {/* 유튜브 연결(운동 채널 3단계) — 채널별 토큰이 분리돼 각각 인증이 필요하다. */}
+      <section className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4">
+        <div>
+          <h2 className="text-sm font-semibold text-foreground">유튜브 연결</h2>
+          <p className="text-xs text-muted-foreground">
+            채널마다 토큰이 따로입니다. 연결 버튼을 누르면 구글 인증 화면이 열리고,
+            거기서 <strong>해당 채널을 직접 선택</strong>해야 합니다.
+          </p>
+        </div>
+        {Object.keys(MUSIC_CHANNELS).map((k) => (
+          <YoutubeConnectCard key={k} channelKey={k} />
+        ))}
+      </section>
 
       {loading ? (
         <div className="flex h-40 items-center justify-center text-muted-foreground"><Loader2 className="h-6 w-6 animate-spin" /></div>

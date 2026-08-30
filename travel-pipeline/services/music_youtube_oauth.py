@@ -30,9 +30,59 @@ logger = logging.getLogger(__name__)
 
 _TIMEOUT = 30.0
 
+# ── 채널별 env 매핑(운동 채널 3단계) ────────────────────────────────────
+# **기존 키 이름은 절대 바꾸지 않는다** — where 가 즉시 깨진다.
+# 새 채널은 항목만 추가하면 된다.
+_CHANNEL_ENV: dict[str, dict[str, str]] = {
+    "rooftop_music": {
+        "channel_id": "YOUTUBE_CHANNEL_ID_MUSIC",
+        "refresh_token": "YOUTUBE_REFRESH_TOKEN_MUSIC",
+    },
+    "workout_music": {
+        "channel_id": "YOUTUBE_CHANNEL_ID_WORKOUT",
+        "refresh_token": "YOUTUBE_REFRESH_TOKEN_WORKOUT",
+    },
+}
+DEFAULT_CHANNEL = "rooftop_music"
 
-def music_channel_id() -> str:
-    return (os.getenv("YOUTUBE_CHANNEL_ID_MUSIC") or "music").strip() or "music"
+
+def is_valid_channel(channel: str | None) -> bool:
+    """등록된 채널인지. callback 의 state 검증에 쓴다."""
+    return isinstance(channel, str) and channel.strip() in _CHANNEL_ENV
+
+
+def _resolve(channel: str | None) -> str:
+    """None·빈값·미등록 → DEFAULT_CHANNEL. 예외를 던지지 않는다."""
+    c = channel.strip() if isinstance(channel, str) else ""
+    return c if c in _CHANNEL_ENV else DEFAULT_CHANNEL
+
+
+def channel_id_env_key(channel: str | None = None) -> str:
+    """해당 채널의 채널ID env 키 이름(오류 메시지에 그대로 쓴다)."""
+    return _CHANNEL_ENV[_resolve(channel)]["channel_id"]
+
+
+def configured_channel_id(channel: str | None = None) -> str:
+    """해당 채널의 유튜브 채널 ID(env). **미설정이면 빈 문자열** — 폴백하지 않는다.
+
+    where(기본)의 폴백 동작은 music_channel_id() 가 그대로 유지한다(회귀 0).
+    운동 등 명시 채널은 자기 env 만 보고, 없으면 호출부가 업로드를 거부한다.
+    """
+    return (os.getenv(channel_id_env_key(channel)) or "").strip()
+
+
+def music_channel_id(channel: str | None = None) -> str:
+    """토큰 저장소 키 + 상태 표시용 채널 식별자.
+
+    where 는 기존 동작 그대로 — env 미설정 시 리터럴 "music" 으로 떨어진다(회귀 0).
+    다른 채널은 env 가 없으면 빈 문자열이 되고, 그 상태로는 토큰 조회·저장이
+    무의미하므로 호출부가 먼저 거부한다.
+    """
+    ch = _resolve(channel)
+    val = configured_channel_id(ch)
+    if ch == DEFAULT_CHANNEL:
+        return val or "music"
+    return val
 
 
 def _client() -> tuple[str, str]:
@@ -53,8 +103,12 @@ def resolve_redirect_uri(explicit: str | None = None) -> str:
     return r
 
 
-def build_auth_url(redirect_uri: str | None = None) -> str:
-    """구글 OAuth 동의 화면 URL(음악 채널용). access_type=offline+prompt=consent."""
+def build_auth_url(redirect_uri: str | None = None, *, channel: str | None = None) -> str:
+    """구글 OAuth 동의 화면 URL(음악 채널용). access_type=offline+prompt=consent.
+
+    channel: state 로 실어 보낸다 — 구글이 그대로 되돌려주므로 쿠키·세션 없이
+    callback 까지 채널이 전달된다(OAuth 표준 방식).
+    """
     cid, _cs = _client()
     redir = resolve_redirect_uri(redirect_uri)
     params = {
@@ -65,27 +119,41 @@ def build_auth_url(redirect_uri: str | None = None) -> str:
         "access_type": "offline",
         "prompt": "consent",
         "include_granted_scopes": "true",
+        "state": _resolve(channel),
     }
-    logger.info("[music-yt-oauth] 인증 URL 생성: redirect_uri=%s", redir)
+    logger.info(
+        "[music-yt-oauth] 인증 URL 생성: redirect_uri=%s channel=%s", redir, _resolve(channel)
+    )
     return f"{_AUTH_ENDPOINT}?{urllib.parse.urlencode(params)}"
 
 
-def exchange_code(code: str, redirect_uri: str | None = None) -> dict:
-    """인증 코드 → 토큰 교환 후 refresh_token 을 음악 채널 ID 로 저장.
+def exchange_code(code: str, redirect_uri: str | None = None, *, channel: str | None = None) -> dict:
+    """인증 코드 → 토큰 교환 후 refresh_token 을 **해당 채널의** 채널 ID 키로 저장.
 
-    Returns: {refresh_token, has_access_token, save, redirect_uri, channel_id, error}
+    Returns: {refresh_token, has_access_token, save, redirect_uri, channel, channel_id, error}
     """
     cid, cs = _client()
     redir = resolve_redirect_uri(redirect_uri)
-    ch = music_channel_id()
+    chan = _resolve(channel)
+    ch = music_channel_id(chan)
     out: dict = {
         "refresh_token": None,
         "has_access_token": False,
         "redirect_uri": redir,
+        "channel": chan,
         "channel_id": ch,
         "save": None,
         "error": None,
     }
+    # 채널 ID env 가 없으면 토큰을 어떤 키로 저장할지 정할 수 없다 → 저장 자체를 막는다.
+    # (잘못된 키로 저장되면 나중에 추적이 어렵다.)
+    if not ch:
+        out["error"] = (
+            f"{channel_id_env_key(chan)} 미설정 — 채널 ID 를 먼저 환경변수에 넣어야 "
+            "토큰을 올바른 키로 저장할 수 있습니다."
+        )
+        logger.warning("[music-yt-oauth] %s", out["error"])
+        return out
     data = {
         "code": code,
         "client_id": cid,
@@ -140,20 +208,28 @@ def _refresh_access_token(refresh_token: str) -> str:
     return access_token
 
 
-def _music_refresh_token() -> str | None:
-    """음악 refresh_token: env YOUTUBE_REFRESH_TOKEN_MUSIC 우선, 없으면 저장소."""
-    env_rt = (os.getenv("YOUTUBE_REFRESH_TOKEN_MUSIC") or "").strip()
-    return env_rt or load_refresh_token(music_channel_id())
+def _music_refresh_token(channel: str | None = None) -> str | None:
+    """해당 채널의 refresh_token: env(채널별 키) 우선, 없으면 저장소(채널 ID 키).
+
+    env 우선은 where 의 기존 패턴 그대로 — 비상 수동 주입용이다.
+    """
+    ch = _resolve(channel)
+    env_rt = (os.getenv(_CHANNEL_ENV[ch]["refresh_token"]) or "").strip()
+    if env_rt:
+        return env_rt
+    key = music_channel_id(ch)
+    return load_refresh_token(key) if key else None
 
 
-def get_credentials():
-    """음악 채널 refresh_token 으로 access_token 을 갱신한 Credentials 반환(업로드용)."""
+def get_credentials(channel: str | None = None):
+    """해당 채널 refresh_token 으로 access_token 을 갱신한 Credentials 반환(업로드용)."""
     from google.oauth2.credentials import Credentials
 
-    refresh_token = _music_refresh_token()
+    ch = _resolve(channel)
+    refresh_token = _music_refresh_token(ch)
     if not refresh_token:
         raise YouTubeNotConnected(
-            "음악 유튜브 미연동 — 먼저 /api/music/youtube/auth 로 인증하세요."
+            f"유튜브 미연동(channel={ch}) — /music/settings 에서 이 채널을 연결하세요."
         )
     cid, cs = _client()
     access_token = _refresh_access_token(refresh_token)
@@ -167,5 +243,5 @@ def get_credentials():
     )
 
 
-def is_connected() -> bool:
-    return bool(_music_refresh_token())
+def is_connected(channel: str | None = None) -> bool:
+    return bool(_music_refresh_token(channel))
