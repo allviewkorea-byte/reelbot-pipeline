@@ -91,7 +91,10 @@ def _build_theme(mood: str, track_count: int = 1, tag_combo: dict | None = None)
     }
 
 
-def start(mood: str | None = None, track_count: int | None = None, tag_combo: dict | None = None) -> dict:
+def start(
+    mood: str | None = None, track_count: int | None = None, tag_combo: dict | None = None,
+    *, channel: str | None = None,
+) -> dict:
     """수동 영상 생성 1개 시작(동시 1개 제한). {ok, job_id} 또는 {ok:False, error, busy_job}.
 
     track_count(#42): 영상에 넣을 곡수 1~100(미지정→1). 곡수 = Suno 호출 수 = 영상 길이(#40).
@@ -116,6 +119,7 @@ def start(mood: str | None = None, track_count: int | None = None, tag_combo: di
             "cancelled": False,
             "created_at": time.time(),
             "tag_combo": tag_combo,
+            "channel": channel,  # run() 이 produce 로 전달(None → where)
         }
         _active_job = job_id
     meta = {"mood": key, "track_count": tc}
@@ -123,7 +127,7 @@ def start(mood: str | None = None, track_count: int | None = None, tag_combo: di
         meta["tag_combo"] = tag_combo
     try:
         from services import music_jobs
-        music_jobs.start_job("manual_render", job_id=job_id, metadata=meta)
+        music_jobs.start_job("manual_render", job_id=job_id, metadata=meta, channel=channel)
     except Exception as e:  # noqa: BLE001
         logger.debug("[music-manual] job 추적 시작 실패(무시): %s", e)
     return {"ok": True, "job_id": job_id}
@@ -206,6 +210,7 @@ def run(job_id: str) -> None:
             lyric_tone=theme["lyric_tone"], minutes=3.5,
             genre_id=None if job.get("tag_combo") else job["mood"],
             action=(job.get("tag_combo") or {}).get("action") or "",
+            channel=job.get("channel"),
             progress=_produce_progress,
         )
         mix = result.get("mix")

@@ -16,7 +16,17 @@ from services.music_store import _http_err, _supabase_cfg
 
 logger = logging.getLogger(__name__)
 
-MUSIC_CHANNEL_ID = "rooftop_music"
+# ── 채널 레지스트리 ────────────────────────────────────────────────────
+# 음악 파이프라인이 여러 채널을 태울 수 있도록 채널 축을 도입한다. 기존 상수는
+# 값을 그대로 두고 별칭으로 남긴다 — 참조부(이 파일 내부 4곳)가 무수정으로 동작한다.
+DEFAULT_CHANNEL = "rooftop_music"          # 기존 where 채널 — 기본값(회귀 0)
+MUSIC_CHANNEL_ID = DEFAULT_CHANNEL         # 하위호환 별칭
+
+CHANNELS: dict[str, dict] = {
+    "rooftop_music": {"label_kr": "where;_____", "youtube": "@Revezen99"},
+    "workout_music": {"label_kr": "2주안에몸매만들기", "youtube": "@2주안에몸매만들기"},
+}
+
 _TABLE = "channel_status"
 _MIN, _MAX = 1, 100  # #40 곡수 1~100(곡수↔길이 연동)
 DEFAULT_TRACK_COUNT = 1
@@ -26,8 +36,39 @@ def _clamp(n: int) -> int:
     return max(_MIN, min(_MAX, n))
 
 
-def get_track_count(default: int = DEFAULT_TRACK_COUNT) -> int:
-    """음악 채널 곡수(1~8). 미설정/오류 시 default(=1). 안전 기본(과금 최소)."""
+def is_valid_channel(channel: str | None) -> bool:
+    """등록된 채널인지. 알 수 없는 문자열을 DB 에 쓰지 않기 위한 검증."""
+    return isinstance(channel, str) and channel.strip() in CHANNELS
+
+
+def resolve_channel(channel: str | None) -> str:
+    """None·빈값·미등록 → DEFAULT_CHANNEL. **절대 예외를 던지지 않는다.**
+
+    호출부가 채널을 안 넘기면(기존 코드 전부) where 채널로 떨어져 회귀가 0 이다.
+    오타·미등록 값이 그대로 DB 에 저장돼 조회에서 영영 안 잡히는 사고도 막는다.
+    """
+    # 문자열이 아닌 값(int·dict 등)이 들어와도 터지지 않게 타입부터 막는다.
+    if not isinstance(channel, str):
+        if channel is not None:
+            logger.warning(
+                "[music-channel] 채널이 문자열이 아님(%s) — %s 로 대체",
+                type(channel).__name__, DEFAULT_CHANNEL,
+            )
+        return DEFAULT_CHANNEL
+    c = channel.strip()
+    if c and c in CHANNELS:
+        return c
+    if c:
+        logger.warning("[music-channel] 미등록 채널 %r — %s 로 대체", c, DEFAULT_CHANNEL)
+    return DEFAULT_CHANNEL
+
+
+def get_track_count(default: int = DEFAULT_TRACK_COUNT, *, channel: str | None = None) -> int:
+    """음악 채널 곡수(1~8). 미설정/오류 시 default(=1). 안전 기본(과금 최소).
+
+    channel=None → DEFAULT_CHANNEL(where). 기존 호출부는 수정 불필요.
+    """
+    ch = resolve_channel(channel)
     url, key = _supabase_cfg()
     if not (url and key):
         return default
@@ -36,7 +77,7 @@ def get_track_count(default: int = DEFAULT_TRACK_COUNT) -> int:
             r = c.get(
                 f"{url}/rest/v1/{_TABLE}",
                 headers={"apikey": key, "Authorization": f"Bearer {key}"},
-                params={"channel_id": f"eq.{MUSIC_CHANNEL_ID}", "select": "track_count", "limit": "1"},
+                params={"channel_id": f"eq.{ch}", "select": "track_count", "limit": "1"},
             )
             r.raise_for_status()
             rows = r.json()
@@ -64,11 +105,13 @@ def default_channel_config() -> dict:
     return {k: (DEFAULT_AI_DISCLOSURE if k == "ai_disclosure" else "") for k in _CONFIG_KEYS}
 
 
-def get_channel_config() -> dict:
+def get_channel_config(*, channel: str | None = None) -> dict:
     """음악 채널 설정(channel_config) 조회. 미설정/오류/컬럼 미존재 시 기본값(빈 칸 + 기본 AI 명시).
 
     공개 업로드 본문 조립(music_meta.build_description)에서 사용. 빈 값은 해당 섹션 생략.
+    channel=None → DEFAULT_CHANNEL(where).
     """
+    ch = resolve_channel(channel)
     base = default_channel_config()
     url, key = _supabase_cfg()
     if not (url and key):
@@ -78,7 +121,7 @@ def get_channel_config() -> dict:
             r = c.get(
                 f"{url}/rest/v1/{_TABLE}",
                 headers={"apikey": key, "Authorization": f"Bearer {key}"},
-                params={"channel_id": f"eq.{MUSIC_CHANNEL_ID}", "select": "channel_config", "limit": "1"},
+                params={"channel_id": f"eq.{ch}", "select": "channel_config", "limit": "1"},
             )
             r.raise_for_status()
             rows = r.json()
@@ -267,12 +310,14 @@ def default_design_config() -> dict:
     return normalize_design_config(DEFAULT_DESIGN_CONFIG, include_all=True)
 
 
-def get_design_config() -> dict | None:
+def get_design_config(*, channel: str | None = None) -> dict | None:
     """저장된 디자인 설정(정규화) 반환. 미저장/빈 객체/오류 시 None.
 
     렌더(make_video)는 None 이면 MusicViz 가 현재 하드코딩값으로 폴백 → 회귀 0.
     UI(GET)는 None 이면 default_design_config() 를 보여준다.
+    channel=None → DEFAULT_CHANNEL(where).
     """
+    ch = resolve_channel(channel)
     url, key = _supabase_cfg()
     if not (url and key):
         return None
@@ -281,7 +326,7 @@ def get_design_config() -> dict | None:
             r = c.get(
                 f"{url}/rest/v1/{_TABLE}",
                 headers={"apikey": key, "Authorization": f"Bearer {key}"},
-                params={"channel_id": f"eq.{MUSIC_CHANNEL_ID}", "select": "design_config", "limit": "1"},
+                params={"channel_id": f"eq.{ch}", "select": "design_config", "limit": "1"},
             )
             r.raise_for_status()
             rows = r.json()
@@ -294,13 +339,14 @@ def get_design_config() -> dict | None:
         return None
 
 
-def set_design_config(cfg: dict) -> dict:
-    """디자인 설정 저장(channel_status upsert, channel_id=rooftop_music). {ok, error}."""
+def set_design_config(cfg: dict, *, channel: str | None = None) -> dict:
+    """디자인 설정 저장(channel_status upsert). {ok, error}. channel=None → where 채널."""
+    ch = resolve_channel(channel)
     url, key = _supabase_cfg()
     if not (url and key):
         return {"ok": False, "error": "supabase 미설정"}
     record = {
-        "channel_id": MUSIC_CHANNEL_ID,
+        "channel_id": ch,
         "design_config": normalize_design_config(cfg),
     }
     try:

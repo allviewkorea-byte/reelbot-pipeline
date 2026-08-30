@@ -58,16 +58,28 @@ def _steps_before(step: str | None) -> list[str]:
     return STEPS[: STEPS.index(step)]
 
 
+def _resolve_channel(channel: str | None) -> str:
+    """music_channel.resolve_channel 지연 호출(순환 import 회피). 실패해도 예외 없음."""
+    try:
+        from services.music_channel import resolve_channel
+
+        return resolve_channel(channel)
+    except Exception:  # noqa: BLE001 - 추적은 best-effort, 절대 파이프라인을 막지 않는다
+        return "rooftop_music"
+
+
 def start_job(
     job_type: str,
     *,
     job_id: str | None = None,
     mix_id: str | None = None,
     metadata: dict | None = None,
+    channel: str | None = None,
 ) -> str:
     """작업 시작 → DB row 생성(status=queued). job_id 반환(미지정 시 생성).
 
     실패해도 호출자 흐름을 막지 않도록 항상 job_id 를 반환한다(인메모리 job 과 동일 id 사용 가능).
+    channel=None → DEFAULT_CHANNEL(where). 기존 호출부는 수정 불필요.
     """
     jid = job_id or uuid.uuid4().hex
     url, key = _supabase_cfg()
@@ -77,6 +89,7 @@ def start_job(
         "job_id": jid,
         "type": job_type,
         "mix_id": mix_id,
+        "channel": _resolve_channel(channel),
         "status": "queued",
         "step": None,
         "step_progress": 0,
@@ -155,14 +168,16 @@ def dismiss_job(job_id: str) -> dict:
 
 _SELECT = (
     "job_id,type,mix_id,status,step,step_progress,steps_completed,"
-    "error_message,metadata,created_at,updated_at,completed_at"
+    "error_message,metadata,channel,created_at,updated_at,completed_at"
 )
 
 
-def list_active() -> list[dict]:
+def list_active(*, channel: str | None = None) -> list[dict]:
     """진행 중(queued/running) + 미확인 실패(failed & completed_at 비어 있음) 목록.
 
     실패 작업도 대표가 [닫기] 하기 전까지는 검토대기 상단에 보이도록 포함한다.
+    channel=None → DEFAULT_CHANNEL(where). 마이그레이션이 기존 행을 where 로 백필하므로
+    지금 시점의 결과 집합은 변하지 않는다.
     """
     url, key = _supabase_cfg()
     if not (url and key):
@@ -170,6 +185,7 @@ def list_active() -> list[dict]:
     try:
         params = {
             "select": _SELECT,
+            "channel": f"eq.{_resolve_channel(channel)}",
             "or": "(status.in.(queued,running),and(status.eq.failed,completed_at.is.null))",
             "order": "created_at.desc",
         }
@@ -199,8 +215,11 @@ def get_job(job_id: str) -> dict | None:
         return None
 
 
-def list_history(limit: int = 20) -> list[dict]:
-    """최근 완료/실패 작업 — 대시보드 통계용. created_at 내림차순."""
+def list_history(limit: int = 20, *, channel: str | None = None) -> list[dict]:
+    """최근 완료/실패 작업 — 대시보드 통계용. created_at 내림차순.
+
+    channel=None → DEFAULT_CHANNEL(where).
+    """
     url, key = _supabase_cfg()
     if not (url and key):
         return []
@@ -209,6 +228,7 @@ def list_history(limit: int = 20) -> list[dict]:
         params = {
             "select": _SELECT,
             "status": "in.(completed,failed)",
+            "channel": f"eq.{_resolve_channel(channel)}",
             "order": "created_at.desc",
             "limit": str(limit),
         }

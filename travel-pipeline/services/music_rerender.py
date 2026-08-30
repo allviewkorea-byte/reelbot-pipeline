@@ -24,8 +24,8 @@ _LOCK = threading.Lock()
 _active: dict[str, str] = {}  # mix_id → 진행 중 job_id
 
 
-def start(mix_id: str) -> dict:
-    """재렌더 시작. {ok, job_id} 또는 {ok:False, error}."""
+def start(mix_id: str, *, channel: str | None = None) -> dict:
+    """재렌더 시작. {ok, job_id} 또는 {ok:False, error}. channel=None → where 채널."""
     with _LOCK:
         cur = _active.get(mix_id)
         if cur and _JOBS.get(cur, {}).get("status") == "running":
@@ -39,7 +39,7 @@ def start(mix_id: str) -> dict:
     # #36 운영 가시성 — DB 작업 추적(인메모리와 같은 job_id). best-effort.
     try:
         from services import music_jobs
-        music_jobs.start_job("rerender", job_id=job_id, mix_id=mix_id)
+        music_jobs.start_job("rerender", job_id=job_id, mix_id=mix_id, channel=channel)
     except Exception as e:  # noqa: BLE001
         logger.debug("[music-rerender] job 추적 시작 실패(무시): %s", e)
     return {"ok": True, "job_id": job_id}
