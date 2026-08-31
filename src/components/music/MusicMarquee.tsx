@@ -4,6 +4,7 @@
 // (직접 import 금지). 음악 영상은 16:9 가로라 카드 비율만 aspect-video 로 조정.
 import { useEffect, useState } from "react"
 import { Film, Loader2 } from "lucide-react"
+import { channelParam } from "@/lib/music"
 
 interface RecentVideo {
   mix_id: string
@@ -46,13 +47,14 @@ function VideoCard({ v }: { v: RecentVideo }) {
   )
 }
 
-export function MusicMarquee() {
+export function MusicMarquee({ channel }: { channel?: string | null }) {
   const [videos, setVideos] = useState<RecentVideo[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let active = true
-    fetch("/api/music/recent")
+    const qp = channelParam(channel)
+    fetch(`/api/music/recent${qp ? `?${qp}` : ""}`)
       .then((r) => r.json())
       .then((d) => {
         if (!active) return
@@ -63,7 +65,7 @@ export function MusicMarquee() {
         if (active) setLoading(false)
       })
     return () => { active = false }
-  }, [])
+  }, [channel])
 
   return (
     <div className="flex min-h-[300px] flex-1 flex-col rounded-xl border border-border bg-card p-3 md:min-h-0">
