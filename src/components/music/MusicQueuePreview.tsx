@@ -2,9 +2,11 @@
 
 // 검토 대기 미리보기(#28) — 대시보드용. 백곰 '오늘의 콘텐츠' placeholder 대체.
 // /api/music/queue 최신 2~3개를 작은 카드로(썸네일+제목+상태점), 클릭 → /music/queue.
-import { useEffect, useState } from "react"
+// 채널 축: channel 미지정·where 면 쿼리를 붙이지 않는다(기존 요청 URL 과 문자 단위 동일).
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { ChevronDown, Music } from "lucide-react"
+import { channelParam, withChannel } from "@/lib/music"
 
 interface QueueItem {
   slug: string
@@ -15,24 +17,26 @@ interface QueueItem {
   thumbnail_r2_key?: string | null
 }
 
-export function MusicQueuePreview() {
+export function MusicQueuePreview({ channel }: { channel?: string | null }) {
   const [items, setItems] = useState<QueueItem[]>([])
   const [loaded, setLoaded] = useState(false)
+  const queueHref = useMemo(() => withChannel("/music/queue", channel), [channel])
 
   useEffect(() => {
-    fetch("/api/music/queue")
+    const qp = channelParam(channel)
+    fetch(`/api/music/queue${qp ? `?${qp}` : ""}`)
       .then((r) => r.json())
       .then((d) => setItems(Array.isArray(d?.queue) ? d.queue.slice(0, 3) : []))
       .catch(() => setItems([]))
       .finally(() => setLoaded(true))
-  }, [])
+  }, [channel])
 
   return (
     <div className="rounded-xl border border-border bg-card p-3">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-sm font-semibold text-foreground">검토 대기</h2>
         <Link
-          href="/music/queue"
+          href={queueHref}
           className="flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-primary/5"
         >
           전체 보기
@@ -49,7 +53,7 @@ export function MusicQueuePreview() {
           items.map((it) => (
             <Link
               key={it.mix_id}
-              href="/music/queue"
+              href={queueHref}
               className="flex items-center gap-2.5 rounded-lg border border-border p-2 transition-colors hover:border-primary/30 hover:bg-secondary/30"
             >
               <div className="flex h-10 w-16 shrink-0 items-center justify-center overflow-hidden rounded bg-secondary/40">

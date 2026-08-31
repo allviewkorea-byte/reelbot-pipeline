@@ -292,7 +292,7 @@ function MusicDashboardPageInner() {
           <MusicTrendPanel />
         </div>
         <div className="[&>div]:h-full">
-          <MusicQueuePreview />
+          <MusicQueuePreview key={channel} channel={channel} />
         </div>
       </div>
 
@@ -300,7 +300,7 @@ function MusicDashboardPageInner() {
       <MusicPipeline activeJobs={activeJobs} />
 
       {/* 최근 업로드 마퀴 */}
-      <MusicMarquee />
+      <MusicMarquee key={channel} channel={channel} />
     </div>
   )
 }
