@@ -391,6 +391,12 @@ def publish(mix_id: str, body: PublishBody | None = None):
     if not mp4_url:
         raise HTTPException(status_code=400, detail="영상(mp4_url)을 찾을 수 없습니다.")
 
+    # 업로드 대상 채널 — 이 영상이 속한 채널(2단계 music_uploads.channel).
+    # where 행은 값이 'rooftop_music' 이지만 **None 으로 넘겨** 기존 동작(느슨한 검증)을
+    # 그대로 쓴다. 다른 채널만 엄격 모드로 돌려 잘못된 채널 업로드를 원천 차단한다.
+    _row_channel = (row.get("channel") or "").strip()
+    _pub_channel = _row_channel if _row_channel and _row_channel != "rooftop_music" else None
+
     # 주제(메타데이터 풍부화) + 믹스(곡 목록) 복원.
     theme = music_theme.get_theme(slug) or {
         "slug": slug,
@@ -495,6 +501,7 @@ def publish(mix_id: str, body: PublishBody | None = None):
             title=base_meta.get("title") or None,
             description=base_meta.get("description") or None,
             synthetic_media=(body.synthetic_media if body else None),
+            channel=_pub_channel,
         )
     except HTTPException:
         raise
@@ -512,7 +519,9 @@ def publish(mix_id: str, body: PublishBody | None = None):
         vid = result["video_id"]
         meta = loc.get("meta") or {}
         if meta:
-            ml["localizations"] = set_localizations(vid, meta, default_lang=src_lang)
+            ml["localizations"] = set_localizations(
+                vid, meta, default_lang=src_lang, channel=_pub_channel
+            )
         lyrics_by_lang = loc.get("lyrics") or {}
         if lyrics_by_lang and mix.get("tracks"):
             total = mix.get("total_sec") or 0.0
@@ -527,7 +536,7 @@ def publish(mix_id: str, body: PublishBody | None = None):
                     "localizations.lyrics 확인 필요)",
                     len(_no_srt), ",".join(_no_srt),
                 )
-            ml["captions"] = upload_captions(vid, srt)
+            ml["captions"] = upload_captions(vid, srt, channel=_pub_channel)
     except Exception as e:  # noqa: BLE001 - 다국어 실패는 영상 공개를 막지 않음
         logger.warning("[music-dashboard] 다국어 적용 실패(영상은 공개됨): %s", e)
 

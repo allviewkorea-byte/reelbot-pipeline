@@ -399,32 +399,71 @@ def build_music_metadata(theme: dict, mix: dict) -> tuple[str, str, list[str]]:
     return title, description, tags[:30]
 
 
-def _verify_music_channel(youtube) -> None:
-    """업로드 토큰 채널이 음악 채널 ID 와 일치하는지 검증(불일치 시 차단).
+def _verify_music_channel(youtube, channel: str | None = None) -> None:
+    """업로드 토큰 채널이 목표 채널 ID 와 일치하는지 검증(불일치 시 차단).
 
-    음악 채널 ID 는 YOUTUBE_CHANNEL_ID_MUSIC 우선, 미설정 시 YOUTUBE_CHANNEL_ID 로 폴백.
+    ★ 비대칭 설계 — 의도적이다.
+
+    where(기본, channel=None)는 **기존 동작 그대로**: 확인 실패·연결 채널 없음·env
+    미설정이면 경고만 남기고 통과한다. 지금까지 이 상태로 운영됐고 회귀 0 이 우선이다.
+    목표 ID 는 YOUTUBE_CHANNEL_ID_MUSIC 우선, 미설정 시 백곰 YOUTUBE_CHANNEL_ID 폴백
+    (논리적으론 이상하지만 제거하면 동작이 바뀌므로 유지).
+
+    채널을 **명시한 경우**(운동 등)는 아래 넷을 전부 거부한다. 확인이 안 되면 올리지
+    않는다 — 운동 곡이 where 에 공개되면 되돌리려면 삭제해야 하고 그 사이 구독자가 본다.
+    조용히 다른 채널로 올라가는 것이 최악의 사고다.
+      ① 해당 채널의 채널ID env 없음   (기존엔 target="" 이라 검증 자체가 스킵됐다)
+      ② channels().list API 호출 실패 (기존엔 통과)
+      ③ 연결된 채널 없음(items 빈 값) (기존엔 통과)
+      ④ 채널 불일치                    (기존에도 차단)
+    명시 채널은 백곰 env 로 폴백하지 않는다 — 자기 env 만 본다.
     """
-    target = (os.getenv("YOUTUBE_CHANNEL_ID_MUSIC") or os.getenv("YOUTUBE_CHANNEL_ID") or "").strip()
+    from services import music_youtube_oauth as _mo
+
+    strict = channel is not None
+    if strict:
+        env_key = _mo.channel_id_env_key(channel)
+        target = _mo.configured_channel_id(channel)  # 폴백 없음
+        if not target:
+            raise RuntimeError(
+                f"[업로드 거부] env 없음 — {env_key} 가 설정되지 않았습니다(channel={channel}). "
+                "채널 ID 를 넣기 전에는 업로드할 수 없습니다(다른 채널로 잘못 올라가는 것을 막습니다)."
+            )
+    else:
+        target = (
+            os.getenv("YOUTUBE_CHANNEL_ID_MUSIC") or os.getenv("YOUTUBE_CHANNEL_ID") or ""
+        ).strip()
+
     try:
         resp = youtube.channels().list(part="id,snippet", mine=True).execute()
         items = resp.get("items", [])
     except Exception as e:  # noqa: BLE001
+        if strict:
+            raise RuntimeError(
+                f"[업로드 거부] 확인 실패 — 유튜브 채널 조회에 실패했습니다(channel={channel}): {e}. "
+                "어느 채널로 올라갈지 확인할 수 없어 중단합니다. 잠시 후 다시 시도하세요."
+            ) from e
         logger.warning("[music-youtube] 채널 확인 실패(업로드는 계속): %s", e)
         return
     if not items:
+        if strict:
+            raise RuntimeError(
+                f"[업로드 거부] 토큰 미연결 — 인증 토큰에 연결된 채널이 없습니다"
+                f"(channel={channel}). /music/settings 에서 이 채널을 다시 연결하세요."
+            )
         logger.warning("[music-youtube] 인증 토큰에 연결된 채널이 없습니다.")
         return
     actual_id = items[0].get("id", "")
     actual_title = items[0].get("snippet", {}).get("title", "")
     logger.warning(
-        "[music-youtube] 인증 채널: id=%s title=%s (목표=%s)",
-        actual_id, actual_title, target or "(미설정)",
+        "[music-youtube] 인증 채널: id=%s title=%s (목표=%s, channel=%s)",
+        actual_id, actual_title, target or "(미설정)", channel or "(기본)",
     )
     if target and actual_id != target:
+        _key = _mo.channel_id_env_key(channel) if strict else "YOUTUBE_CHANNEL_ID_MUSIC"
         raise RuntimeError(
-            f"음악 업로드 대상 채널 불일치: 토큰 채널={actual_id}({actual_title}) ≠ "
-            f"YOUTUBE_CHANNEL_ID_MUSIC={target}. /api/music/youtube/auth 재인증 시 "
-            "Revezen 채널을 선택하세요."
+            f"[업로드 거부] 채널 불일치: 토큰 채널={actual_id}({actual_title}) ≠ "
+            f"{_key}={target}. /music/settings 에서 재인증할 때 올바른 채널을 선택하세요."
         )
 
 
@@ -439,6 +478,7 @@ def upload_music_video(
     description: str | None = None,
     tags: list[str] | None = None,
     synthetic_media: bool | None = None,
+    channel: str | None = None,
 ) -> dict:
     """음악 영상(mp4)을 음악 채널(Revezen)에 업로드. Returns {video_id, video_url}.
 
@@ -447,6 +487,9 @@ def upload_music_video(
     thumbnail_path 가 있으면 썸네일도 첨부. mp4_path 는 R2 URL/로컬 경로 모두 가능.
     title/description/tags 를 주면(#37 풍부화 메타) 그것을 쓰고, 없으면 build_music_metadata.
     업로드 성공 시 music_uploads 에 기록(실패해도 업로드는 성공).
+
+    channel: 채널 축(운동 채널 3단계). 지정하면 그 채널의 토큰·채널ID 로 업로드하고
+    검증을 엄격 모드로 돌린다(확인 불가 시 거부). None 이면 where 기존 동작.
 
     synthetic_media: AI 표시(status.containsSyntheticMedia). 우선순위는 백곰 upload_video 와
     동일하게 전달 인자(대시보드 토글) > env(YOUTUBE_SYNTHETIC_MEDIA) > False.
@@ -471,9 +514,9 @@ def upload_music_video(
         if not local.exists() or local.stat().st_size == 0:
             raise FileNotFoundError(f"업로드할 음악 영상 없음/빈 파일: {mp4_path}")
 
-        creds = music_get_credentials()
+        creds = music_get_credentials(channel)
         youtube = build("youtube", "v3", credentials=creds, cache_discovery=False)
-        _verify_music_channel(youtube)
+        _verify_music_channel(youtube, channel)
 
         body = {
             "snippet": {
@@ -594,15 +637,15 @@ def publish_to_youtube(
 
 
 # ── #32 다국어: 자막(captions) + 제목·설명(localizations) ────────────────
-def _music_youtube_client():
-    """음악 채널 YouTube 클라이언트(force-ssl 포함 스코프 필요)."""
+def _music_youtube_client(channel: str | None = None):
+    """음악 채널 YouTube 클라이언트(force-ssl 포함 스코프 필요). channel 미지정 → where."""
     from googleapiclient.discovery import build
     from services.music_youtube_oauth import get_credentials as music_get_credentials
-    creds = music_get_credentials()
+    creds = music_get_credentials(channel)
     return build("youtube", "v3", credentials=creds, cache_discovery=False)
 
 
-def upload_captions(video_id: str, srt_by_lang: dict[str, str]) -> dict:
+def upload_captions(video_id: str, srt_by_lang: dict[str, str], *, channel: str | None = None) -> dict:
     """언어별 SRT 를 자막 트랙으로 업로드(captions.insert). {uploaded:[lang...], failed:{lang:err}}.
 
     force-ssl 스코프 필요(재인증). 실패는 언어별로 격리(한 언어 실패가 나머지 막지 않음).
@@ -617,7 +660,7 @@ def upload_captions(video_id: str, srt_by_lang: dict[str, str]) -> dict:
     if not srt_by_lang:
         logger.warning("[music-youtube] 자막 SRT 가 하나도 없음 — 업로드 생략")
         return {"uploaded": [], "failed": {}, "skipped": []}
-    youtube = _music_youtube_client()
+    youtube = _music_youtube_client(channel)
     with tempfile.TemporaryDirectory(prefix="srt_") as tmp:
         for lang, srt in srt_by_lang.items():
             if not (srt or "").strip():
@@ -673,7 +716,10 @@ def _clamp_description(desc: str, lng: str) -> str:
     return cut
 
 
-def set_localizations(video_id: str, localizations: dict[str, dict], default_lang: str = "ko") -> dict:
+def set_localizations(
+    video_id: str, localizations: dict[str, dict], default_lang: str = "ko",
+    *, channel: str | None = None,
+) -> dict:
     """제목·설명 다국어 적용(videos.update localizations). {ok, error, applied, failed}.
 
     localizations: {lang: {title, description}}. 기존 snippet 보존 + defaultLanguage 설정.
@@ -686,7 +732,7 @@ def set_localizations(video_id: str, localizations: dict[str, dict], default_lan
     if not localizations:
         return {"ok": False, "error": "localizations 비어있음", "applied": [], "failed": {}}
     try:
-        youtube = _music_youtube_client()
+        youtube = _music_youtube_client(channel)
         resp = youtube.videos().list(part="snippet", id=video_id).execute()
         items = resp.get("items", [])
         if not items:

@@ -31,7 +31,7 @@ export const MUSIC_CHANNELS: Record<string, MusicChannelInfo> = {
     id: WORKOUT_CHANNEL_ID,
     name: "2주안에몸매만들기",
     icon: "💪",
-    canUpload: false, // 유튜브 토큰 채널별 분리는 3단계
+    canUpload: true, // 3단계에서 채널별 토큰 분리 완료 — 업로드 개방
   },
 }
 
