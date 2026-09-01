@@ -14,5 +14,10 @@ export async function GET(request: NextRequest) {
     .filter(([k, v]) => v || k === "genre")
     .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
     .join("&")
-  return proxyJson(`/api/music/genre-prompt?${qs}`, { method: "GET" })
+  const res = await proxyJson(`/api/music/genre-prompt?${qs}`, { method: "GET" })
+  // 클릭마다 새 프롬프트여야 하므로 어떤 계층에도 캐시되면 안 된다.
+  // (실측상 지금도 캐시되진 않지만 응답에 Cache-Control 이 아예 없어서 브라우저·
+  //  프록시 변수가 남아 있었다. proxyJson 은 다른 라우트도 쓰므로 여기서만 붙인다.)
+  res.headers.set("Cache-Control", "no-store, max-age=0")
+  return res
 }
