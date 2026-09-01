@@ -227,7 +227,23 @@ def _translate_one_meta(base_title: str, base_desc: str, src: str, target: str) 
 
 
 def generate_hashtags(theme: dict, viz_spec: dict | None) -> list[str]:
-    """해시태그 — 영어 5~7 + 한국어 3~5 + 무드/장소 2~3 (총 10~15). 결정적(비용 0)."""
+    """해시태그 — 영어 5~7 + 한국어 3~5 + 무드/장소 2~3 (총 10~15). 결정적(비용 0).
+
+    ★ 채널 분기(운동 채널 4단계). 아래 11개는 채널·장르와 무관하게 **하드코딩**돼 있어
+    힙합 운동곡에도 #lofi #studymusic #citypop 이 붙었다(유튜브 오분류 → SEO 손해).
+    where(미지정 포함)는 기존 영상과의 일관성 때문에 **바이트 동일**하게 두고, 그 외
+    채널만 music_meta.build_hashtags(tag_combo 기반) 로 보낸다. where 의 같은 문제는
+    별도 작업으로 잡는다 — 여기서 같이 고치면 회귀 검증에 변수가 섞인다.
+
+    채널은 theme["channel"] 로 실려 온다(music_video.py 무수정 우회 — 렌더 시점 호출부가
+    theme 만 넘기기 때문). 없으면 where.
+    """
+    from services.music_channel import DEFAULT_CHANNEL, resolve_channel
+
+    if resolve_channel(theme.get("channel")) != DEFAULT_CHANNEL:
+        from services import music_meta
+
+        return music_meta.build_hashtags(theme, viz_spec)
     vs = viz_spec or {}
     genre = (theme.get("genre") or "").strip().replace(" ", "")
     mood = (theme.get("mood") or "").strip()

@@ -225,8 +225,54 @@ _PLAYLISTS = {
 }
 
 
-def _get_playlist(key: str) -> str:
-    return _PLAYLISTS[key]()
+# ── 채널별 재생목록(운동 채널 4단계) ─────────────────────────────────
+# where 12개는 위 _PLAYLISTS 를 **그대로** 쓴다(딕셔너리·env 키 이름 무수정 → 회귀 0).
+# 운동 채널은 축이 달라 3개로 묶는다. ID 가 바뀌면 env 로 덮을 수 있게 같은 _pl 패턴.
+_WORKOUT_PLAYLISTS = {
+    "strength": lambda: _pl("PLAYLIST_WORKOUT_STRENGTH", "PLHWh6LvxRMKc"),  # 웨이트·근력
+    "cardio": lambda: _pl("PLAYLIST_WORKOUT_CARDIO", "PLVgsgniEHDqM"),      # 러닝·유산소
+    "warmup": lambda: _pl("PLAYLIST_WORKOUT_WARMUP", "PLcPnjH0jsx1A"),      # 워밍업·스트레칭
+}
+
+_CHANNEL_PLAYLISTS: dict[str, dict] = {
+    "rooftop_music": _PLAYLISTS,
+    "workout_music": _WORKOUT_PLAYLISTS,
+}
+
+# 운동 채널 action → 재생목록. 제목과 내용이 맞는 것만 넣는다 — 억지로 채우면
+# 목록 클릭 후 이탈한다. 여기 없는 action 은 **재생목록 없이 업로드**(정상 동작).
+_WORKOUT_ACTION_MAP: dict[str, str] = {
+    "workout": "strength", "confidence": "strength",
+    "running": "cardio", "swimming": "cardio",
+    "stretching": "warmup", "yoga": "warmup", "pilates": "warmup",
+    "meditation": "warmup", "rest": "warmup", "walk": "warmup",
+}
+
+
+def _get_playlist(key: str, channel: str | None = None) -> str:
+    """채널의 재생목록 ID. channel 미지정 → where(기존 동작, 12개 그대로).
+
+    등록되지 않은 키는 빈 문자열 — 호출부가 falsy 로 걸러 재생목록 없이 업로드한다.
+    """
+    from services.music_channel import resolve_channel
+
+    table = _CHANNEL_PLAYLISTS.get(resolve_channel(channel)) or _PLAYLISTS
+    fn = table.get(key)
+    return fn() if fn else ""
+
+
+def _workout_playlist_id(theme: dict) -> str | None:
+    """운동 채널 재생목록 — tag_combo 의 action 만 본다.
+
+    where 의 12개 규칙(장르·감정 폴백, _legacy_playlist)은 축이 달라 재사용하지 않는다.
+    where 규칙을 태우면 where 재생목록 ID 가 나와 남의 채널에 넣으려다 실패한다 —
+    이번 버그의 원인이 정확히 그것이었다.
+    """
+    action = ((theme.get("tag_combo") or {}).get("action") or "").strip()
+    key = _WORKOUT_ACTION_MAP.get(action)
+    if not key:
+        return None
+    return _get_playlist(key, "workout_music") or None
 
 
 def add_to_playlist(youtube, video_id: str, playlist_id: str) -> bool:
@@ -253,8 +299,17 @@ def add_to_playlist(youtube, video_id: str, playlist_id: str) -> bool:
         return False
 
 
-def _genre_playlist_id(theme: dict) -> str | None:
-    """tag_combo 8축 기반 12개 재생목록 매칭. 매칭 안 되면 None(재생목록 미배정)."""
+def _genre_playlist_id(theme: dict, channel: str | None = None) -> str | None:
+    """tag_combo 8축 기반 12개 재생목록 매칭. 매칭 안 되면 None(재생목록 미배정).
+
+    channel: 채널 축(4단계). where(미지정 포함)는 아래 기존 규칙 그대로, 다른 채널은
+    그 채널 전용 규칙으로 보낸다.
+    """
+    from services.music_channel import DEFAULT_CHANNEL, resolve_channel
+
+    ch = resolve_channel(channel)
+    if ch != DEFAULT_CHANNEL:
+        return _workout_playlist_id(theme) if ch == "workout_music" else None
     combo = theme.get("tag_combo")
     if not combo:
         return _legacy_playlist(theme)
@@ -566,8 +621,17 @@ def upload_music_video(
         # 재생목록 자동 분류 — 장르 매핑이 있으면 해당 재생목록에 추가(best-effort).
         # 매핑 없는 장르 → 추가 없이 그냥 업로드. 어떤 실패도 업로드를 막지 않음.
         try:
-            playlist_id = _genre_playlist_id(theme)
-            if playlist_id and add_to_playlist(youtube, video_id, playlist_id):
+            playlist_id = _genre_playlist_id(theme, channel)
+            if not playlist_id:
+                # 이전에는 조용히 건너뛰어 "재생목록이 왜 비었는지"를 로그로 알 수 없었다.
+                logger.warning(
+                    "[playlist] 매핑 없음 → 재생목록 미배정(업로드는 정상): "
+                    "video=%s channel=%s action=%s genre=%s",
+                    video_id, channel or "(기본)",
+                    (theme.get("tag_combo") or {}).get("action") or "-",
+                    theme.get("genre") or "-",
+                )
+            elif add_to_playlist(youtube, video_id, playlist_id):
                 logger.warning(
                     "[playlist] 재생목록 추가 완료: video=%s playlist=%s", video_id, playlist_id
                 )

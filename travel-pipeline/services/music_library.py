@@ -157,6 +157,8 @@ def run(job_id: str) -> None:
             "situation": preset.get("situation", ""),
             "mood": preset["mood"],
             "type": "instrumental",  # 라이브러리 믹스는 가사 임베드 없음(자막 미동기).
+            # 채널 축(4단계) — 해시태그·본문 Copyright 가 채널을 알게 한다. None → where.
+            "channel": job.get("channel"),
         }
 
         # ① 마스터(멱등) — 원본 r2_key 소스로 새 slug 아래 마스터본 생성. Suno 호출 없음.

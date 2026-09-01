@@ -97,6 +97,9 @@ def run(job_id: str) -> None:
         theme = music_theme.get_theme(slug) or {
             "slug": slug, "title_kr": row.get("title_kr"),
             "genre": row.get("genre"), "mood": row.get("mood"),
+            # 재렌더는 localizations 를 지우고 다시 만든다 — 여기서 빠지면 해시태그·
+            # Copyright 가 다시 where 기준으로 굳는다(4단계).
+            "tag_combo": row.get("tag_combo"), "channel": row.get("channel"),
         }
         mix = _load_mix(slug, mix_id)
 
