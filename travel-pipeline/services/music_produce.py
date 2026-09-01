@@ -417,6 +417,10 @@ def run_theme(
     slug = theme.get("slug") or theme.get("theme_slug")
     if not slug:
         raise ValueError("theme 에 slug 가 없습니다.")
+    # 채널 축(4단계) — theme 에 실어 두면 make_video(수정 금지) 를 거쳐 해시태그·본문
+    # Copyright 까지 채널이 전달된다. where 는 None 이라 기존 동작 그대로.
+    if channel and theme.get("channel") is None:
+        theme["channel"] = channel
     count = n or int(theme.get("track_count") or 3)
 
     # #46: 주제의 genre id 우선, 없으면 텍스트로 14장르 분류(best-effort). None → LLM 폴백.

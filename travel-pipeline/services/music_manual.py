@@ -46,7 +46,12 @@ def _clamp_track_count(n) -> int:
         return 1
 
 
-def _build_theme(mood: str, track_count: int = 1, tag_combo: dict | None = None) -> dict:
+def _build_theme(
+    mood: str, track_count: int = 1, tag_combo: dict | None = None,
+    *, channel: str | None = None,
+) -> dict:
+    """channel: 채널 축(4단계). theme 에 실어 보내면 music_video.py 를 수정하지 않고도
+    해시태그·본문 Copyright 가 채널을 알 수 있다. None → where(기존 동작)."""
     if tag_combo:
         from services import music_tags
         has_chips = any(tag_combo.get(k) for k in ("genre", "situation", "emotion", "tempo", "format", "charm"))
@@ -76,6 +81,7 @@ def _build_theme(mood: str, track_count: int = 1, tag_combo: dict | None = None)
             "lyric_tone": lyric_tone,
             "track_count": _clamp_track_count(track_count),
             "tag_combo": tag_combo,
+            "channel": channel,
         }
     preset = music_genres.preset(mood)
     return {
@@ -88,6 +94,7 @@ def _build_theme(mood: str, track_count: int = 1, tag_combo: dict | None = None)
         "style_prompt": preset["style_prompt"],
         "lyric_tone": preset["lyric_tone"],
         "track_count": _clamp_track_count(track_count),
+        "channel": channel,
     }
 
 
@@ -197,7 +204,9 @@ def run(job_id: str) -> None:
         from services import music_produce, music_video, music_viz_analyzer
 
         tc = _clamp_track_count(job.get("track_count", 1))
-        theme = _build_theme(job["mood"], tc, tag_combo=job.get("tag_combo"))
+        theme = _build_theme(
+            job["mood"], tc, tag_combo=job.get("tag_combo"), channel=job.get("channel"),
+        )
         slug = theme["slug"]
 
         _step("음원")

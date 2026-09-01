@@ -28,8 +28,34 @@ SIGNATURE = "\U0001D40F\U0001D425\U0001D41A\U0001D432\U0001D425\U0001D422\U0001D
 SEP = "━" * 20
 
 
-def _channel_name() -> str:
-    return (os.getenv("MUSIC_CHANNEL_NAME") or os.getenv("NEXT_PUBLIC_MUSIC_CHANNEL_NAME") or "Revezen").strip()
+# 채널별 채널명 env 키(본문 Copyright 줄 전용). where 는 기존 키를 그대로 쓴다 —
+# 키 이름을 바꾸면 Railway 설정이 죽는다.
+_CHANNEL_NAME_ENV: dict[str, tuple[str, ...]] = {
+    "rooftop_music": ("MUSIC_CHANNEL_NAME", "NEXT_PUBLIC_MUSIC_CHANNEL_NAME"),
+    "workout_music": ("MUSIC_CHANNEL_NAME_WORKOUT",),
+}
+# env 미설정 시 채널별 기본값. where 는 기존 리터럴 그대로(회귀 0).
+_CHANNEL_NAME_DEFAULT: dict[str, str] = {
+    "rooftop_music": "Revezen",
+    "workout_music": "2SHAPE",
+}
+
+
+def _channel_name(channel: str | None = None) -> str:
+    """본문 Copyright 줄에 쓰는 채널명. channel 미지정 → where(기존 동작 그대로).
+
+    where 는 env 2개(MUSIC_CHANNEL_NAME → NEXT_PUBLIC_...) → "Revezen" 폴백으로
+    리팩터 전과 완전히 동일하다. 다른 채널은 자기 env → 자기 기본값만 본다
+    (where env 로 폴백하면 운동 영상에 where_music 이 박히는 이번 버그가 재발한다).
+    """
+    from services.music_channel import DEFAULT_CHANNEL, resolve_channel
+
+    ch = resolve_channel(channel)
+    for key in _CHANNEL_NAME_ENV.get(ch, ()):
+        v = (os.getenv(key) or "").strip()
+        if v:
+            return v
+    return _CHANNEL_NAME_DEFAULT.get(ch) or _CHANNEL_NAME_DEFAULT[DEFAULT_CHANNEL]
 
 
 def _pick(pool: list[str], seed: str) -> str:
@@ -822,7 +848,11 @@ def build_description_parts(
         "intro": intro,
         "tracklist": tracklist,
         "info_head": "\n".join(info),
-        "copyright": f"Copyright Ⓒ {channel_name or _channel_name()} All rights reserved.",
+        # 채널명 — 인자 > theme["channel"] 별 env·기본값. theme 에 channel 이 없으면 where.
+        "copyright": (
+            f"Copyright Ⓒ {channel_name or _channel_name(theme.get('channel'))}"
+            " All rights reserved."
+        ),
     }
 
 

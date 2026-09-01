@@ -176,7 +176,9 @@ def _build_localizations(
     from services import music_channel, music_meta, music_translate
     lyrics = mix.get("lyrics") or ""
     tracks = mix.get("tracks") or []
-    config = music_channel.get_channel_config()
+    # 채널 설정(슬로건·소셜·AI 명시)도 채널별로 — where 설정이 남의 채널 본문에
+    # 새지 않게. theme 에 channel 이 없으면 where(기존 동작).
+    config = music_channel.get_channel_config(channel=theme.get("channel"))
     src = music_translate.detect_source_lang(lyrics or theme.get("title_kr", ""))
     prev = existing if isinstance(existing, dict) else {}
     # 원본 언어가 달라진 캐시는 재사용하지 않는다. detect_source_lang 의 "ko-" 센티넬
@@ -344,8 +346,12 @@ def localize_generate(mix_id: str):
 
     def _load() -> tuple[dict, dict | None, dict]:
         slug = row.get("slug") or ""
+        # 수동 영상 slug(manual_*)는 music_themes 에 저장된 적이 없어 항상 이 폴백이다.
+        # tag_combo·channel 은 DB 행에 살아있는데 폴백이 안 담아가 해시태그·재생목록이
+        # 구식 경로로 빠졌다(4단계 부수 발견).
         theme = music_theme.get_theme(slug) or {
             "slug": slug, "title_kr": row.get("title_kr"), "genre": row.get("genre"), "mood": row.get("mood"),
+            "tag_combo": row.get("tag_combo"), "channel": row.get("channel"),
         }
         return theme, row.get("viz_spec"), _load_mix(slug, mix_id)
 
@@ -403,6 +409,10 @@ def publish(mix_id: str, body: PublishBody | None = None):
         "title_kr": row.get("title_kr"),
         "genre": row.get("genre"),
         "mood": row.get("mood"),
+        # tag_combo: 재생목록 분류(_genre_playlist_id)·해시태그의 입력. 빠지면 구식
+        # 14장르 폴백(_legacy_playlist)으로 새어 where 재생목록 ID 가 나온다.
+        "tag_combo": row.get("tag_combo"),
+        "channel": row.get("channel"),
     }
     # 믹스 복원 — make_video 가 mp3 를 받아야 하므로 mp3_url 도 구성.
     mix = {
