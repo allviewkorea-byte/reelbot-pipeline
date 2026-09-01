@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import random
+import time
 from pathlib import Path
 
 from config import CLAUDE_MODEL
@@ -178,16 +179,83 @@ def _extract_json(text: str):
     raise RuntimeError(f"가사 응답 JSON 파싱 실패: {raw[:300]}")
 
 
-def _call(system: str, user: str, *, max_tokens: int = 2000, model: str | None = None) -> str:
-    """Claude messages.create 1회 호출 → 텍스트 반환."""
+# 재시도 간격(초). 지시서 기준 1초 → 3초.
+_RETRY_DELAYS = (1.0, 3.0)
+
+
+def _call(
+    system: str,
+    user: str,
+    *,
+    max_tokens: int = 2000,
+    model: str | None = None,
+    retries: int = 2,
+) -> str:
+    """Claude messages.create 호출 → 텍스트 반환. 일시적 오류는 재시도(총 retries+1회).
+
+    ※ anthropic SDK 자체가 429/5xx/연결오류/408/409 를 기본 2회 재시도한다(호출당 3회).
+    여기의 재시도는 그 위에 얹히는 애플리케이션 레벨 재시도로, SDK 재시도까지 모두
+    소진된 경우(과부하가 길게 이어질 때)를 위한 것이다. 400/401/403/404 처럼 다시
+    보내도 결과가 같은 오류는 재시도하지 않고 즉시 올린다(무한 낭비 방지).
+
+    retries 기본값이 있으므로 기존 호출부(가사 생성·명언·제목 생성 등)는 수정 불필요.
+    """
+    import anthropic
+
     client = _client()
-    msg = client.messages.create(
-        model=model or _model(),
-        max_tokens=max_tokens,
-        system=system,
-        messages=[{"role": "user", "content": user}],
+    msg = None
+    for attempt in range(max(0, retries) + 1):
+        try:
+            msg = client.messages.create(
+                model=model or _model(),
+                max_tokens=max_tokens,
+                system=system,
+                messages=[{"role": "user", "content": user}],
+            )
+        except (
+            anthropic.BadRequestError,          # 400 — 요청 자체가 잘못됨
+            anthropic.AuthenticationError,      # 401
+            anthropic.PermissionDeniedError,    # 403
+            anthropic.NotFoundError,            # 404 (모델명 오타 등)
+        ):
+            raise
+        except (anthropic.RateLimitError, anthropic.APIConnectionError) as e:
+            # 429 / 네트워크·타임아웃(APITimeoutError 는 APIConnectionError 하위).
+            err: Exception = e
+        except anthropic.APIStatusError as e:
+            if e.status_code < 500:
+                raise  # 위에서 안 걸린 4xx 는 재시도 금지
+            err = e     # 500/502/503/529 등
+        else:
+            break
+        if attempt >= retries:
+            logger.warning(
+                "[music-lyrics] 호출 실패 — 재시도 %d회 모두 소진(%s): %s",
+                retries, type(err).__name__, err,
+            )
+            raise err
+        delay = _RETRY_DELAYS[min(attempt, len(_RETRY_DELAYS) - 1)]
+        logger.warning(
+            "[music-lyrics] 호출 실패(%s) — %.0f초 후 재시도 %d/%d: %s",
+            type(err).__name__, delay, attempt + 1, retries, err,
+        )
+        time.sleep(delay)
+
+    # 잘림 감지 — 파싱 실패의 원인이 "재시도 부족"인지 "출력 잘림"인지 구분하는 진단 신호.
+    if getattr(msg, "stop_reason", None) == "max_tokens":
+        logger.warning(
+            "[music-lyrics] 응답이 max_tokens(%s)에서 잘림 — 파싱 실패 가능", max_tokens
+        )
+    # content 가 비었거나 text 블록이 아닌 경우 방어(IndexError/AttributeError).
+    blocks = getattr(msg, "content", None) or []
+    for b in blocks:
+        if getattr(b, "type", None) == "text" and getattr(b, "text", ""):
+            return b.text
+    logger.warning(
+        "[music-lyrics] 응답에 text 블록이 없음(blocks=%d, stop_reason=%s)",
+        len(blocks), getattr(msg, "stop_reason", None),
     )
-    return msg.content[0].text
+    return ""
 
 
 # ── 스테이지 1: 다양성 플랜 ───────────────────────────────────────────────
