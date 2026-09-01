@@ -171,6 +171,9 @@ export function ManualProgressCard({ step }: { step: string }) {
 
 export function MusicQueueCard({ item, onChanged, onOpenViewer }: { item: QueueItem; onChanged: (keep?: string) => void; onOpenViewer?: () => void }) {
   const [copied, setCopied] = useState(false)
+  // ②(API 새 프롬프트)의 결과. 클립보드 쓰기가 제스처 밖이라 막히면 이 값을 화면에
+  // 띄워 대표가 직접 복사한다 — 조용히 옛 저장값이 남는 사고를 막는다.
+  const [freshPrompt, setFreshPrompt] = useState<string | null>(null)
   const [thumbUrl, setThumbUrl] = useState<string | null>(item.thumbnail_url ?? null)
   const [needsRerender, setNeedsRerender] = useState(false)
   const [rerendering, setRerendering] = useState(false)
@@ -252,7 +255,12 @@ export function MusicQueueCard({ item, onChanged, onOpenViewer }: { item: QueueI
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     }
-    // ② 백그라운드로 장르별 새 프롬프트를 받아 재복사 시도(실패해도 저장값은 이미 복사됨).
+    // ② 새 프롬프트를 받아 재복사 시도.
+    //    ★ 여기가 조용히 실패하면 ①의 저장값(그 곡의 고정값)이 클립보드에 남는다 —
+    //    "몇 번을 눌러도 같은 프롬프트", "[WORKOUT] 이 안 붙는다"가 둘 다 이 한 버그였다.
+    //    await fetch 를 지나면 사용자 제스처가 소멸해 clipboard.writeText 도
+    //    execCommand 도 막힐 수 있으므로, 실패하면 **화면에 띄워** 직접 복사하게 한다.
+    setFreshPrompt(null)
     try {
       // 운동 채널은 장르가 없어도 action 으로 뽑을 수 있어야 한다(5단계 A).
       // where 는 쿼리를 붙이지 않는다 — 기존 요청 URL 과 문자 단위로 동일(회귀 0).
@@ -263,11 +271,26 @@ export function MusicQueueCard({ item, onChanged, onOpenViewer }: { item: QueueI
         const qs = new URLSearchParams({ genre: item.genre || "" })
         if (ch) qs.set("channel", ch)
         if (act) qs.set("action", act)
-        const r = await fetch(`/api/music/genre-prompt?${qs.toString()}`)
+        const r = await fetch(`/api/music/genre-prompt?${qs.toString()}`, { cache: "no-store" })
         const d = await r.json().catch(() => null)
-        if (d?.prompt) await writeClipboard(d.prompt as string)
+        const fresh = typeof d?.prompt === "string" ? d.prompt.trim() : ""
+        if (fresh) {
+          if (await writeClipboard(fresh)) {
+            toast.success("새 프롬프트를 복사했습니다.")
+          } else {
+            // 클립보드는 막혔지만 프롬프트는 받았다 → 화면에 띄운다.
+            setFreshPrompt(fresh)
+            toast.error("클립보드가 막혔습니다 — 아래 새 프롬프트를 직접 복사하세요.")
+          }
+          return
+        }
+        toast.error("새 프롬프트를 받지 못했습니다 — 저장된 프롬프트가 복사됐습니다.")
+        return
       }
-    } catch { /* 네트워크 실패 → 이미 복사된 저장값 유지 */ }
+    } catch {
+      toast.error("새 프롬프트 요청 실패 — 저장된 프롬프트가 복사됐습니다.")
+      return
+    }
     if (!okNow) toast.error("복사 실패 — 텍스트를 직접 선택해 복사하세요.")
   }
 
@@ -521,6 +544,46 @@ export function MusicQueueCard({ item, onChanged, onOpenViewer }: { item: QueueI
           <span className="truncate">GPT 프롬프트 복사</span>
           {copied ? <Check className="h-3.5 w-3.5 shrink-0 text-emerald-400" /> : <Copy className="h-3.5 w-3.5 shrink-0" />}
         </button>
+
+        {/* 클립보드가 막혔을 때만 표시 — 받은 새 프롬프트를 직접 복사할 수 있게. */}
+        {freshPrompt && (
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-2">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <span className="text-[11px] font-medium text-amber-400">새 프롬프트 — 직접 복사하세요</span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    // 이 클릭은 사용자 제스처 안이라 클립보드가 열린다.
+                    if (await writeClipboard(freshPrompt)) {
+                      toast.success("새 프롬프트를 복사했습니다.")
+                      setFreshPrompt(null)
+                    } else {
+                      toast.error("복사 실패 — 텍스트를 길게 눌러 직접 선택하세요.")
+                    }
+                  }}
+                  className="rounded border border-amber-500/40 px-2 py-0.5 text-[11px] text-amber-300 transition-colors hover:bg-amber-500/10"
+                >
+                  복사
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFreshPrompt(null)}
+                  className="rounded border border-border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  닫기
+                </button>
+              </div>
+            </div>
+            <textarea
+              readOnly
+              value={freshPrompt}
+              onFocus={(e) => e.currentTarget.select()}
+              rows={4}
+              className="w-full resize-y rounded bg-background/60 p-2 text-[11px] leading-relaxed text-foreground outline-none"
+            />
+          </div>
+        )}
 
         {/* 썸네일 업로드 */}
         <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
