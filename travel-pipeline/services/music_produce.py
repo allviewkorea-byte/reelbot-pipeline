@@ -158,16 +158,24 @@ def _gen_vocal(
     seen = seen if seen is not None else set()
     for i, (s, gender) in enumerate(zip(valid, genders), 1):
         lyric = s["lyrics"].strip()
+        from services import music_workout_style as _ws  # 5단계 B (지연 import)
         theme = {
             "theme_slug": theme_slug,
             "instrumental": False,
-            "style": _vocal_style(s.get("style") or base_style, gender),
+            # 운동 채널: LLM 이 지은 곡별 style 을 **버리지 않고** 뒤에 구체 음악 용어를
+            # 덧붙인다(다양성 유지 + 강렬함 확보). where 는 인자 그대로 반환된다.
+            "style": _ws.boost_style(
+                _vocal_style(s.get("style") or base_style, gender), action, channel=channel,
+            ),
             "title": s.get("title") or "",  # #52-A 빈값 → Suno 가 곡 제목 자동 생성(장르명+번호 표시 방지)
             "lyrics": lyric,
             "vocalGender": gender,
             "genre_id": genre_id,  # #46: 트랙에 장르 기록(used=false로 적립)
             "action": action,
             "channel": channel,  # 채널 축 — 적립될 재활용 풀을 가른다
+            # negativeTags: music_suno._build_body 가 값이 있을 때만 전송한다.
+            # where 는 None → 지금까지와 동일하게 전송 안 함.
+            "negativeTags": _ws.negative_tags(action, channel=channel),
         }
         try:
             log(f"보컬 생성 {i}/{len(valid)} [{gender}]: {s.get('title')}")
@@ -247,14 +255,16 @@ def _gen_instrumental(
             produced.append({**recycled})
             continue
         # ② 없으면 Suno 정상 호출(폴백).
+        from services import music_workout_style as _ws  # 5단계 B (지연 import)
         theme = {
             "theme_slug": theme_slug,
             "instrumental": True,
-            "style": track_style,
+            "style": _ws.boost_style(track_style, action, channel=channel),
             "title": title,
             "genre_id": genre_id,  # #46: 둘째 클립이 used=false 로 적립 → 다음에 재활용
             "action": action,
             "channel": channel,  # 채널 축 — 적립될 재활용 풀을 가른다
+            "negativeTags": _ws.negative_tags(action, channel=channel),
         }
         try:
             log(f"연주 생성 {i}/{n}: {title or '(자동)'}")

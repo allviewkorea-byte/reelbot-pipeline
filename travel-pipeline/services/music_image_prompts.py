@@ -386,13 +386,27 @@ def _generate_new_prompt(genre_id: str, examples: list[str]) -> str:
     return out
 
 
-def get_image_prompt(genre_id: str | None, *, include_prefix: bool = True) -> str | None:
+def get_image_prompt(
+    genre_id: str | None,
+    *,
+    include_prefix: bool = True,
+    channel: str | None = None,
+    action: str | None = None,
+) -> str | None:
     """장르 id → 이미지 프롬프트. LLM 으로 매번 새로 생성(헌법 예시 기반), 실패 시 풀 랜덤 폴백.
 
     include_prefix=True: 공통 프리픽스 포함(자동 배경/API 용).
     include_prefix=False: 복사용 — 프리픽스 제외, '프롬프트 + 꼬리표'만.
     미매칭/빈 풀이면 None(호출부가 기존 방식 폴백).
+
+    channel(5단계 A): 운동 채널이면 **완전히 다른 풀**(WORKOUT_IMAGE_PROMPTS, 어둡고
+    강렬한 결)로 간다. genre_id 는 무시한다 — 운동 채널에선 장르가 아니라 action(무엇을
+    할 때 듣는가)이 그림을 정한다. None·where·미등록 → 아래 기존 경로 그대로(회귀 0).
     """
+    from services.music_workout_style import is_workout_channel
+
+    if is_workout_channel(channel):
+        return get_workout_image_prompt(action, include_prefix=include_prefix)
     gid = (genre_id or "").strip().lower()
     pool = IMAGE_PROMPTS.get(gid)
     if not pool:
@@ -405,3 +419,136 @@ def get_image_prompt(genre_id: str | None, *, include_prefix: bool = True) -> st
     suffix = BRIGHT_SUFFIX if gid in BRIGHT_GENRES else GENRE_SUFFIX.get(gid, "")
     core = f"{prompt} {suffix}".rstrip()
     return f"{IMAGE_PROMPT_PREFIX} {core}".rstrip() if include_prefix else core
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 운동 채널(5단계 A) — where 와 **정반대 결**. 위 IMAGE_PROMPTS·_GEN_SYSTEM·
+# IMAGE_PROMPT_PREFIX 는 한 줄도 건드리지 않는다(where 회귀 0).
+#
+# 축은 4단계 재생목록·B 태그보정과 같은 strength/cardio/warmup 3개.
+# 대표가 폰 ChatGPT 지침에 [WORKOUT] 태그로 조건 분기를 걸어두었으므로
+# 운동 채널 반환값은 **항상 "[WORKOUT] " 로 시작**한다.
+# ══════════════════════════════════════════════════════════════════════
+
+WORKOUT_TAG = "[WORKOUT]"
+
+_WORKOUT_PREFIX = (
+    "실제 사진작가가 고급 카메라로 촬영한 가로 16:9 비율 사진. 강한 대비와 깊은 그림자, "
+    "실내 조명·저녁 빛·역광. 어둡고 무게감 있게. 고해상도, 선명하고 디테일이 풍부하게. "
+    "세련됨보다 강렬함과 에너지 우선. AI가 만든 느낌 절대 없이. 텍스트, 글자, 워터마크 없이."
+)
+
+WORKOUT_IMAGE_PROMPTS: dict[str, list[str]] = {
+    # ── 웨이트·근력 ────────────────────────────────────────────────
+    "strength": [
+        "새벽 헬스장, 스포트 조명 아래 바닥에 놓인 바벨과 원판. 어두운 배경에 강한 대비, 바닥에 긴 그림자.",
+        "콘크리트 벽 앞 철제 덤벨 랙. 거친 벽 질감, 금속 반사광, 깊은 그림자.",
+        "역광 속 스쿼트 랙 실루엣. 뒤쪽 창에서 들어오는 저녁 빛에 프레임만 검게 남는다.",
+        "체인이 감긴 케틀벨 클로즈업. 표면의 흠집과 마모, 낮은 조명, 어두운 바닥.",
+        "지하 헬스장 복도, 천장 형광등 한 줄. 양쪽으로 늘어선 머신들이 어둠 속에 잠겨 있다.",
+        "분필 가루가 흩날리는 손과 바벨 봉. 손등의 힘줄, 강한 측면광, 배경은 완전히 어둡게.",
+        "땀이 맺힌 검은 고무 바닥과 원판 자국. 낮은 각도, 거친 질감, 차가운 조명.",
+        "철제 파워랙 뒤에서 본 실루엣. 사람은 뒷모습, 얼굴은 보이지 않고 어깨와 등의 선만.",
+        "낡은 복싱 체육관의 샌드백. 천장에서 내려오는 백열등 하나, 주변은 짙은 어둠.",
+        "무게 원판이 쌓인 타워. 금속의 붉은 녹과 검은 도장, 강한 대비의 흑백에 가까운 색감.",
+        "창고를 개조한 헬스장. 노출 콘크리트 기둥, 철제 프레임, 저녁의 푸른 빛이 들어온다.",
+        "벤치프레스 위에 놓인 두꺼운 리프팅 벨트와 스트랩. 거친 가죽 질감, 낮은 조명.",
+        "어두운 라커룸, 열린 사물함에서 새어 나오는 빛. 벤치 위 수건과 물통.",
+        "체육관 거울에 반사된 조명과 기구들. 초점을 흐린 반사상, 짙은 그림자.",
+        "밤의 옥상 야외 운동 공간. 철봉과 평행봉 실루엣, 도시 불빛이 배경에 번진다.",
+    ],
+    # ── 러닝·유산소 ────────────────────────────────────────────────
+    "cardio": [
+        "비 온 뒤 도시 야간 러닝 트랙. 젖은 바닥에 반사된 조명, 붉은 트랙 라인이 길게 이어진다.",
+        "새벽 강변 산책로, 가로등 불빛 아래 젖은 아스팔트. 안개와 역광.",
+        "지하 주차장 램프를 오르는 계단. 형광등 줄무늬 조명, 강한 원근감.",
+        "트레드밀 열이 늘어선 어두운 카디오 존. 계기판 불빛만 점점이 켜져 있다.",
+        "역광 속 달리는 사람의 뒷모습 실루엣. 얼굴은 보이지 않고 흩날리는 그림자만.",
+        "야간 육상 트랙의 곡선 구간. 조명탑 빛이 바닥에 긴 광선을 만든다.",
+        "터널을 통과하는 러닝 코스. 끝의 밝은 출구와 어두운 내부의 강한 대비.",
+        "낡은 운동화 클로즈업, 젖은 바닥에 닿는 순간. 물방울과 반사광, 배경은 흐리게.",
+        "다리 위 야간 조깅 코스. 난간 너머 강물에 도시 불빛이 길게 번진다.",
+        "실내 사이클 스튜디오, 조명이 꺼진 상태의 자전거 열. 붉은 조명 한 줄기.",
+        "새벽 계단 오르기 훈련 장소. 콘크리트 계단의 거친 질감, 측면에서 들어오는 빛.",
+        "안개 낀 공원 트랙, 이른 아침 푸른 어둠. 나무 그림자가 길게 드리운다.",
+        "로잉 머신이 놓인 어두운 공간. 금속 레일의 반사, 낮은 조명.",
+        "밤의 도시 인도, 신호등 불빛에 젖은 보도블록이 반사된다. 사람 없는 러닝 코스.",
+        "체육관 창밖으로 보이는 해질녘 하늘. 실내는 어둡고 창만 강하게 밝다.",
+    ],
+    # ── 워밍업·스트레칭 ────────────────────────────────────────────
+    "warmup": [
+        "저녁 빛이 들어오는 조용한 스튜디오 바닥에 펼쳐진 요가 매트. 긴 그림자와 따뜻한 역광.",
+        "나무 바닥 위 폼롤러와 스트레칭 밴드. 낮은 측면광, 깊은 그림자.",
+        "커다란 창 앞 빈 매트 한 장. 실루엣이 된 창틀, 바닥에 격자 그림자.",
+        "어두운 스튜디오 구석에 쌓인 요가 블록과 담요. 조명 하나, 주변은 짙게.",
+        "역광 속 스트레칭 자세의 뒷모습 실루엣. 얼굴은 보이지 않고 선만 남는다.",
+        "콘크리트 벽에 기대 놓인 매트 롤. 거친 벽 질감, 저녁 빛이 비스듬히.",
+        "이른 아침 체육관, 아직 불이 반만 켜진 상태의 넓은 매트 존.",
+        "따뜻한 조명 아래 놓인 물통과 수건. 나무 벤치, 배경은 어둡게.",
+        "천장이 높은 스튜디오, 위에서 내려오는 빛기둥 하나. 바닥은 어둠에 잠긴다.",
+        "발목과 매트가 닿는 부분의 클로즈업. 질감 위주, 얕은 심도, 낮은 조명.",
+        "해질녘 창가에서 몸을 푸는 사람의 뒷그림자만 벽에 비친다.",
+        "낡은 나무 마루의 오래된 체육관. 긁힌 자국과 라인 마킹, 측면광.",
+        "어두운 방 안 매트 위 놓인 스트레칭 링과 밴드. 단순한 구도, 강한 대비.",
+        "비 오는 창밖을 등진 스튜디오 내부. 창은 흐리고 실내는 어둡고 고요하다.",
+        "조명이 낮게 깔린 회복 존, 마사지건과 폼롤러가 정리되지 않은 채 놓여 있다.",
+    ],
+}
+
+# 축별 꼬리표 — where 의 BRIGHT_SUFFIX/GENRE_SUFFIX 와 완전히 분리된 상수.
+WORKOUT_SUFFIX: dict[str, str] = {
+    "strength": "무겁고 강렬한 분위기. 어두운 배경, 금속과 콘크리트 질감, 깊은 그림자.",
+    "cardio": "속도감과 에너지. 젖은 노면 반사, 야간 조명, 길게 뻗은 선.",
+    "warmup": "차분하지만 무게감 있는 분위기. 낮은 조명, 따뜻한 역광, 넓은 여백.",
+}
+
+# 새 프롬프트 생성 LLM 지시(운동 전용). _GEN_SYSTEM 과 별개 상수 — where 무수정.
+_WORKOUT_GEN_SYSTEM = (
+    "너는 운동·피트니스 유튜브 음악 채널의 배경/썸네일용 한국어 이미지 프롬프트 작가다. "
+    "주어진 같은 축 예시들의 느낌을 살려 **새로운 이미지 프롬프트 1개**만 만든다. "
+    "강한 대비와 깊은 그림자, 실내 조명·저녁 빛·역광을 유지한다. 어둡고 무게감 있게. "
+    "★ 세련됨보다 강렬함·에너지를 우선한다. "
+    "소재: 헬스장 기구·철제와 콘크리트 질감·땀·야간 러닝 트랙·스트레칭 공간 중심. "
+    "거칠고 눌린 질감을 허용한다 — 완벽하게 정돈하지 말 것. "
+    "사람이 등장하면 운동 중 실루엣이나 뒷모습만. 모델 화보·인물 클로즈업·수영복 화보는 금지. "
+    "밝은 자연광·파란 하늘·미니멀하고 정돈된 색감·파스텔·카페 감성은 금지. "
+    "한 줄, 한국어, 따옴표·번호·접두어 없이 프롬프트 문장만 출력한다."
+)
+
+
+def _generate_workout_prompt(examples: list[str]) -> str:
+    """운동 축 예시 → 같은 결의 새 프롬프트 1개. 실패 시 예외(호출부 폴백).
+
+    where 의 _generate_new_prompt 와 구조는 같으나 system 프롬프트가 정반대라
+    공유하지 않고 분리한다(where 함수 무수정 보장).
+    """
+    from services import music_lyrics
+    if not music_lyrics.is_available():
+        raise RuntimeError("LLM 미설정")
+    sample = examples if len(examples) <= 5 else random.sample(examples, 5)
+    user = "예시:\n" + "\n".join(f"- {e}" for e in sample) + "\n\n새 프롬프트 1개:"
+    raw = music_lyrics._call(_WORKOUT_GEN_SYSTEM, user, max_tokens=200)
+    out = (raw or "").strip().splitlines()[0].strip().strip('"').strip("'").lstrip("-").strip()
+    if not out or len(out) < 12:
+        raise RuntimeError("빈 생성")
+    return out
+
+
+def get_workout_image_prompt(action: str | None, *, include_prefix: bool = True) -> str:
+    """운동 채널 이미지 프롬프트. action → strength/cardio/warmup 축.
+
+    미매핑·빈 action 은 strength 로 떨어진다(None 을 돌려주면 호출부가 where 프롬프트로
+    폴백해 버린다 — 이번 버그의 재발 경로다). 반환값은 항상 "[WORKOUT] " 로 시작한다.
+    """
+    from services.music_workout_style import axis_for_action
+
+    axis = axis_for_action(action)
+    pool = WORKOUT_IMAGE_PROMPTS[axis]
+    try:
+        prompt = _generate_workout_prompt(pool)
+    except Exception as e:  # noqa: BLE001 - LLM 실패는 고정 풀 폴백
+        logger.debug("[image-prompt] 운동 LLM 생성 실패(풀 폴백): %s", e)
+        prompt = random.choice(pool)
+    core = f"{prompt} {WORKOUT_SUFFIX[axis]}".rstrip()
+    body = f"{_WORKOUT_PREFIX} {core}".rstrip() if include_prefix else core
+    return f"{WORKOUT_TAG} {body}"

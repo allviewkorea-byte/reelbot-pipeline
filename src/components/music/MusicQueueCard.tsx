@@ -7,7 +7,7 @@ import { isPipSupported, togglePip } from "@/lib/pip"
 import { cn } from "@/lib/utils"
 import { ACTION_TAGS, comboLabelsKr } from "@/lib/music-tags"
 import type { TagCombo } from "@/lib/music-tags"
-import { MUSIC_CHANNELS, resolveMusicChannel } from "@/lib/music"
+import { DEFAULT_MUSIC_CHANNEL, MUSIC_CHANNELS, resolveMusicChannel } from "@/lib/music"
 
 const ACTION_LABEL = new Map(ACTION_TAGS.map((t) => [t.id, t.label_kr]))
 
@@ -254,8 +254,16 @@ export function MusicQueueCard({ item, onChanged, onOpenViewer }: { item: QueueI
     }
     // ② 백그라운드로 장르별 새 프롬프트를 받아 재복사 시도(실패해도 저장값은 이미 복사됨).
     try {
-      if (item.genre) {
-        const r = await fetch(`/api/music/genre-prompt?genre=${encodeURIComponent(item.genre)}`)
+      // 운동 채널은 장르가 없어도 action 으로 뽑을 수 있어야 한다(5단계 A).
+      // where 는 쿼리를 붙이지 않는다 — 기존 요청 URL 과 문자 단위로 동일(회귀 0).
+      const _ch = resolveMusicChannel(item.channel)
+      const ch = _ch === DEFAULT_MUSIC_CHANNEL ? "" : _ch
+      const act = (item.tag_combo?.action || "").trim()
+      if (item.genre || ch) {
+        const qs = new URLSearchParams({ genre: item.genre || "" })
+        if (ch) qs.set("channel", ch)
+        if (act) qs.set("action", act)
+        const r = await fetch(`/api/music/genre-prompt?${qs.toString()}`)
         const d = await r.json().catch(() => null)
         if (d?.prompt) await writeClipboard(d.prompt as string)
       }
