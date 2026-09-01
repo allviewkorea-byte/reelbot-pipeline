@@ -246,14 +246,26 @@ def manual_render_cancel(job_id: str):
 
 
 @router.get("/genre-prompt")
-def genre_prompt(genre: str = ""):
+def genre_prompt(genre: str = "", channel: str | None = None, action: str | None = None):
     """#49 — 장르(라벨 또는 id)에 맞는 이미지 프롬프트 1개(풀 15개 중 랜덤). 매번 새로 뽑는다.
 
     검토대기 'GPT 프롬프트 복사'가 클릭마다 호출 → 같은 장르라도 다른 프롬프트.
     매칭 실패 시 prompt=null → 프론트가 저장된 gpt_prompt 로 폴백.
+
+    channel·action(5단계 A): 운동 채널이면 장르 대신 action(strength/cardio/warmup)으로
+    어둡고 강렬한 전용 풀에서 뽑고 맨 앞에 [WORKOUT] 을 붙인다. 미지정 → where(기존 동작).
     """
     from services import music_genres, music_image_prompts
+    from services.music_workout_style import axis_for_action, is_workout_channel
     g = (genre or "").strip()
+    if is_workout_channel(channel):
+        # 운동 채널은 장르 분류를 타지 않는다 — genre_id 자리에 축을 돌려줘 프론트가
+        # 무엇으로 뽑혔는지 알 수 있게 한다.
+        return {
+            "prompt": music_image_prompts.get_workout_image_prompt(action, include_prefix=False),
+            "genre_id": axis_for_action(action),
+            "channel": "workout_music",
+        }
     gid = g.lower() if g.lower() in music_image_prompts.IMAGE_PROMPTS else music_genres.classify(g)
     # 복사용 — 프리픽스 제외(대표 ChatGPT 에 스킬 고정).
     return {"prompt": music_image_prompts.get_image_prompt(gid, include_prefix=False), "genre_id": gid}

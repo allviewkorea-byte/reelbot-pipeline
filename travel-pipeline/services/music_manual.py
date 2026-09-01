@@ -56,7 +56,11 @@ def _build_theme(
         from services import music_tags
         has_chips = any(tag_combo.get(k) for k in ("genre", "situation", "emotion", "tempo", "format", "charm"))
         if not has_chips:
+            from services import music_workout_style
             tag_combo = music_tags.smart_random(tag_combo)
+            # start() 에서 이미 보정된 combo 가 오면 여기 분기는 안 탄다(칩이 차 있음).
+            # 다른 경로로 들어온 combo 를 위한 동일 보정(멱등).
+            tag_combo = music_workout_style.refine_combo(tag_combo, channel=channel)
         style = music_tags.tags_to_suno_style(tag_combo)
         instrumental = music_tags.is_instrumental(tag_combo)
         action = tag_combo.get("action") or ""
@@ -114,8 +118,12 @@ def start(
     if tag_combo:
         has_chips = any(tag_combo.get(k) for k in ("genre", "situation", "emotion", "tempo", "format", "charm"))
         if not has_chips:
-            from services import music_tags
+            from services import music_tags, music_workout_style
             tag_combo = music_tags.smart_random(tag_combo)
+            # 운동 채널 보정(5단계 B-1) — smart_random 은 action별 기본값이 sleep·
+            # baby_sleep·focus 셋뿐이라 workout 에 dream pop·lights_off·peaceful 을
+            # 넣는다. **칩을 하나도 안 고른 경우에만** 부른다(대표 선택은 보존).
+            tag_combo = music_workout_style.refine_combo(tag_combo, channel=channel)
     with _LOCK:
         if _active_job and _JOBS.get(_active_job, {}).get("status") == "running":
             return {"ok": False, "error": "이미 영상 생성이 진행 중입니다. 완료 후 다시 시도하세요.", "busy_job": _active_job}

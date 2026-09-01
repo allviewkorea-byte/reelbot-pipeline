@@ -6,6 +6,13 @@ import { proxyJson } from "@/lib/proxy"
 export const dynamic = "force-dynamic"
 
 export async function GET(request: NextRequest) {
-  const genre = request.nextUrl.searchParams.get("genre") || ""
-  return proxyJson(`/api/music/genre-prompt?genre=${encodeURIComponent(genre)}`, { method: "GET" })
+  const sp = request.nextUrl.searchParams
+  // channel·action(5단계): 운동 채널은 장르 대신 action 으로 전용 풀에서 뽑는다.
+  // 미지정이면 쿼리를 붙이지 않아 기존 요청 URL 과 문자 단위로 동일하다.
+  const qs = ["genre", "channel", "action"]
+    .map((k) => [k, (sp.get(k) || "").trim()] as const)
+    .filter(([k, v]) => v || k === "genre")
+    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+    .join("&")
+  return proxyJson(`/api/music/genre-prompt?${qs}`, { method: "GET" })
 }
