@@ -279,8 +279,9 @@ export function MusicQueueCard({ item, onChanged, onOpenViewer }: { item: QueueI
             toast.success("새 프롬프트를 복사했습니다.")
           } else {
             // 클립보드는 막혔지만 프롬프트는 받았다 → 화면에 띄운다.
+            // ★ 토스트는 띄우지 않는다 — 패널 자체가 안내다. 같은 말을 두 번 하는 데다
+            //   빨간 토스트라 정상 폴백이 에러처럼 보였다(아이폰에서 매번 노출).
             setFreshPrompt(fresh)
-            toast.error("클립보드가 막혔습니다 — 아래 새 프롬프트를 직접 복사하세요.")
           }
           return
         }
@@ -547,9 +548,9 @@ export function MusicQueueCard({ item, onChanged, onOpenViewer }: { item: QueueI
 
         {/* 클립보드가 막혔을 때만 표시 — 받은 새 프롬프트를 직접 복사할 수 있게. */}
         {freshPrompt && (
-          <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-2">
+          <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2">
             <div className="mb-1 flex items-center justify-between gap-2">
-              <span className="text-[11px] font-medium text-amber-400">새 프롬프트 — 직접 복사하세요</span>
+              <span className="text-[11px] font-medium text-amber-300/90">새 프롬프트를 받았어요 — 아래에서 복사하세요</span>
               <div className="flex items-center gap-1">
                 <button
                   type="button"
