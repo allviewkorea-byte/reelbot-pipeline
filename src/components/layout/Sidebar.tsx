@@ -209,9 +209,9 @@ function SidebarBody({ activeChannel }: { activeChannel: string }) {
   const systemIssue = useSystemIssue()
   const [mobileOpen, setMobileOpen] = useState(false)
 
-  // 백곰 관제 대시보드 = /dashboard(루트 / 도 리다이렉트). 상단 '대시보드' 메뉴와
-  // 중복이므로 별도 대시보드 메뉴는 두지 않고 이 항목으로 통합.
-  const baekgomActive = pathname === "/dashboard" || pathname === "/"
+  // 백곰 관제 대시보드 = /dashboard. 별도 대시보드 메뉴 없이 이 항목으로 통합한다.
+  // 루트 "/" 는 시작 화면(운동 채널)으로 즉시 리다이렉트돼 도달하지 않으므로 판정에서 뺐다.
+  const baekgomActive = pathname === "/dashboard"
   // 음악 채널 = /music (검토 대기 큐) + /music/guide. 채널은 쿼리로 구분한다.
   const inMusic = pathname === "/music" || pathname.startsWith("/music/")
   const musicActive = inMusic && activeChannel === DEFAULT_MUSIC_CHANNEL
