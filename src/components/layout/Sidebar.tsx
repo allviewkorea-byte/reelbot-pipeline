@@ -265,7 +265,8 @@ function SidebarBody({ activeChannel }: { activeChannel: string }) {
           </button>
         </div>
 
-        {/* 내 채널 — 백곰 + 음악(검토 대기 큐). 카드 스타일 통일(데이터·동작 무변경). */}
+        {/* 내 채널 — 운동 + 백곰 + 음악(검토 대기 큐). 카드 스타일 통일(데이터·동작 무변경).
+            순서는 대표 지시(2주안에몸매만들기 → 백곰 → where). 링크·배지·active 판정은 그대로. */}
         <div className="flex min-h-0 flex-1 flex-col px-3 pt-4">
           <div className="px-3 pb-1">
             <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -273,6 +274,17 @@ function SidebarBody({ activeChannel }: { activeChannel: string }) {
             </p>
           </div>
           <nav className="flex flex-col gap-1">
+            {/* 운동 채널 — 같은 /music 화면을 ?channel= 로 전환한다(2단계). */}
+            <ChannelCard
+              href={withChannel("/music", WORKOUT_CHANNEL_ID)}
+              active={workoutActive}
+              icon={MUSIC_CHANNELS[WORKOUT_CHANNEL_ID].icon}
+              name={MUSIC_CHANNELS[WORKOUT_CHANNEL_ID].name}
+              status="idle"
+              statusText="유튜브 · 검토 대기"
+              badge={workoutQueue > 0 ? { label: `검토 ${workoutQueue}`, tone: "review" } : undefined}
+              onNavigate={closeMobile}
+            />
             <ChannelCard
               href="/dashboard"
               active={baekgomActive}
@@ -290,17 +302,6 @@ function SidebarBody({ activeChannel }: { activeChannel: string }) {
               status="idle"
               statusText="유튜브 · 검토 대기"
               badge={whereQueue > 0 ? { label: `검토 ${whereQueue}`, tone: "review" } : undefined}
-              onNavigate={closeMobile}
-            />
-            {/* 운동 채널 — 같은 /music 화면을 ?channel= 로 전환한다(2단계). */}
-            <ChannelCard
-              href={withChannel("/music", WORKOUT_CHANNEL_ID)}
-              active={workoutActive}
-              icon={MUSIC_CHANNELS[WORKOUT_CHANNEL_ID].icon}
-              name={MUSIC_CHANNELS[WORKOUT_CHANNEL_ID].name}
-              status="idle"
-              statusText="유튜브 · 검토 대기"
-              badge={workoutQueue > 0 ? { label: `검토 ${workoutQueue}`, tone: "review" } : undefined}
               onNavigate={closeMobile}
             />
 
