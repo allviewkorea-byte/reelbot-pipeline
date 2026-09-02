@@ -149,7 +149,13 @@ def fail_job(job_id: str, error: str) -> None:
 
 
 def dismiss_job(job_id: str) -> dict:
-    """실패 카드 [닫기] — completed_at 을 채워 active 목록에서 제거(상태는 failed 유지)."""
+    """카드 [닫기](✕) — completed_at 을 채워 active 목록에서만 제거한다.
+
+    **status 는 바꾸지 않는다.** 버튼이 약속한 "작업 추적만 숨김"이 그대로여야 한다 —
+    살아 있는 작업을 status=failed 로 바꾸면 이력에 거짓 실패가 남는다.
+    ✕ 는 실패 카드가 아니라 진행 중 카드에 달려 있으므로(MusicJobCard) 대상은
+    주로 running/queued 다. list_active 가 completed_at 을 함께 봐야 실제로 사라진다.
+    """
     url, key = _supabase_cfg()
     if not (url and key):
         return {"ok": False, "error": "supabase 미설정"}
@@ -173,9 +179,11 @@ _SELECT = (
 
 
 def list_active(*, channel: str | None = None) -> list[dict]:
-    """진행 중(queued/running) + 미확인 실패(failed & completed_at 비어 있음) 목록.
+    """[닫기] 하지 않은 진행 중(queued/running) + 미확인 실패 목록.
 
-    실패 작업도 대표가 [닫기] 하기 전까지는 검토대기 상단에 보이도록 포함한다.
+    두 가지 모두 completed_at 이 비어 있어야 한다 — [닫기](dismiss_job)가 completed_at
+    을 채우는 것으로 목록에서 빠지기 때문이다. 실패 작업도 대표가 [닫기] 하기 전까지는
+    검토대기 상단에 보이도록 포함한다.
     channel=None → DEFAULT_CHANNEL(where). 마이그레이션이 기존 행을 where 로 백필하므로
     지금 시점의 결과 집합은 변하지 않는다.
     """
@@ -186,7 +194,13 @@ def list_active(*, channel: str | None = None) -> list[dict]:
         params = {
             "select": _SELECT,
             "channel": f"eq.{_resolve_channel(channel)}",
-            "or": "(status.in.(queued,running),and(status.eq.failed,completed_at.is.null))",
+            # 첫 가지에 completed_at 조건이 없어서, running/queued 작업은 dismiss_job 이
+            # completed_at 을 채워도 계속 매칭돼 목록에 되살아났다(✕ 가 안 먹던 원인).
+            # ✕ 는 실패 카드가 아니라 **진행 중 카드**에 달려 있어 이 경로가 실사용이다.
+            "or": (
+                "(and(status.in.(queued,running),completed_at.is.null),"
+                "and(status.eq.failed,completed_at.is.null))"
+            ),
             "order": "created_at.desc",
         }
         with httpx.Client(timeout=15.0) as c:

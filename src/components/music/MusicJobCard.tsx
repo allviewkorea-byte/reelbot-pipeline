@@ -24,10 +24,12 @@ export function MusicJobCard({ job, onChanged }: { job: MusicJob; onChanged: () 
     setBusy(true)
     try {
       const r = await fetch(`/api/music/jobs/${job.job_id}/dismiss`, { method: "POST" })
-      if (!r.ok) throw new Error()
+      const d = await r.json().catch(() => null)
+      // 원인 없는 "닫기 실패"는 다음 진단을 막는다 — 백엔드 detail 을 그대로 보여준다.
+      if (!r.ok) throw new Error(d?.detail || `닫기 실패 (HTTP ${r.status})`)
       onChanged()
-    } catch {
-      toast.error("닫기 실패")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "닫기 실패")
     } finally {
       setBusy(false)
     }
