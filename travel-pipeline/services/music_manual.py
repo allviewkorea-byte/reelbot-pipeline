@@ -94,6 +94,9 @@ def _build_theme(
             lyric_tone = "자장가 톤, 아기에게 들려주는 부드럽고 따뜻한 가사. 느리고 반복적인 리듬."
         elif action == "focus" and not instrumental:
             lyric_tone = "차분하고 집중에 방해되지 않는 톤. 가사는 최소한으로, 반복적이고 단순하게."
+        # 운동 채널(strength/cardio) — 가사 톤을 운동 톤으로. warmup·where 는 위 값 그대로.
+        from services import music_workout_style as _mws
+        lyric_tone = _mws.lyric_tone(action, channel=channel) or lyric_tone
         summary_kr = music_tags.combo_summary_kr(tag_combo)
         return {
             "slug": f"manual_{uuid.uuid4().hex[:12]}",
@@ -244,7 +247,7 @@ def run(job_id: str) -> None:
 
     img_dir: str | None = None
     try:
-        from services import music_produce, music_video, music_viz_analyzer
+        from services import music_produce, music_video, music_viz_analyzer, music_workout_style
 
         tc = _clamp_track_count(job.get("track_count", 1))
         theme = _build_theme(
@@ -263,6 +266,10 @@ def run(job_id: str) -> None:
             genre_id=None if job.get("tag_combo") else job["mood"],
             action=(job.get("tag_combo") or {}).get("action") or "",
             channel=job.get("channel"),
+            # 운동 채널만 운동 소재 풀(플랜 LLM 참고). where 는 None → 기존 기본 풀 그대로.
+            sub_theme_pool=music_workout_style.subtheme_pool(
+                (job.get("tag_combo") or {}).get("action"), channel=job.get("channel"),
+            ),
             progress=_produce_progress,
         )
         mix = result.get("mix")

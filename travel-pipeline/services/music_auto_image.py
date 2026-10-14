@@ -31,6 +31,8 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -43,12 +45,39 @@ _DEFAULT_QUALITY = "high"
 _DEFAULT_OUTPUT_USD_PER_M = 30.0
 _MAX_ATTEMPTS = 2  # 1회 + 불합격 시 재생성 최대 1회
 
+# 단계 상한(2026-10: 수동 생성이 이미지 단계에서 멈춘 사례). SDK 기본값은 OpenAI·Anthropic 모두
+# read timeout 600초 × 재시도 2회라, 상한 없이는 이미지 단계 하나가 1시간 넘게 잡을 수 있었다.
+# 넘거나 예외면 이미지 없이(bg_path=None) 기존 블랙 배경 렌더로 계속한다. env 로 덮을 수 있다.
+_DEFAULT_IMAGE_TIMEOUT_SEC = 180.0   # OpenAI 이미지 1회(재시도 0)
+_DEFAULT_REVIEW_TIMEOUT_SEC = 60.0   # Claude 검수 1회(재시도 0)
+_DEFAULT_PREPARE_TIMEOUT_SEC = 360.0  # prepare_for_render 전체(생성·검수·재생성 포함) 6분
+_FFMPEG_TIMEOUT_SEC = 60             # PNG 변환·검수용 축소
+
 # 검수용 축소본 — Claude 이미지 입력 한도(장당 5MB) 안에 넉넉히 들게 1024px JPEG 로.
 _REVIEW_MAX_PX = 1024
 
 
 def _env(key: str, default: str) -> str:
     return (os.getenv(key) or default).strip()
+
+
+def _float_env(key: str, default: float) -> float:
+    try:
+        return float(_env(key, str(default)))
+    except ValueError:
+        return default
+
+
+def image_timeout_sec() -> float:
+    return _float_env("MUSIC_IMAGE_TIMEOUT_SEC", _DEFAULT_IMAGE_TIMEOUT_SEC)
+
+
+def review_timeout_sec() -> float:
+    return _float_env("MUSIC_IMAGE_REVIEW_TIMEOUT_SEC", _DEFAULT_REVIEW_TIMEOUT_SEC)
+
+
+def prepare_timeout_sec() -> float:
+    return _float_env("MUSIC_IMAGE_PREPARE_TIMEOUT_SEC", _DEFAULT_PREPARE_TIMEOUT_SEC)
 
 
 def image_model() -> str:
@@ -140,7 +169,7 @@ def _to_png(src: Path, dest: Path) -> None:
     """PNG 가 아니면 ffmpeg 로 PNG 변환(대표 업로드와 같은 .png·image/png 로 맞춘다)."""
     subprocess.run(
         ["ffmpeg", "-y", "-i", str(src), "-frames:v", "1", str(dest)],
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT_SEC,
     )
 
 
@@ -157,8 +186,16 @@ def generate_image(prompt: str, out_path: str) -> dict:
     if not key:
         raise RuntimeError("OPENAI_API_KEY 미설정 — 이미지를 생성할 수 없습니다.")
     model, size, quality = image_model(), image_size(), image_quality()
-    client = OpenAI(api_key=key)
-    resp = client.images.generate(model=model, prompt=prompt, size=size, quality=quality, n=1)
+    timeout = image_timeout_sec()
+    client = OpenAI(api_key=key, timeout=timeout, max_retries=0)
+    t0 = time.monotonic()
+    logger.warning("[auto-image] OpenAI 이미지 호출 시작 model=%s timeout=%.0fs retries=0", model, timeout)
+    try:
+        resp = client.images.generate(model=model, prompt=prompt, size=size, quality=quality, n=1)
+    except Exception as e:  # noqa: BLE001 - 소요시간을 남기고 그대로 올린다(시도 실패로 기록됨)
+        logger.warning("[auto-image] OpenAI 이미지 호출 실패 %.1fs: %s", time.monotonic() - t0, str(e)[:200])
+        raise
+    logger.warning("[auto-image] OpenAI 이미지 호출 끝 %.1fs", time.monotonic() - t0)
     data = getattr(resp, "data", None) or []
     if not data:
         raise RuntimeError("이미지 응답이 비어 있습니다.")
@@ -226,7 +263,7 @@ def _review_copy(src: str, dest: str) -> str:
     subprocess.run(
         ["ffmpeg", "-y", "-i", src, "-vf", f"scale='min({_REVIEW_MAX_PX},iw)':-2",
          "-frames:v", "1", "-q:v", "3", dest],
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT_SEC,
     )
     return dest
 
@@ -249,8 +286,10 @@ def review_image(path: str) -> dict:
     """이미지 1장을 Claude 비전으로 검수 → {pass, reasons, model}. 호출·파싱 실패 시 예외."""
     from services import music_lyrics
 
-    client = music_lyrics._client()
+    timeout = review_timeout_sec()
+    client = music_lyrics._client().with_options(timeout=timeout, max_retries=0)
     tmpdir = Path(tempfile.mkdtemp(prefix="imgrev_"))
+    t0 = time.monotonic()
     try:
         small = _review_copy(path, str(tmpdir / "review.jpg"))
         b64 = base64.b64encode(Path(small).read_bytes()).decode("ascii")
@@ -270,22 +309,36 @@ def review_image(path: str) -> dict:
         text = "".join(getattr(b, "text", "") for b in (msg.content or []))
         out = _parse_review(text)
         out["model"] = model
+        logger.warning("[auto-image] Claude 검수 끝 %.1fs (timeout=%.0fs)", time.monotonic() - t0, timeout)
         return out
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[auto-image] Claude 검수 실패 %.1fs: %s", time.monotonic() - t0, str(e)[:200])
+        raise
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
-def generate_reviewed(action: str | None, out_path: str) -> dict:
+def generate_reviewed(action: str | None, out_path: str, *, deadline: float | None = None) -> dict:
     """생성 → 검수. 불합격이면 재생성 최대 1회. {ok, path, attempts, summary}.
 
     API 오류·검수 실패(응답 파싱 불가 포함)도 그 시도의 불합격으로 친다 — 검수를 못 했으면
     쓰지 않는다. 어떤 경우에도 예외를 던지지 않는다(호출부는 ok 만 보면 된다).
+    deadline(time.monotonic 기준): 남은 시간이 1회분(생성+검수 상한)보다 적으면 재생성을 건너뛴다.
     """
     out = Path(out_path)
     attempts: list[dict] = []
     for i in range(1, _MAX_ATTEMPTS + 1):
         rec: dict = {"attempt": i}
         cand = out.with_name(f"{out.stem}_try{i}.png")
+        if i > 1 and deadline is not None and (
+            time.monotonic() + image_timeout_sec() + review_timeout_sec() > deadline
+        ):
+            rec.update({"pass": False, "error": "시간 상한 — 재생성 생략"})
+            attempts.append(rec)
+            logger.warning("[auto-image] 시도 %d/%d 생략 — 남은 시간 부족", i, _MAX_ATTEMPTS)
+            break
+        t_try = time.monotonic()
+        logger.warning("[auto-image] 시도 %d/%d 시작", i, _MAX_ATTEMPTS)
         try:
             prompt = build_prompt(action)
             rec["prompt"] = prompt[:400]
@@ -296,8 +349,9 @@ def generate_reviewed(action: str | None, out_path: str) -> dict:
             rec["reasons"] = review["reasons"]
             rec["review_model"] = review.get("model")
             logger.warning(
-                "[auto-image] 검수 %s (시도 %d/%d) 사유=%s",
-                "합격" if review["pass"] else "불합격", i, _MAX_ATTEMPTS, review["reasons"],
+                "[auto-image] 검수 %s (시도 %d/%d, %.1fs) 사유=%s",
+                "합격" if review["pass"] else "불합격", i, _MAX_ATTEMPTS,
+                time.monotonic() - t_try, review["reasons"],
             )
             if review["pass"]:
                 shutil.move(str(cand), str(out))
@@ -463,7 +517,36 @@ def prepare_for_render(job_id: str, action: str | None, workdir: str) -> tuple[s
 
     None 이면 호출부는 지금까지처럼 background_path 없이 렌더한다(블랙 배경, 반자동으로 떨어짐).
     """
-    res = generate_reviewed(action, str(Path(workdir) / "auto_bg.png"))
+    limit = prepare_timeout_sec()
+    t0 = time.monotonic()
+    logger.warning("[auto-image] 이미지 단계 시작 job=%s action=%s 상한=%.0fs", job_id, action or "-", limit)
+    # 전체 상한 — 생성/검수가 무응답이어도 렌더로 넘어가게 **데몬 스레드**에서 돌리고 limit 초에 끊는다.
+    # ThreadPoolExecutor 는 쓰지 않는다: 워커가 데몬이 아니라 무응답 스레드가 프로세스 종료(재배포)
+    # 시 join 에서 막힌다. 끊긴 스레드는 강제 종료할 수 없지만(파이썬 제약) 결과는 버리고, 각 호출에
+    # 개별 timeout 이 있어 오래 남지 않는다.
+    box: dict = {}
+
+    def _work() -> None:
+        try:
+            box["res"] = generate_reviewed(action, str(Path(workdir) / "auto_bg.png"), deadline=t0 + limit)
+        except Exception as e:  # noqa: BLE001
+            box["err"] = e
+
+    th = threading.Thread(target=_work, name="auto-image", daemon=True)
+    th.start()
+    th.join(timeout=limit)
+    if th.is_alive():
+        res = {"ok": False, "path": None, "attempts": [],
+               "summary": f"이미지 단계 시간 초과({limit:.0f}초) — 이미지 없이 진행"}
+        logger.warning("[auto-image] 이미지 단계 시간 초과 %.0fs → 이미지 없이 렌더 진행 job=%s", limit, job_id)
+    elif "err" in box:  # generate_reviewed 는 예외를 안 던지지만 방어
+        res = {"ok": False, "path": None, "attempts": [], "summary": f"이미지 단계 오류: {str(box['err'])[:200]}"}
+        logger.warning("[auto-image] 이미지 단계 오류 → 이미지 없이 렌더 진행 job=%s: %s", job_id, box["err"])
+    else:
+        res = box.get("res") or {"ok": False, "path": None, "attempts": [], "summary": "결과 없음"}
+    logger.warning(
+        "[auto-image] 이미지 단계 끝 job=%s ok=%s 소요=%.1fs", job_id, bool(res.get("ok")), time.monotonic() - t0,
+    )
     summary = job_summary(res)
     try:
         from services import music_jobs

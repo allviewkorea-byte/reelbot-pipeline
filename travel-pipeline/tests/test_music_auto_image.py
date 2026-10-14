@@ -101,7 +101,8 @@ class _FakeImages:
 def _install_fake_openai(monkeypatch, payload):
     images = _FakeImages(payload)
     mod = types.ModuleType("openai")
-    mod.OpenAI = lambda api_key: types.SimpleNamespace(images=images)
+    images.client_kwargs = {}
+    mod.OpenAI = lambda **kw: images.client_kwargs.update(kw) or types.SimpleNamespace(images=images)
     monkeypatch.setitem(sys.modules, "openai", mod)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     return images
@@ -116,6 +117,8 @@ def test_generate_image_b64(monkeypatch, tmp_path):
     assert (tmp_path / "out.png").read_bytes() == raw
     assert images.calls[0] == {"model": "gpt-image-2.5-flare", "prompt": "p", "size": "2048x1152", "quality": "high", "n": 1}
     assert "response_format" not in images.calls[0]
+    # 단계 상한: 이미지 1회 180초·재시도 0(SDK 기본 600초×2회 대신)
+    assert images.client_kwargs["timeout"] == 180.0 and images.client_kwargs["max_retries"] == 0
     assert info["response_format"] == "b64_json" and info["est_output_usd"] == 0.06
 
 
@@ -153,9 +156,19 @@ def test_review_image_sends_image_block(monkeypatch, tmp_path):
             return types.SimpleNamespace(content=[types.SimpleNamespace(text='{"pass": true, "reasons": []}')])
 
     from services import music_lyrics
-    monkeypatch.setattr(music_lyrics, "_client", lambda: types.SimpleNamespace(messages=_Msgs()))
+    opts = {}
+
+    class _Client:
+        messages = _Msgs()
+
+        def with_options(self, **kw):
+            opts.update(kw)
+            return self
+
+    monkeypatch.setattr(music_lyrics, "_client", lambda: _Client())
     out = mai.review_image(str(src))
     assert out["pass"] is True
+    assert opts == {"timeout": 60.0, "max_retries": 0}  # 검수 60초·재시도 0
     blocks = sent["messages"][0]["content"]
     assert blocks[0]["type"] == "image" and blocks[0]["source"]["media_type"] == "image/jpeg"
 
