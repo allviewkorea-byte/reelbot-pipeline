@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
-import { Loader2, Music, Copy, Check, Upload, Globe, Trash2, MonitorPlay, Languages, ChevronDown, ChevronUp, RefreshCw, FileText, Maximize2, PictureInPicture2 } from "lucide-react"
+import { Loader2, Music, Copy, Check, Upload, Globe, Trash2, MonitorPlay, Languages, ChevronDown, ChevronUp, RefreshCw, FileText, Maximize2, PictureInPicture2, Sparkles } from "lucide-react"
 import { isPipSupported, togglePip } from "@/lib/pip"
 import { cn } from "@/lib/utils"
 import { ACTION_TAGS, comboLabelsKr } from "@/lib/music-tags"
 import type { TagCombo } from "@/lib/music-tags"
-import { DEFAULT_MUSIC_CHANNEL, MUSIC_CHANNELS, resolveMusicChannel } from "@/lib/music"
+import { DEFAULT_MUSIC_CHANNEL, MUSIC_CHANNELS, WORKOUT_CHANNEL_ID, resolveMusicChannel } from "@/lib/music"
 
 const ACTION_LABEL = new Map(ACTION_TAGS.map((t) => [t.id, t.label_kr]))
 
@@ -186,6 +186,9 @@ export function MusicQueueCard({ item, onChanged, onOpenViewer }: { item: QueueI
   // 채널별 업로드 가능 여부 — 운동 채널은 유튜브 토큰 분리(3단계) 전까지 업로드 불가.
   // 그냥 두면 백엔드 _verify_music_channel 이 차단해 원인 모를 에러로 보인다.
   const canUpload = MUSIC_CHANNELS[resolveMusicChannel(item.channel)].canUpload
+  // PR-1 운동 채널만 — [AI 이미지 생성](생성·검수 → 교체 → 재렌더). where 카드엔 안 보인다.
+  const isWorkoutCard = resolveMusicChannel(item.channel) === WORKOUT_CHANNEL_ID
+  const [aiImaging, setAiImaging] = useState(false)
   // #39 영상별 PLAY LIST 표시 토글(미지정=표시). 변경 시 즉시 DB 저장 → [재렌더]로 반영.
   const [showPlaylist, setShowPlaylist] = useState(item.show_playlist ?? true)
   const [savingPl, setSavingPl] = useState(false)
@@ -452,6 +455,44 @@ export function MusicQueueCard({ item, onChanged, onOpenViewer }: { item: QueueI
     }
   }
 
+  // 운동 채널 [AI 이미지 생성] — 재렌더와 같은 job·폴링 경로. 불합격이면 기존 이미지·영상 유지.
+  const generateAiImage = async () => {
+    setAiImaging(true)
+    setRerendering(true)
+    setRerenderStep("AI 이미지 생성")
+    try {
+      const res = await fetch(`/api/music/queue/${encodeURIComponent(item.mix_id)}/ai-image`, { method: "POST" })
+      const data = await res.json()
+      if (!res.ok || !data?.job_id) throw new Error(data?.detail || "AI 이미지 생성 시작 실패")
+      const jobId = data.job_id as string
+      await new Promise<void>((resolve) => {
+        const tick = async () => {
+          try {
+            const sr = await fetch(`/api/music/queue/rerender/status/${jobId}`)
+            const sd = await sr.json()
+            if (sd?.step) setRerenderStep(sd.step)
+            if (sd?.thumbnail_url) setThumbUrl(sd.thumbnail_url)
+            if (sd?.status === "done") {
+              toast.success("AI 이미지로 재렌더 완료 — 영상이 갱신되었습니다.")
+              setNeedsRerender(false)
+              setMlVer((v) => v + 1)
+              onChanged(item.mix_id)
+              resolve(); return
+            }
+            if (sd?.status === "error") { toast.error(sd?.error || "AI 이미지 생성 실패"); resolve(); return }
+          } catch { /* 다음 틱 재시도 */ }
+          setTimeout(tick, 4000)
+        }
+        tick()
+      })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "AI 이미지 생성 실패")
+    } finally {
+      setAiImaging(false)
+      setRerendering(false)
+    }
+  }
+
   const removeImage = async () => {
     try {
       const res = await fetch(`/api/music/queue/${encodeURIComponent(item.mix_id)}/thumbnail`, { method: "DELETE" })
@@ -662,6 +703,20 @@ export function MusicQueueCard({ item, onChanged, onOpenViewer }: { item: QueueI
             </span>
           </span>
         </button>
+
+        {/* PR-1 운동 채널: AI 배경 이미지 생성 → 검수 → 그 이미지로 재렌더(다시 누르면 새 이미지로 교체) */}
+        {isWorkoutCard && (
+          <button
+            type="button"
+            onClick={generateAiImage}
+            disabled={rerendering}
+            className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md border border-primary/40 text-xs font-medium text-primary hover:bg-primary/10 disabled:opacity-60"
+            title="AI 가 배경 이미지를 만들고 검수한 뒤 그 이미지로 영상을 다시 렌더합니다(불합격이면 기존 그대로)"
+          >
+            {aiImaging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            {hasThumb ? "AI 이미지 다시 생성" : "AI 이미지 생성"}
+          </button>
+        )}
 
         {/* #33 A/C: 재렌더(올린 이미지로 실제 영상 갱신) + 이미지 제거 */}
         {hasThumb && (

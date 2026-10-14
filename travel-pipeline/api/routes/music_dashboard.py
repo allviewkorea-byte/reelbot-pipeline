@@ -321,6 +321,27 @@ def rerender_start(mix_id: str, background: BackgroundTasks):
     return {"ok": True, "job_id": started["job_id"]}
 
 
+@router.post("/queue/{mix_id}/ai-image")
+def ai_image_start(mix_id: str, background: BackgroundTasks):
+    """운동 채널 [AI 이미지 생성](PR-1) — 이미지 생성·검수 → 합격 시 교체 → 재렌더(비동기).
+
+    진행 상태는 재렌더와 같은 GET /queue/rerender/status/{job_id} 로 폴링한다.
+    where 영상은 400 — 이번 범위 밖(수동 업로드·재렌더 경로 그대로).
+    """
+    from services.music_workout_style import is_workout_channel
+    row = music_uploads.get_upload(mix_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="해당 mix_id 의 큐 항목이 없습니다.")
+    if not is_workout_channel(row.get("channel")):
+        raise HTTPException(status_code=400, detail="AI 이미지 생성은 운동 채널 영상에서만 쓸 수 있습니다.")
+    from services import music_rerender
+    started = music_rerender.start(mix_id, channel=row.get("channel"))
+    if not started.get("ok"):
+        raise HTTPException(status_code=409, detail=started.get("error") or "이미 진행 중")
+    background.add_task(music_rerender.run_with_ai_image, started["job_id"])
+    return {"ok": True, "job_id": started["job_id"]}
+
+
 @router.get("/queue/rerender/status/{job_id}")
 def rerender_status(job_id: str):
     """재렌더 진행 상태 폴링 — {status, step, video_url, error}. 없으면 404."""
@@ -487,10 +508,23 @@ def publish(mix_id: str, body: PublishBody | None = None):
                 logger.warning("[music-dashboard] 인물 다운로드 실패(배경만 업로드): %s", e)
         # #39 영상별 PLAY LIST 표시(미지정/없음 → True).
         _sp = row.get("show_playlist")
-        vres = make_video(
-            theme, mix, background_path=str(thumb), character_path=char_path,
-            show_playlist=(True if _sp is None else bool(_sp)),
-        )
+        # 운동 채널만(PR-1): 현재 mp4 가 **지금 배경·인물·PLAY LIST·디자인**으로 렌더된 것이
+        # 확실하면(R2 렌더 표식 전부 일치) 재렌더를 건너뛴다. 하나라도 다르거나 표식이 없으면
+        # None → 아래 기존 재렌더 그대로. where 는 판정 자체를 하지 않는다(회귀 0).
+        _same = None
+        if _row_channel == "workout_music":
+            from services import music_auto_image
+            _same = music_auto_image.matching_render(
+                row, bg_path=str(thumb), char_path=char_path,
+                show_playlist=(True if _sp is None else bool(_sp)),
+            )
+        if _same:
+            vres = {"video_url": mp4_url, "frame_thumb_key": _same.get("frame_thumb_key")}
+        else:
+            vres = make_video(
+                theme, mix, background_path=str(thumb), character_path=char_path,
+                show_playlist=(True if _sp is None else bool(_sp)),
+            )
         new_mp4_url = vres["video_url"]
 
         # 3) 유튜브 썸네일 = 영상 첫 프레임(#20, Remotion 텍스트 포함) — 있으면 다운로드해 사용,

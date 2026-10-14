@@ -49,7 +49,10 @@ def get_status(job_id: str) -> dict | None:
     job = _JOBS.get(job_id)
     if not job:
         return None
-    return {k: job[k] for k in ("job_id", "mix_id", "status", "step", "video_url", "error")}
+    st = {k: job[k] for k in ("job_id", "mix_id", "status", "step", "video_url", "error")}
+    if "thumbnail_url" in job:  # AI 이미지 생성 잡만(운동 채널) — 일반 재렌더 응답은 무변경
+        st["thumbnail_url"] = job["thumbnail_url"]
+    return st
 
 
 def _load_mix(slug: str, mix_id: str) -> dict:
@@ -127,6 +130,15 @@ def run(job_id: str) -> None:
             theme, mix, background_path=str(thumb), character_path=char_path,
             persist=True, show_playlist=show_playlist,
         )
+        # 운동 채널만 — publish 가 재렌더를 건너뛸 수 있게 렌더 정합 표식을 남긴다(PR-1).
+        # where 는 표식을 남기지 않는다(= publish 는 지금처럼 항상 재렌더).
+        from services.music_workout_style import is_workout_channel
+        if is_workout_channel(row.get("channel")):
+            from services import music_auto_image
+            music_auto_image.record_render(
+                slug, mix_id, bg_path=str(thumb), char_path=char_path, char_key=char_key,
+                show_playlist=show_playlist, vres=vres,
+            )
         job["video_url"] = vres.get("video_url")
         job["status"] = "done"
         _step("완료")
@@ -150,3 +162,74 @@ def run(job_id: str) -> None:
         with _LOCK:
             if _active.get(mix_id) == job_id:
                 _active.pop(mix_id, None)
+
+
+def run_with_ai_image(job_id: str) -> None:
+    """운동 채널 검토대기 카드 [AI 이미지 생성] — 생성·검수 → 합격 시 이미지 교체 → run() 재렌더.
+
+    불합격(재생성 1회 포함)이면 기존 이미지·영상은 그대로 두고 job 을 실패로 끝낸다(사유 포함).
+    합격하면 대표가 "깨끗한 이미지 업로드"를 누른 것과 **같은 자리**(R2 + thumbnail_r2_key)에
+    이미지를 놓고, 같은 재렌더(run)를 탄다. start() 로 만든 job 을 그대로 쓴다(폴링 경로 공유).
+    """
+    job = _JOBS.get(job_id)
+    if not job:
+        return
+    mix_id = job["mix_id"]
+
+    from services import music_jobs
+
+    tmpdir: Path | None = None
+    try:
+        from adapters import r2_storage
+        from services import music_auto_image, music_uploads
+
+        row = music_uploads.get_upload(mix_id)
+        if not row:
+            raise RuntimeError("큐 항목을 찾을 수 없습니다.")
+        slug = row.get("slug") or ""
+        if not slug:
+            raise RuntimeError("slug 를 확인할 수 없습니다.")
+        if not r2_storage.is_available():
+            raise RuntimeError("R2 미설정 — 이미지 저장 불가")
+
+        job["step"] = "AI 이미지 생성"
+        logger.info("[music-rerender] job=%s step=AI 이미지 생성", job_id)
+        try:
+            music_jobs.update_job_step(job_id, "video")
+        except Exception:  # noqa: BLE001
+            pass
+        tmpdir = Path(tempfile.mkdtemp(prefix="aiimg_"))
+        bg_path, summary = music_auto_image.prepare_for_render(
+            job_id, (row.get("tag_combo") or {}).get("action"), str(tmpdir),
+        )
+        if not bg_path:
+            raise RuntimeError(f"AI 이미지 검수 불합격 — 기존 상태 유지. {summary.get('summary', '')}"[:300])
+
+        r2_storage.upload_music_thumbnail(bg_path, slug, mix_id)
+        res = music_uploads.set_thumbnail(mix_id, r2_storage.music_thumbnail_key(slug, mix_id))
+        if res.get("error"):
+            raise RuntimeError(f"이미지 저장 실패: {res['error']}")
+        # 수동 [재렌더] 라우트와 동일 — 다국어 캐시를 비워 새 렌더 기준으로 다시 만들게.
+        try:
+            music_uploads.clear_localizations(mix_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[music-rerender] localizations 초기화 실패(계속): %s", e)
+        job["thumbnail_url"] = f"{r2_storage.music_thumbnail_url(slug, mix_id)}?v={int(time.time())}"
+    except Exception as e:  # noqa: BLE001
+        job["status"] = "error"
+        job["error"] = str(e)[:300]
+        try:
+            music_jobs.fail_job(job_id, str(e))
+        except Exception:  # noqa: BLE001
+            pass
+        logger.warning("[music-rerender] AI 이미지 실패 job=%s: %s", job_id, e)
+        with _LOCK:
+            if _active.get(mix_id) == job_id:
+                _active.pop(mix_id, None)
+        return
+    finally:
+        if tmpdir is not None:
+            import shutil
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    run(job_id)

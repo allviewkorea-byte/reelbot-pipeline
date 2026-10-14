@@ -148,6 +148,16 @@ def fail_job(job_id: str, error: str) -> None:
     _patch(job_id, {"status": "failed", "error_message": (error or "")[:500]})
 
 
+def merge_metadata(job_id: str, extra: dict) -> None:
+    """metadata(jsonb)에 키를 덧붙인다 — 기존 키는 보존. best-effort.
+
+    운동 채널 AI 이미지 검수 결과(합격/불합격 사유)를 남기는 용도(신규 컬럼 없이).
+    """
+    cur = get_job(job_id) or {}
+    meta = cur.get("metadata") if isinstance(cur.get("metadata"), dict) else {}
+    _patch(job_id, {"metadata": {**meta, **(extra or {})}})
+
+
 def dismiss_job(job_id: str) -> dict:
     """카드 [닫기](✕) — completed_at 을 채워 active 목록에서만 제거한다.
 
