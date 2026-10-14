@@ -159,14 +159,23 @@ def _gen_vocal(
     for i, (s, gender) in enumerate(zip(valid, genders), 1):
         lyric = s["lyrics"].strip()
         from services import music_workout_style as _ws  # 5단계 B (지연 import)
+        if _ws.is_workout_channel(channel):
+            # 운동 채널: 태그 style(refine_combo 장르)을 앞에 고정하고 LLM 곡별 style 은 꼬리
+            # 변주로만(풀 밖 장르·처지는 형용사 제거). 플랜 LLM 이 "mellow city pop" 처럼
+            # 장르를 덮어쓰던 문제(2026-10 실측) 차단. 부스터·1000자 한도는 함수 안에서.
+            _style = _ws.lock_vocal_style(
+                base_style, s.get("style"), action,
+                finalize=lambda st, _g=gender: _vocal_style(st, _g), channel=channel,
+            )
+        else:
+            # where: 기존 그대로(LLM style 우선, boost_style 은 where 에서 인자 그대로 반환).
+            _style = _ws.boost_style(
+                _vocal_style(s.get("style") or base_style, gender), action, channel=channel,
+            )
         theme = {
             "theme_slug": theme_slug,
             "instrumental": False,
-            # 운동 채널: LLM 이 지은 곡별 style 을 **버리지 않고** 뒤에 구체 음악 용어를
-            # 덧붙인다(다양성 유지 + 강렬함 확보). where 는 인자 그대로 반환된다.
-            "style": _ws.boost_style(
-                _vocal_style(s.get("style") or base_style, gender), action, channel=channel,
-            ),
+            "style": _style,
             "title": s.get("title") or "",  # #52-A 빈값 → Suno 가 곡 제목 자동 생성(장르명+번호 표시 방지)
             "lyrics": lyric,
             "vocalGender": gender,

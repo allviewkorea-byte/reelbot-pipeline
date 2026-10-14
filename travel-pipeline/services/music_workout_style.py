@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import random
+import re as _re
 
 # 이 모듈이 개입하는 채널. 다른 채널이 생기면 여기부터 넓힌다.
 WORKOUT_CHANNEL = "workout_music"
@@ -146,3 +147,135 @@ def negative_tags(action: str | None, *, channel: str | None = None) -> str | No
     if not is_workout_channel(channel):
         return None
     return _NEGATIVE[axis_for_action(action)]
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 보컬 곡 장르 고정 · 운동 소재 풀 · 가사 톤 (운동 채널 전용)
+#
+# 배경(2026-10 실측): 운동 채널 보컬 곡이 "late-night city pop", "mellow city pop" 으로
+# 나왔다. 보컬 경로는 가사 플랜 LLM 이 곡별 style 을 새로 짓고(music_lyrics.plan_songs),
+# music_produce._gen_vocal 이 그 style 로 태그 style 을 **통째로 대체**한다. 플랜 프롬프트엔
+# 장르 정보가 없고 sub-주제 풀이 시티팝 기본값(DEFAULT_SUBTHEME_POOL)이라 LLM 이 시티팝을 짓는다.
+#
+# ① lock_vocal_style — 태그 style(refine_combo 결과 장르)을 앞에 고정, LLM style 은
+#    꼬리 변주로만. 꼬리에서 운동 풀 밖 장르 토큰은 통째로, 처지는 형용사는 단어만 뺀다.
+# ② subtheme_pool / lyric_tone — 플랜·작성 단계에 운동 소재와 톤을 넘긴다.
+#    warmup(스트레칭) 축은 잔잔한 게 정상이라 톤은 기존 그대로(빈 값), 소재만 맞춘다.
+# 기존 함수(refine_combo·boost_style·negative_tags)는 무수정.
+# ══════════════════════════════════════════════════════════════════════
+
+SUNO_STYLE_MAX = 1000  # sunoapi style 한도(V4.5+/V6 공통 1000자)
+
+# 운동 풀에 없는 장르 — 토큰에 들어 있으면 그 토큰을 통째로 뺀다("late-night city pop" 등).
+# warmup 축 풀에 있는 장르(acoustic·ambient·piano·new age)는 그 축에서만 허용한다.
+_FOREIGN_GENRES = (
+    "city pop", "citypop", "lo-fi", "lofi", "lo fi", "jazz", "ballad", "acoustic", "ambient",
+    "bossa nova", "bossa", "folk", "lounge", "chillhop", "chillwave", "dream pop", "shoegaze",
+    "piano ballad", "new age", "classical", "orchestral", "lullaby", "smooth jazz",
+)
+_WARMUP_ALLOWED_GENRES = ("acoustic", "ambient", "new age", "piano")
+
+# 처지는 형용사 — 토큰은 살리고 단어만 지운다(strength/cardio 기준 목록).
+_DROOPY_ALL = (
+    "late-night", "late night", "midnight", "mellow", "soft", "chill", "chilled", "laid-back",
+    "laid back", "lazy", "slow", "downtempo", "dreamy", "hazy", "muted", "lonely", "wistful",
+    "sad", "melancholic", "melancholy", "gloomy", "somber", "sombre", "sleepy", "drowsy", "rainy",
+)
+# warmup 도 지시 목록(mellow·late-night·soft·chill·sad·melancholic)과 우울 계열은 지운다.
+# slow·dreamy·hazy 등 '느긋함' 쪽은 스트레칭 결에 맞을 수 있어 warmup 에선 남긴다.
+_DROOPY_WARMUP = (
+    "late-night", "late night", "mellow", "soft", "chill", "chilled", "sad", "melancholic",
+    "melancholy", "gloomy", "somber", "sombre", "sleepy", "drowsy", "lonely",
+)
+
+
+# 처지는 형용사를 지운 뒤 이것만 남은 토큰은 의미가 없어 버린다("soft vocals" → "vocals").
+_FILLER = {"vocals", "vocal", "voice", "groove", "beat", "beats", "sound", "sounds", "vibe", "vibes",
+           "warmth", "tone", "tones", "feel", "mood", "texture"}
+
+
+def _genre_first(tag_style: str) -> str:
+    """태그 style 의 장르 토큰을 맨 앞으로(순서만 바꾼다, 내용 동일). "for workout, ..., hip-hop" →
+    "hip-hop, for workout, ...". 장르 문구는 music_tags 장르 축 값(전부 단일 토큰)."""
+    from services.music_tags import _AXIS_MAP
+
+    genres = {v.lower() for v in (_AXIS_MAP.get("genre") or {}).values()}
+    toks = [t.strip() for t in (tag_style or "").split(",") if t.strip()]
+    first = [t for t in toks if t.lower() in genres]
+    return ", ".join(first + [t for t in toks if t.lower() not in genres])
+
+
+def _word_re(words) -> "_re.Pattern[str]":
+    alts = sorted({w.lower() for w in words}, key=len, reverse=True)
+    return _re.compile(r"(?<![a-z])(?:" + "|".join(_re.escape(a) for a in alts) + r")(?![a-z])", _re.I)
+
+
+def _clean_tail(llm_style: str, axis: str, tag_style: str) -> list[str]:
+    """LLM style → 꼬리 토큰 리스트(운동 풀 밖 장르 토큰 제거·처지는 형용사 삭제·중복 제거)."""
+    allowed = _WARMUP_ALLOWED_GENRES if axis == "warmup" else ()
+    foreign = _word_re([g for g in _FOREIGN_GENRES if g not in allowed])
+    droopy = _word_re(_DROOPY_WARMUP if axis == "warmup" else _DROOPY_ALL)
+    have = {t.strip().lower() for t in (tag_style or "").split(",") if t.strip()}
+    out: list[str] = []
+    for tok in (llm_style or "").split(","):
+        t = tok.strip()
+        if not t or foreign.search(t):
+            continue
+        t = _re.sub(r"\s{2,}", " ", droopy.sub("", t)).strip(" -/&")
+        if len(t) < 3 or t.lower() in _FILLER or t.lower() in have or t.lower() in {x.lower() for x in out}:
+            continue
+        out.append(t)
+    return out
+
+
+def lock_vocal_style(
+    tag_style: str, llm_style: str | None, action: str | None, *, finalize=None,
+    channel: str | None = WORKOUT_CHANNEL,
+) -> str:
+    """운동 채널 보컬 곡 최종 style. 태그 style 이 맨 앞, LLM style(정리본)은 꼬리 변주.
+
+    finalize: 곡별 마무리(성별·명료도 등, music_produce._vocal_style)를 적용하는 함수.
+    마무리 + 운동 부스터(boost_style)까지 붙인 **최종 문자열**이 1000자를 넘으면 꼬리를
+    뒤에서부터 덜어낸다. where 는 호출하지 않는다(호출부가 채널로 가른다).
+    """
+    finalize = finalize or (lambda s: s)
+    axis = axis_for_action(action)
+    head = _genre_first((tag_style or "").strip().strip(",").strip())
+    tail = _clean_tail(llm_style or "", axis, head)
+    while True:
+        body = ", ".join([p for p in [head, *tail] if p])
+        style = boost_style(finalize(body), action, channel=channel)
+        if len(style) <= SUNO_STYLE_MAX or not tail:
+            break
+        tail.pop()
+    if len(style) > SUNO_STYLE_MAX:  # 꼬리 없이도 넘으면(이론상) 쉼표 경계에서 자른다
+        style = style[:SUNO_STYLE_MAX].rsplit(",", 1)[0].strip()
+    return style
+
+
+# 운동 소재 풀(플랜 LLM 참고용 sub-주제). strength/cardio 공용. 대표 검토 대상.
+WORKOUT_SUBTHEME_POOL = [
+    "마지막 한 세트", "새벽 러닝", "땀으로 젖은 티셔츠", "한계 돌파", "거울 속 나",
+    "데드리프트", "숨이 턱까지", "2주 뒤의 나", "포기하고 싶은 순간", "첫 풀업 성공",
+    "인터벌 마지막 바퀴", "빈 헬스장의 새벽", "어제보다 1kg 더", "결승선 직전", "끝까지 버틴 나",
+]
+# warmup(스트레칭·요가·명상 등) 축 — 근력 소재는 결이 안 맞아 몸 풀기 소재로 따로.
+WORKOUT_WARMUP_SUBTHEME_POOL = [
+    "아침 스트레칭", "굳은 어깨 풀기", "깊은 호흡", "몸이 깨어나는 순간", "운동 전 워밍업",
+    "쿨다운", "매트 위의 고요", "오늘도 나를 돌보는 시간",
+]
+WORKOUT_LYRIC_TONE = "신나고 힘 있는, 자신감·성취감. 느리거나 우울한 정서 금지."
+
+
+def subtheme_pool(action: str | None, *, channel: str | None = None) -> list[str] | None:
+    """플랜 단계 sub-주제 풀. 운동 채널이 아니면 None(→ 기존 기본 풀 그대로)."""
+    if not is_workout_channel(channel):
+        return None
+    return list(WORKOUT_WARMUP_SUBTHEME_POOL if axis_for_action(action) == "warmup" else WORKOUT_SUBTHEME_POOL)
+
+
+def lyric_tone(action: str | None, *, channel: str | None = None) -> str | None:
+    """작성 단계 가사 톤. 운동 채널 strength/cardio 만 운동 톤, 그 외 None(→ 기존 값 유지)."""
+    if not is_workout_channel(channel) or axis_for_action(action) == "warmup":
+        return None
+    return WORKOUT_LYRIC_TONE
