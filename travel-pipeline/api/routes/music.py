@@ -396,7 +396,17 @@ def jobs_retry(job_id: str, background: BackgroundTasks):
     meta = job.get("metadata") or {}
     if jtype == "manual_render":
         from services import music_manual
-        started = music_manual.start(mood=meta.get("mood"))
+        from services.music_channel import DEFAULT_CHANNEL
+        # 원래 작업 그대로 다시 — channel·tag_combo·track_count 를 빠뜨리면 운동 작업이
+        # where 시티팝으로 재생성된다(2026-10-07 실측). where 행의 channel 은 None 으로 넘겨
+        # 기존 호출(채널 미지정)과 같게 둔다.
+        _ch = (job.get("channel") or "").strip()
+        started = music_manual.start(
+            mood=meta.get("mood"),
+            track_count=meta.get("track_count"),
+            tag_combo=meta.get("tag_combo"),
+            channel=_ch if _ch and _ch != DEFAULT_CHANNEL else None,
+        )
         if not started.get("ok"):
             raise HTTPException(status_code=409, detail=started.get("error") or "이미 진행 중")
         music_jobs.dismiss_job(job_id)

@@ -151,7 +151,9 @@ function MusicQueueGridPageInner() {
     setManualJobId(null)
     try {
       const tc = Math.max(1, Math.min(100, Math.floor(Number(manualCount)) || 1)) // #42 곡수 1~100 클램프
-      const payload: Record<string, unknown> = { mood: testMood, track_count: tc, channel }
+      const payload: Record<string, unknown> = { track_count: tc, channel }
+      // 운동 채널은 mood(시티팝 기본값)를 보내지 않는다 — 칩이 없으면 백엔드가 운동 풀로 채운다.
+      if (channel !== WORKOUT_CHANNEL_ID) payload.mood = testMood
       if (tagCombo) payload.tag_combo = tagCombo
       if (isWorkout) payload.auto_image = autoImage
       const res = await fetch("/api/music/manual-render", {

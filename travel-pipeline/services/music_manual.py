@@ -48,12 +48,31 @@ def _clamp_track_count(n) -> int:
         return 1
 
 
+def _workout_default_combo(tag_combo: dict | None, channel: str | None) -> dict | None:
+    """운동 채널인데 tag_combo 가 없거나 비어 있으면 {"action": "workout"} 으로 채운다.
+
+    칩도 "어떨때"도 안 고르면 프론트가 tag_combo 를 빼고 mood="citypop" 만 보낸다. 그대로 두면
+    mood 프리셋(시티팝)·suno_config("citypop") 고정 태그로 떨어져 운동 채널에 시티팝이
+    만들어진다(2026-10 실측). action 을 채우면 smart_random → refine_combo(운동 풀) 경로를 탄다.
+    where(미지정 포함)·운동 채널의 대표 선택(칩/어떨때)은 원본 그대로 돌려준다(회귀 0).
+    """
+    from services.music_workout_style import is_workout_channel
+
+    if not is_workout_channel(channel):
+        return tag_combo
+    if isinstance(tag_combo, dict) and any(tag_combo.values()):
+        return tag_combo
+    return {"action": "workout"}
+
+
 def _build_theme(
     mood: str, track_count: int = 1, tag_combo: dict | None = None,
     *, channel: str | None = None,
 ) -> dict:
     """channel: 채널 축(4단계). theme 에 실어 보내면 music_video.py 를 수정하지 않고도
     해시태그·본문 Copyright 가 채널을 알 수 있다. None → where(기존 동작)."""
+    # 운동 채널은 어떤 경로로 들어와도 mood 프리셋(시티팝)으로 새지 않게 한 번 더 막는다.
+    tag_combo = _workout_default_combo(tag_combo, channel)
     if tag_combo:
         from services import music_tags
         has_chips = any(tag_combo.get(k) for k in ("genre", "situation", "emotion", "tempo", "format", "charm"))
@@ -120,6 +139,9 @@ def start(
     auto = wants_auto_image(channel, auto_image)
     key = music_genres.normalize_mood_key(mood or _DEFAULT_MOOD)
     tc = _clamp_track_count(track_count if track_count is not None else 1)
+    # 운동 채널 + 칩·어떨때 미선택 → {"action": "workout"}(아래 랜덤 경로가 운동 풀로 채운다).
+    # 이게 없으면 mood 기본값(citypop) 프리셋으로 떨어진다. where 는 무변경.
+    tag_combo = _workout_default_combo(tag_combo, channel)
     # 랜덤 경로: 칩 비었으면 미리 채워 metadata에 반영(카드에 채워진 칩 표시).
     if tag_combo:
         has_chips = any(tag_combo.get(k) for k in ("genre", "situation", "emotion", "tempo", "format", "charm"))
