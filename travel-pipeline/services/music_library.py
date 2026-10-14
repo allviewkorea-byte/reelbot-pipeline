@@ -12,6 +12,8 @@
 from __future__ import annotations
 
 import logging
+import shutil
+import tempfile
 import threading
 import time
 import uuid
@@ -67,7 +69,10 @@ def get_status(job_id: str) -> dict | None:
     job = _JOBS.get(job_id)
     if not job:
         return None
-    return {k: job[k] for k in ("job_id", "status", "step", "video_url", "mix_id", "error")}
+    st = {k: job[k] for k in ("job_id", "status", "step", "video_url", "mix_id", "error")}
+    if "image_review" in job:  # 운동 채널 AI 이미지 검수 결과(있을 때만 — where 응답 무변경)
+        st["image_review"] = job["image_review"]
+    return st
 
 
 def cancel(job_id: str) -> dict:
@@ -89,9 +94,17 @@ def cancel(job_id: str) -> dict:
     return {"ok": True}
 
 
-def start(track_ids: list[str], mood: str | None = None, *, channel: str | None = None) -> dict:
-    """선택곡 영상 제작 시작(동시 1개). {ok, job_id} 또는 {ok:False, error}."""
+def start(
+    track_ids: list[str], mood: str | None = None, *,
+    channel: str | None = None, auto_image: bool | None = None,
+) -> dict:
+    """선택곡 영상 제작 시작(동시 1개). {ok, job_id} 또는 {ok:False, error}.
+
+    auto_image(PR-1): 운동 채널 배경 이미지 자동 생성. 운동 채널 기본 ON, where 는 항상 OFF.
+    """
     global _active_job
+    from services.music_auto_image import wants_auto_image
+    auto = wants_auto_image(channel, auto_image)
     ids = [str(t).strip() for t in (track_ids or []) if str(t).strip()]
     if not ids:
         return {"ok": False, "error": "선택된 곡이 없습니다."}
@@ -107,6 +120,7 @@ def start(track_ids: list[str], mood: str | None = None, *, channel: str | None 
             "video_url": None, "mix_id": None, "error": None, "cancelled": False,
             "created_at": time.time(),
             "channel": channel,  # run() 이 트랙 조회에 사용(None → where)
+            "auto_image": auto,
         }
         _active_job = job_id
     try:
@@ -138,6 +152,7 @@ def run(job_id: str) -> None:
             except Exception:  # noqa: BLE001
                 pass
 
+    img_dir: str | None = None
     try:
         track_ids: list[str] = job["track_ids"]
         rows = music_store.get_tracks_by_ids(track_ids, channel=job.get("channel"))
@@ -177,6 +192,20 @@ def run(job_id: str) -> None:
             logger.info("[music-library] 취소됨 job=%s", job_id)
             return
 
+        # 운동 채널 — 렌더 전에 배경 이미지 생성·검수(PR-1). 실패면 None → 기존 블랙 배경 렌더.
+        # 라이브러리 믹스엔 tag_combo 가 없어 첫 트랙의 action 으로 축을 고른다.
+        bg_path: str | None = None
+        if job.get("auto_image"):
+            _step("이미지", "video")
+            from services import music_auto_image
+            img_dir = tempfile.mkdtemp(prefix="autoimg_")
+            bg_path, job["image_review"] = music_auto_image.prepare_for_render(
+                job_id, rows[0].get("action") or None, img_dir,
+            )
+            if job.get("cancelled"):
+                logger.info("[music-library] 취소됨 job=%s", job_id)
+                return
+
         # ③ 풀 렌더(분할 렌더·배경·자동 썸네일은 make_video 가 자동) → 검토 큐 적재.
         _step("렌더", "video")
         viz_spec = music_viz_analyzer.analyze_song(theme, mix)
@@ -189,7 +218,12 @@ def run(job_id: str) -> None:
         except Exception as e:  # noqa: BLE001
             logger.warning("[music-library] build_title 실패(기본값 유지): %s", e)
 
-        video = music_video.make_video(theme, mix, viz_spec=viz_spec, persist=True)
+        if bg_path:
+            video = music_video.make_video(
+                theme, mix, viz_spec=viz_spec, persist=True, background_path=bg_path,
+            )
+        else:
+            video = music_video.make_video(theme, mix, viz_spec=viz_spec, persist=True)
 
         # ④ 사용된 트랙 used=true 마킹(best-effort).
         for r in rows:
@@ -206,6 +240,13 @@ def run(job_id: str) -> None:
                 music_uploads.set_channel(job["mix_id"], job["channel"])
             except Exception as e:  # noqa: BLE001
                 logger.warning("[music-library] 채널 보정 실패(무시): %s", e)
+        # 이미지를 대표 업로드와 같은 자리(thumbnail_r2_key)에 연결 — 큐 행이 생긴 렌더 뒤에만 가능.
+        if bg_path and job.get("mix_id"):
+            from services import music_auto_image
+            att = music_auto_image.attach_after_render(slug, job["mix_id"], bg_path, video)
+            if att.get("error"):
+                job["image_review"] = {**job.get("image_review", {}), "ok": False,
+                                       "summary": f"이미지 연결 실패: {att['error'][:120]}"}
         job["status"] = "done"
         _step("완료")
         try:
@@ -223,6 +264,8 @@ def run(job_id: str) -> None:
             pass
         logger.warning("[music-library] 실패 job=%s: %s", job_id, e)
     finally:
+        if img_dir:
+            shutil.rmtree(img_dir, ignore_errors=True)
         with _LOCK:
             if _active_job == job_id:
                 _active_job = None

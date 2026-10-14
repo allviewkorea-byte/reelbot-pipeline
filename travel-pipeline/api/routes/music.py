@@ -188,6 +188,8 @@ class TestRenderBody(BaseModel):
     track_count: int | None = None  # #42 수동 생성 곡수 1~100(미지정→1). test_render 는 무시.
     tag_combo: dict | None = None  # ③-A 태그 조합(8축). 있으면 mood 무시, style 을 태그로 생성.
     channel: str | None = None  # 채널 축(미지정→where). 적립 풀·검토 큐가 이 값으로 갈린다.
+    # PR-1 운동 채널 배경 이미지 자동 생성. 미지정 → 운동 채널 ON / where 는 값과 무관하게 OFF.
+    auto_image: bool | None = None
 
 
 @router.post("/test-render")
@@ -221,6 +223,7 @@ def manual_render(background: BackgroundTasks, body: TestRenderBody | None = Non
         track_count=body.track_count if body else None,
         tag_combo=body.tag_combo if body else None,
         channel=body.channel if body else None,
+        auto_image=body.auto_image if body else None,
     )
     if not started.get("ok"):
         raise HTTPException(status_code=409, detail=started.get("error") or "이미 진행 중")
@@ -253,7 +256,7 @@ def genre_prompt(genre: str = "", channel: str | None = None, action: str | None
     매칭 실패 시 prompt=null → 프론트가 저장된 gpt_prompt 로 폴백.
 
     channel·action(5단계 A): 운동 채널이면 장르 대신 action(strength/cardio/warmup)으로
-    어둡고 강렬한 전용 풀에서 뽑고 맨 앞에 [WORKOUT] 을 붙인다. 미지정 → where(기존 동작).
+    밝은 햇살·쨍한 원색 대비의 전용 풀에서 뽑고 맨 앞에 [WORKOUT] 을 붙인다. 미지정 → where(기존 동작).
     """
     from services import music_genres, music_image_prompts
     from services.music_workout_style import axis_for_action, is_workout_channel
@@ -275,6 +278,7 @@ class LibraryCreateBody(BaseModel):
     track_ids: list[str] = []
     mood: str | None = None  # 장르 자동 판별(첫 트랙) 또는 직접 지정
     channel: str | None = None  # 채널 축(미지정→where)
+    auto_image: bool | None = None  # PR-1 운동 채널 배경 자동 생성(미지정→운동 ON, where 항상 OFF)
 
 
 @router.get("/library")
@@ -314,6 +318,7 @@ def library_create_video(background: BackgroundTasks, body: LibraryCreateBody | 
         track_ids=body.track_ids if body else [],
         mood=body.mood if body else None,
         channel=body.channel if body else None,
+        auto_image=body.auto_image if body else None,
     )
     if not started.get("ok"):
         code = 409 if started.get("busy_job") else 400

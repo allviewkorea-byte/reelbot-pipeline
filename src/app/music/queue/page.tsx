@@ -10,7 +10,7 @@ import { SwipeVideoViewer } from "@/components/music/SwipeVideoViewer"
 import { MusicJobCard } from "@/components/music/MusicJobCard"
 import type { MusicJob } from "@/lib/music-jobs"
 import {
-  MUSIC_CHANNELS, channelParam, estimateProductionTime, fmtMinutes, resolveMusicChannel, withChannel,
+  MUSIC_CHANNELS, WORKOUT_CHANNEL_ID, channelParam, estimateProductionTime, fmtMinutes, resolveMusicChannel, withChannel,
 } from "@/lib/music"
 import { useSearchParams } from "next/navigation"
 import { MUSIC_GENRES } from "@/lib/music-genres"
@@ -63,6 +63,9 @@ function MusicQueueGridPageInner() {
   const [manualLoading, setManualLoading] = useState(false)
   const [manualCount, setManualCount] = useState("1") // #42 수동 생성 곡수(1~100, 기본 1)
   const [tagCombo, setTagCombo] = useState<TagCombo | null>(null)
+  // PR-1 운동 채널 — 렌더 전에 AI 배경 이미지 생성(기본 ON). where 에는 옵션 자체가 안 보인다.
+  const isWorkout = channel === WORKOUT_CHANNEL_ID
+  const [autoImage, setAutoImage] = useState(true)
   // #26-C 취소 — 진행 중 job_id + 취소 요청 표시(현재 스텝 완료 후 중단).
   const [manualJobId, setManualJobId] = useState<string | null>(null)
   const [cancelRequested, setCancelRequested] = useState(false)
@@ -150,6 +153,7 @@ function MusicQueueGridPageInner() {
       const tc = Math.max(1, Math.min(100, Math.floor(Number(manualCount)) || 1)) // #42 곡수 1~100 클램프
       const payload: Record<string, unknown> = { mood: testMood, track_count: tc, channel }
       if (tagCombo) payload.tag_combo = tagCombo
+      if (isWorkout) payload.auto_image = autoImage
       const res = await fetch("/api/music/manual-render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -168,6 +172,9 @@ function MusicQueueGridPageInner() {
             const sd = await sr.json()
             if (sd?.status === "done") {
               toast.success("영상 생성 완료 — 검토 큐에 추가되었습니다.")
+              if (sd?.image_review && sd.image_review.ok === false) {
+                toast.warning(`AI 배경 이미지 불합격 — 이미지 없이 추가됨 (${sd.image_review.summary || "사유 없음"})`)
+              }
               load() // 큐 새로고침 → 새 pending 카드 등장(일반 카드)
               loadJobs() // 완료된 작업은 진행 카드에서 사라짐
               resolve(); return
@@ -194,7 +201,7 @@ function MusicQueueGridPageInner() {
       setManualJobId(null)
       setCancelRequested(false)
     }
-  }, [testMood, manualCount, tagCombo, channel, load, loadJobs])
+  }, [testMood, manualCount, tagCombo, channel, isWorkout, autoImage, load, loadJobs])
 
   // #26-C 진행 중 취소 — 현재 스텝 완료 후 큐 적재 없이 종료(즉시 중단 아님).
   const cancelManual = useCallback(async () => {
@@ -309,6 +316,19 @@ function MusicQueueGridPageInner() {
               />
               곡
             </label>
+            {/* PR-1 운동 채널만 — AI 배경 이미지 자동 생성(렌더 1회로 끝남) */}
+            {isWorkout && (
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground" title="렌더 전에 AI 가 배경 이미지를 만들고 검수합니다(불합격이면 이미지 없이 추가)">
+                <input
+                  type="checkbox"
+                  checked={autoImage}
+                  disabled={manualLoading}
+                  onChange={(e) => setAutoImage(e.target.checked)}
+                  className="h-3.5 w-3.5 accent-primary"
+                />
+                AI 배경 이미지 자동 생성
+              </label>
+            )}
             {/* 메인 액션 — 버튼 라벨 동적: action만→랜덤 / 칩→수동 / 없음→수동 */}
             <button
               type="button"

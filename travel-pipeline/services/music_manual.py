@@ -13,6 +13,8 @@ JobManager 는 인메모리(재시작 시 소실).
 from __future__ import annotations
 
 import logging
+import shutil
+import tempfile
 import threading
 import time
 import uuid
@@ -104,14 +106,18 @@ def _build_theme(
 
 def start(
     mood: str | None = None, track_count: int | None = None, tag_combo: dict | None = None,
-    *, channel: str | None = None,
+    *, channel: str | None = None, auto_image: bool | None = None,
 ) -> dict:
     """수동 영상 생성 1개 시작(동시 1개 제한). {ok, job_id} 또는 {ok:False, error, busy_job}.
 
     track_count(#42): 영상에 넣을 곡수 1~100(미지정→1). 곡수 = Suno 호출 수 = 영상 길이(#40).
     tag_combo(③-A): 8축 태그 조합. 있으면 mood 무시, 태그 기반 style 생성.
+    auto_image(PR-1): 운동 채널 배경 이미지 자동 생성. 운동 채널은 기본 ON(False 만 끔),
+      where 는 값과 무관하게 항상 OFF(기존 동작).
     """
     global _active_job
+    from services.music_auto_image import wants_auto_image
+    auto = wants_auto_image(channel, auto_image)
     key = music_genres.normalize_mood_key(mood or _DEFAULT_MOOD)
     tc = _clamp_track_count(track_count if track_count is not None else 1)
     # 랜덤 경로: 칩 비었으면 미리 채워 metadata에 반영(카드에 채워진 칩 표시).
@@ -135,11 +141,14 @@ def start(
             "created_at": time.time(),
             "tag_combo": tag_combo,
             "channel": channel,  # run() 이 produce 로 전달(None → where)
+            "auto_image": auto,
         }
         _active_job = job_id
     meta = {"mood": key, "track_count": tc}
     if tag_combo:
         meta["tag_combo"] = tag_combo
+    if auto:
+        meta["auto_image_requested"] = True
     try:
         from services import music_jobs
         music_jobs.start_job("manual_render", job_id=job_id, metadata=meta, channel=channel)
@@ -175,7 +184,10 @@ def get_status(job_id: str) -> dict | None:
     job = _JOBS.get(job_id)
     if not job:
         return None
-    return {k: job[k] for k in ("job_id", "status", "step", "mood", "video_url", "mix_id", "error")}
+    st = {k: job[k] for k in ("job_id", "status", "step", "mood", "video_url", "mix_id", "error")}
+    if "image_review" in job:  # 운동 채널 AI 이미지 검수 결과(있을 때만 — where 응답 무변경)
+        st["image_review"] = job["image_review"]
+    return st
 
 
 def run(job_id: str) -> None:
@@ -188,7 +200,7 @@ def run(job_id: str) -> None:
     from services import music_jobs
 
     # 한국어 표시 단계 → 표준 단계(music_jobs.STEPS) 매핑(파이프라인 시각화용).
-    _CANON = {"주제": "theme", "음원": "vocal", "가사": "lyrics", "음원·믹스": "mix", "렌더": "video"}
+    _CANON = {"주제": "theme", "음원": "vocal", "가사": "lyrics", "음원·믹스": "mix", "렌더": "video", "이미지": "video"}
 
     def _step(name: str) -> None:
         job["step"] = name
@@ -208,6 +220,7 @@ def run(job_id: str) -> None:
         else:
             _step("음원")
 
+    img_dir: str | None = None
     try:
         from services import music_produce, music_video, music_viz_analyzer
 
@@ -239,6 +252,20 @@ def run(job_id: str) -> None:
             logger.info("[music-manual] 취소됨 → 렌더 생략 job=%s", job_id)
             return
 
+        # 운동 채널 — 렌더 **전에** 배경 이미지를 만들어 렌더 1회로 끝낸다(PR-1).
+        # 생성·검수 실패면 bg_path=None → 아래는 기존과 똑같이 블랙 배경 렌더(반자동).
+        bg_path: str | None = None
+        if job.get("auto_image"):
+            _step("이미지")
+            from services import music_auto_image
+            img_dir = tempfile.mkdtemp(prefix="autoimg_")
+            bg_path, job["image_review"] = music_auto_image.prepare_for_render(
+                job_id, (theme.get("tag_combo") or {}).get("action"), img_dir,
+            )
+            if job.get("cancelled"):
+                logger.info("[music-manual] 취소됨 → 렌더 생략 job=%s", job_id)
+                return
+
         _step("렌더")
         viz_spec = music_viz_analyzer.analyze_song(theme, mix)
         # tag_combo 경로: LLM 한국어 제목으로 title_kr 업그레이드(카드·영상 표시용).
@@ -251,7 +278,12 @@ def run(job_id: str) -> None:
             except Exception:  # noqa: BLE001
                 pass
         # 일반 cron 과 동일: gpt-image 배경 + Remotion 풀 렌더 + record_pending(검토 큐 적재).
-        video = music_video.make_video(theme, mix, viz_spec=viz_spec, persist=True)
+        if bg_path:
+            video = music_video.make_video(
+                theme, mix, viz_spec=viz_spec, persist=True, background_path=bg_path,
+            )
+        else:
+            video = music_video.make_video(theme, mix, viz_spec=viz_spec, persist=True)
 
         job["video_url"] = video.get("video_url")
         job["mix_id"] = video.get("video_id")
@@ -263,6 +295,13 @@ def run(job_id: str) -> None:
                 music_uploads.set_channel(job["mix_id"], job["channel"])
             except Exception as e:  # noqa: BLE001
                 logger.warning("[music-manual] 채널 보정 실패(무시): %s", e)
+        # 이미지를 대표 업로드와 같은 자리(thumbnail_r2_key)에 연결 — 큐 행이 생긴 렌더 뒤에만 가능.
+        if bg_path and job.get("mix_id"):
+            from services import music_auto_image
+            att = music_auto_image.attach_after_render(slug, job["mix_id"], bg_path, video)
+            if att.get("error"):
+                job["image_review"] = {**job.get("image_review", {}), "ok": False,
+                                       "summary": f"이미지 연결 실패: {att['error'][:120]}"}
         job["status"] = "done"
         _step("완료")
         try:
@@ -279,6 +318,8 @@ def run(job_id: str) -> None:
             pass
         logger.warning("[music-manual] 실패 job=%s: %s", job_id, e)
     finally:
+        if img_dir:
+            shutil.rmtree(img_dir, ignore_errors=True)
         with _LOCK:
             if _active_job == job_id:
                 _active_job = None

@@ -240,6 +240,10 @@ function MusicLibraryPageInner() {
             const sd = await sr.json()
             if (sd?.status === "done") {
               toast.success("영상 생성 완료 — 검토 대기에 추가되었습니다.")
+              // 운동 채널 AI 배경(PR-1) 불합격 → 이미지 없이 적재됨을 알린다(where 는 키 자체가 없음).
+              if (sd?.image_review && sd.image_review.ok === false) {
+                toast.warning(`AI 배경 이미지 불합격 — 이미지 없이 검토 대기에 추가됨 (${sd.image_review.summary || "사유 없음"})`)
+              }
               setSelectedOrder([])
               load()
               resolve(); return
