@@ -10,7 +10,7 @@ import { SwipeVideoViewer } from "@/components/music/SwipeVideoViewer"
 import { MusicJobCard } from "@/components/music/MusicJobCard"
 import type { MusicJob } from "@/lib/music-jobs"
 import {
-  MUSIC_CHANNELS, channelParam, estimateProductionTime, fmtMinutes, resolveMusicChannel, withChannel,
+  MUSIC_CHANNELS, WORKOUT_CHANNEL_ID, channelParam, estimateProductionTime, fmtMinutes, resolveMusicChannel, withChannel,
 } from "@/lib/music"
 import { useSearchParams } from "next/navigation"
 import { MUSIC_GENRES } from "@/lib/music-genres"
@@ -148,7 +148,9 @@ function MusicQueueGridPageInner() {
     setManualJobId(null)
     try {
       const tc = Math.max(1, Math.min(100, Math.floor(Number(manualCount)) || 1)) // #42 곡수 1~100 클램프
-      const payload: Record<string, unknown> = { mood: testMood, track_count: tc, channel }
+      const payload: Record<string, unknown> = { track_count: tc, channel }
+      // 운동 채널은 mood(시티팝 기본값)를 보내지 않는다 — 칩이 없으면 백엔드가 운동 풀로 채운다.
+      if (channel !== WORKOUT_CHANNEL_ID) payload.mood = testMood
       if (tagCombo) payload.tag_combo = tagCombo
       const res = await fetch("/api/music/manual-render", {
         method: "POST",
