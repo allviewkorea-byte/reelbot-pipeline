@@ -137,7 +137,7 @@ def run(job_id: str) -> None:
             from services import music_auto_image
             music_auto_image.record_render(
                 slug, mix_id, bg_path=str(thumb), char_path=char_path, char_key=char_key,
-                show_playlist=show_playlist, vres=vres,
+                show_playlist=show_playlist, vres=vres, channel=row.get("channel"),
             )
         job["video_url"] = vres.get("video_url")
         job["status"] = "done"

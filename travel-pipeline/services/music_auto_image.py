@@ -409,10 +409,14 @@ def _sha256(path: str | None) -> str | None:
     return h.hexdigest()
 
 
-def _design_hash() -> str:
-    """make_video 가 읽는 것과 **같은 호출**(channel 미지정)의 디자인 설정 해시."""
+def _design_hash(channel: str | None) -> str:
+    """make_video 가 읽는 것과 **같은 호출**(theme 채널)의 디자인 설정 해시.
+
+    make_video 는 get_design_config(channel=theme["channel"]) 를 읽는다(채널별 디자인).
+    표식 기록·판정 모두 그 영상의 채널로 계산해야 같은 값을 비교한다.
+    """
     from services import music_channel
-    cfg = music_channel.get_design_config()
+    cfg = music_channel.get_design_config(channel=channel)
     return hashlib.sha256(json.dumps(cfg, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
@@ -423,7 +427,7 @@ def _norm_key(v) -> str | None:
 
 def record_render(
     slug: str, mix_id: str, *, bg_path: str, char_path: str | None, char_key: str | None,
-    show_playlist: bool, vres: dict,
+    show_playlist: bool, vres: dict, channel: str | None = "workout_music",
 ) -> bool:
     """렌더 직후 사이드카 기록. 첫프레임(=Remotion 렌더 성공)이 없으면 기록하지 않는다.
 
@@ -445,7 +449,7 @@ def record_render(
             "char_key": _norm_key(char_key),
             "char_sha256": _sha256(char_path) if char_path else None,
             "show_playlist": bool(show_playlist),
-            "design_hash": _design_hash(),
+            "design_hash": _design_hash(channel),
         }
         if not marker["bg_sha256"]:
             return False
@@ -499,7 +503,7 @@ def matching_render(row: dict, *, bg_path: str, char_path: str | None, show_play
             "char": (marker.get("char_sha256") == (_sha256(char_path) if char_path else None))
                      and not (row_char_key and not char_path),
             "show_playlist": marker.get("show_playlist") is bool(show_playlist),
-            "design": marker.get("design_hash") == _design_hash(),
+            "design": marker.get("design_hash") == _design_hash(row.get("channel")),
         }
     except Exception as e:  # noqa: BLE001
         logger.warning("[auto-image] 렌더 정합 판정 실패 → 재렌더 mix_id=%s: %s", mix_id, e)
@@ -556,7 +560,9 @@ def prepare_for_render(job_id: str, action: str | None, workdir: str) -> tuple[s
     return (res["path"] if res.get("ok") else None), summary
 
 
-def attach_after_render(slug: str, mix_id: str, bg_path: str, vres: dict) -> dict:
+def attach_after_render(
+    slug: str, mix_id: str, bg_path: str, vres: dict, *, channel: str | None = "workout_music",
+) -> dict:
     """렌더 후 처리 — 이미지를 대표 업로드와 같은 자리에 두고(R2 + thumbnail_r2_key) 표식 기록.
 
     렌더 전에는 큐 행이 없어(record_pending 이 렌더 끝에 만든다) set_thumbnail 이 0행을 고친다.
@@ -574,5 +580,8 @@ def attach_after_render(slug: str, mix_id: str, bg_path: str, vres: dict) -> dic
     except Exception as e:  # noqa: BLE001 - 영상은 이미 만들어졌다(이미지 없이 검토대기)
         logger.warning("[auto-image] 썸네일 연결 실패 mix_id=%s: %s", mix_id, e)
         return {"thumbnail_r2_key": None, "error": str(e)[:300]}
-    record_render(slug, mix_id, bg_path=bg_path, char_path=None, char_key=None, show_playlist=True, vres=vres)
+    record_render(
+        slug, mix_id, bg_path=bg_path, char_path=None, char_key=None, show_playlist=True,
+        vres=vres, channel=channel,
+    )
     return {"thumbnail_r2_key": key, "error": None}

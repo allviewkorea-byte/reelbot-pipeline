@@ -327,7 +327,9 @@ def run(job_id: str) -> None:
         # 이미지를 대표 업로드와 같은 자리(thumbnail_r2_key)에 연결 — 큐 행이 생긴 렌더 뒤에만 가능.
         if bg_path and job.get("mix_id"):
             from services import music_auto_image
-            att = music_auto_image.attach_after_render(slug, job["mix_id"], bg_path, video)
+            att = music_auto_image.attach_after_render(
+                slug, job["mix_id"], bg_path, video, channel=job.get("channel"),
+            )
             if att.get("error"):
                 job["image_review"] = {**job.get("image_review", {}), "ok": False,
                                        "summary": f"이미지 연결 실패: {att['error'][:120]}"}
