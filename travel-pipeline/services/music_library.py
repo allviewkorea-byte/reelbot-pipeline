@@ -218,12 +218,34 @@ def run(job_id: str) -> None:
         except Exception as e:  # noqa: BLE001
             logger.warning("[music-library] build_title 실패(기본값 유지): %s", e)
 
-        if bg_path:
-            video = music_video.make_video(
-                theme, mix, viz_spec=viz_spec, persist=True, background_path=bg_path,
-            )
-        else:
-            video = music_video.make_video(theme, mix, viz_spec=viz_spec, persist=True)
+        # 복구 A·B·C — 곡은 이미 있다(라이브러리). 렌더 실패(폴백·로컬 경로·로고 누락)면 같은 곡·주제로
+        # 영상만 다시(최대 2회). Suno 호출 없음.
+        from services import music_recovery
+        rec = {"kind": "library", "slug": slug, "theme": music_recovery._theme_brief(theme),
+               "channel": job.get("channel"), "auto_image": bool(job.get("auto_image")),
+               "mix_id": mix.get("mix_id"), "minutes": 10.0, "stage": "rendering",
+               "tracks": [{k: r.get(k) for k in ("audio_id", "r2_key", "duration", "title", "tags")} for r in rows]}
+        music_jobs.merge_metadata(job_id, {"recovery": rec})
+        with music_recovery.Heartbeat(job_id):
+            try:
+                if bg_path:
+                    video = music_video.make_video(
+                        theme, mix, viz_spec=viz_spec, persist=True, background_path=bg_path,
+                    )
+                else:
+                    video = music_video.make_video(theme, mix, viz_spec=viz_spec, persist=True)
+                chk = music_recovery.check_render(video, channel=job.get("channel"))
+                if not chk["ok"]:
+                    raise music_recovery.RenderFailed(chk["reason"], video)
+                music_jobs.merge_metadata(job_id, {"render_check": chk})
+            except Exception as e:  # noqa: BLE001
+                if job.get("cancelled"):
+                    raise
+                logger.warning("[music-library] 영상 단계 실패 → 복구 시도 job=%s: %s", job_id, e)
+                video, _chk = music_recovery.recover_video(
+                    rec, job_id=job_id, first_error=e, bg_path=bg_path, step=lambda n: _step(n),
+                )
+        job["frame_thumb_key"] = video.get("frame_thumb_key")
 
         # ④ 사용된 트랙 used=true 마킹(best-effort).
         for r in rows:

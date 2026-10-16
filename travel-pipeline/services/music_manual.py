@@ -169,6 +169,12 @@ def start(
             "auto_image": auto,
         }
         _active_job = job_id
+    # 복구 F — 지난 작업에서 R2 저장이 실패해 보류된 Suno 곡이 있으면 백그라운드로 재취득(비차단).
+    try:
+        from services import music_recovery
+        threading.Thread(target=music_recovery.reacquire_pending_stores, name="reacquire", daemon=True).start()
+    except Exception:  # noqa: BLE001
+        pass
     meta = {"mood": key, "track_count": tc}
     if tag_combo:
         meta["tag_combo"] = tag_combo
@@ -246,73 +252,100 @@ def run(job_id: str) -> None:
             _step("음원")
 
     img_dir: str | None = None
+    hb = None
     try:
-        from services import music_produce, music_video, music_viz_analyzer, music_workout_style
+        from services import music_produce, music_recovery, music_video, music_viz_analyzer, music_workout_style
 
         tc = _clamp_track_count(job.get("track_count", 1))
         theme = _build_theme(
             job["mood"], tc, tag_combo=job.get("tag_combo"), channel=job.get("channel"),
         )
         slug = theme["slug"]
+        # 복구 A·E — 주제·곡수를 먼저 남기고(재시작 후에도 같은 주제로 재개), 1분 하트비트 시작.
+        cp = music_recovery.Checkpoint(job_id, {
+            "kind": "manual", "slug": slug, "theme": music_recovery._theme_brief(theme),
+            "track_count": tc, "minutes": 3.5, "channel": job.get("channel"),
+            "auto_image": bool(job.get("auto_image")),
+        })
+        cp.save()
+        hb = music_recovery.Heartbeat(job_id).__enter__()
 
-        _step("음원")
-        # 실제 제작: 가사(GPT) → suno 보컬 N곡 → 마스터 → 믹스. 일반 cron 과 동일(#42 곡수 N).
-        # #46: 수동 무드 키 = 14장르 id → 고정 태그·instrumental·재활용 적용.
-        result = music_produce.produce(
-            slug, n=tc,
-            genre_theme=theme["genre"], base_style=theme["style_prompt"],
-            style_prompt=theme["style_prompt"], track_type=theme.get("type", "vocal"),
-            lyric_tone=theme["lyric_tone"], minutes=3.5,
-            genre_id=None if job.get("tag_combo") else job["mood"],
-            action=(job.get("tag_combo") or {}).get("action") or "",
-            channel=job.get("channel"),
-            # 운동 채널만 운동 소재 풀(플랜 LLM 참고). where 는 None → 기존 기본 풀 그대로.
-            sub_theme_pool=music_workout_style.subtheme_pool(
-                (job.get("tag_combo") or {}).get("action"), channel=job.get("channel"),
-            ),
-            progress=_produce_progress,
-        )
-        mix = result.get("mix")
-        if not mix or not mix.get("mp3_url"):
-            raise RuntimeError("믹스 생성 실패(음원 없음).")
-
-        # #26-C 취소 체크 — 음원 생성까지 끝났어도 렌더 시작 전 취소면 큐 적재 없이 종료.
-        if job.get("cancelled"):
-            logger.info("[music-manual] 취소됨 → 렌더 생략 job=%s", job_id)
-            return
-
-        # 운동 채널 — 렌더 **전에** 배경 이미지를 만들어 렌더 1회로 끝낸다(PR-1).
-        # 생성·검수 실패면 bg_path=None → 아래는 기존과 똑같이 블랙 배경 렌더(반자동).
         bg_path: str | None = None
-        if job.get("auto_image"):
-            _step("이미지")
-            from services import music_auto_image
-            img_dir = tempfile.mkdtemp(prefix="autoimg_")
-            bg_path, job["image_review"] = music_auto_image.prepare_for_render(
-                job_id, (theme.get("tag_combo") or {}).get("action"), img_dir,
+        video: dict | None = None
+        try:
+            _step("음원")
+            # 실제 제작: 가사(GPT) → suno 보컬 N곡 → 마스터 → 믹스. 일반 cron 과 동일(#42 곡수 N).
+            # #46: 수동 무드 키 = 14장르 id → 고정 태그·instrumental·재활용 적용.
+            result = music_produce.produce(
+                slug, n=tc,
+                genre_theme=theme["genre"], base_style=theme["style_prompt"],
+                style_prompt=theme["style_prompt"], track_type=theme.get("type", "vocal"),
+                lyric_tone=theme["lyric_tone"], minutes=3.5,
+                genre_id=None if job.get("tag_combo") else job["mood"],
+                action=(job.get("tag_combo") or {}).get("action") or "",
+                channel=job.get("channel"),
+                # 운동 채널만 운동 소재 풀(플랜 LLM 참고). where 는 None → 기존 기본 풀 그대로.
+                sub_theme_pool=music_workout_style.subtheme_pool(
+                    (job.get("tag_combo") or {}).get("action"), channel=job.get("channel"),
+                ),
+                progress=_produce_progress,
+                checkpoint=cp,
             )
+            mix = result.get("mix")
+            if not mix or not mix.get("mp3_url"):
+                raise RuntimeError("믹스 생성 실패(음원 없음).")
+            cp.set_stage("rendering", mix_id=mix.get("mix_id"))
+
+            # #26-C 취소 체크 — 음원 생성까지 끝났어도 렌더 시작 전 취소면 큐 적재 없이 종료.
             if job.get("cancelled"):
                 logger.info("[music-manual] 취소됨 → 렌더 생략 job=%s", job_id)
                 return
 
-        _step("렌더")
-        viz_spec = music_viz_analyzer.analyze_song(theme, mix)
-        # tag_combo 경로: LLM 한국어 제목으로 title_kr 업그레이드(카드·영상 표시용).
-        if theme.get("tag_combo"):
-            try:
-                from services import music_meta
-                ko_copy, _ = music_meta._generate_title_copy_tag(theme)
-                if ko_copy:
-                    theme["title_kr"] = ko_copy
-            except Exception:  # noqa: BLE001
-                pass
-        # 일반 cron 과 동일: gpt-image 배경 + Remotion 풀 렌더 + record_pending(검토 큐 적재).
-        if bg_path:
-            video = music_video.make_video(
-                theme, mix, viz_spec=viz_spec, persist=True, background_path=bg_path,
+            # 운동 채널 — 렌더 **전에** 배경 이미지를 만들어 렌더 1회로 끝낸다(PR-1).
+            # 생성·검수 실패면 bg_path=None → 아래는 기존과 똑같이 블랙 배경 렌더(반자동).
+            if job.get("auto_image"):
+                _step("이미지")
+                from services import music_auto_image
+                img_dir = tempfile.mkdtemp(prefix="autoimg_")
+                bg_path, job["image_review"] = music_auto_image.prepare_for_render(
+                    job_id, (theme.get("tag_combo") or {}).get("action"), img_dir,
+                )
+                if job.get("cancelled"):
+                    logger.info("[music-manual] 취소됨 → 렌더 생략 job=%s", job_id)
+                    return
+
+            _step("렌더")
+            viz_spec = music_viz_analyzer.analyze_song(theme, mix)
+            # tag_combo 경로: LLM 한국어 제목으로 title_kr 업그레이드(카드·영상 표시용).
+            if theme.get("tag_combo"):
+                try:
+                    from services import music_meta
+                    ko_copy, _ = music_meta._generate_title_copy_tag(theme)
+                    if ko_copy:
+                        theme["title_kr"] = ko_copy
+                except Exception:  # noqa: BLE001
+                    pass
+            cp.update_theme(theme)  # 재시도·재개가 같은 제목으로 렌더하게
+            # 일반 cron 과 동일: gpt-image 배경 + Remotion 풀 렌더 + record_pending(검토 큐 적재).
+            if bg_path:
+                video = music_video.make_video(
+                    theme, mix, viz_spec=viz_spec, persist=True, background_path=bg_path,
+                )
+            else:
+                video = music_video.make_video(theme, mix, viz_spec=viz_spec, persist=True)
+            # 복구 B — 폴백(로고 없음)·로컬 경로·밀착 시트 로고 누락이면 렌더 실패로 본다.
+            chk = music_recovery.check_render(video, channel=job.get("channel"))
+            if not chk["ok"]:
+                raise music_recovery.RenderFailed(chk["reason"], video)
+            music_jobs.merge_metadata(job_id, {"render_check": chk})
+        except Exception as e:  # noqa: BLE001
+            # 복구 C — 곡을 하나라도 확보했으면 영상 단계만 다시(같은 곡·주제·가사, Suno 0회).
+            if job.get("cancelled") or not cp.tracks:
+                raise
+            logger.warning("[music-manual] 영상 단계 실패 → 복구 시도 job=%s: %s", job_id, e)
+            video, chk = music_recovery.recover_video(
+                cp.snapshot(), job_id=job_id, first_error=e, bg_path=bg_path, step=_step,
             )
-        else:
-            video = music_video.make_video(theme, mix, viz_spec=viz_spec, persist=True)
 
         job["video_url"] = video.get("video_url")
         job["mix_id"] = video.get("video_id")
@@ -335,6 +368,7 @@ def run(job_id: str) -> None:
             if att.get("error"):
                 job["image_review"] = {**job.get("image_review", {}), "ok": False,
                                        "summary": f"이미지 연결 실패: {att['error'][:120]}"}
+        cp.set_stage("done", mix_id=job["mix_id"])
         job["status"] = "done"
         _step("완료")
         try:
@@ -351,6 +385,8 @@ def run(job_id: str) -> None:
             pass
         logger.warning("[music-manual] 실패 job=%s: %s", job_id, e)
     finally:
+        if hb is not None:
+            hb.__exit__(None, None, None)
         if img_dir:
             shutil.rmtree(img_dir, ignore_errors=True)
         with _LOCK:

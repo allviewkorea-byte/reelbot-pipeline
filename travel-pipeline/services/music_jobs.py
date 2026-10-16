@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
@@ -107,6 +107,48 @@ def start_job(
     except Exception as e:  # noqa: BLE001 - 추적 실패는 파이프라인을 막지 않음
         logger.warning("[music-jobs] start 기록 실패(job=%s): %s", jid, _http_err(e))
     return jid
+
+
+def touch(job_id: str) -> None:
+    """하트비트(복구 E) — updated_at 만 갱신. 긴 단계(Suno·렌더)에서 1분마다."""
+    _patch(job_id, {})
+
+
+def list_unfinished() -> list[dict]:
+    """queued/running + completed_at null 전 채널(재시작 복구 E 판정용). 오류 시 빈 리스트."""
+    url, key = _supabase_cfg()
+    if not (url and key):
+        return []
+    try:
+        params = {"select": _SELECT, "status": "in.(queued,running)", "completed_at": "is.null",
+                  "order": "created_at.asc", "limit": "50"}
+        with httpx.Client(timeout=15.0) as c:
+            r = c.get(f"{url}/rest/v1/{_TABLE}", headers=_headers(key), params=params)
+            r.raise_for_status()
+            rows = r.json()
+        return rows if isinstance(rows, list) else []
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[music-jobs] unfinished 조회 실패: %s", _http_err(e))
+        return []
+
+
+def list_recent_with_metadata(limit: int = 50) -> list[dict]:
+    """최근 작업(15일, 채널 무관) — 곡 재취득(복구 F)이 metadata.recovery.pending_store 를 찾는다."""
+    url, key = _supabase_cfg()
+    if not (url and key):
+        return []
+    since = (datetime.now(timezone.utc) - timedelta(days=15)).isoformat()
+    try:
+        params = {"select": "job_id,metadata,updated_at", "created_at": f"gte.{since}",
+                  "order": "created_at.desc", "limit": str(max(1, min(200, limit)))}
+        with httpx.Client(timeout=15.0) as c:
+            r = c.get(f"{url}/rest/v1/{_TABLE}", headers=_headers(key), params=params)
+            r.raise_for_status()
+            rows = r.json()
+        return rows if isinstance(rows, list) else []
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[music-jobs] recent 조회 실패: %s", _http_err(e))
+        return []
 
 
 def claim_job(job_id: str, job_type: str, *, channel: str | None = None, metadata: dict | None = None) -> bool:

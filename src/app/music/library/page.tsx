@@ -4,6 +4,7 @@ import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState }
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { toast } from "sonner"
+import { JOB_LOST_MESSAGE } from "@/lib/music-jobs"
 import {
   ArrowLeft, Loader2, Music2, Play, Pause, Clapperboard,
   SkipForward, SkipBack, PictureInPicture2, ArrowUp, ArrowDown, X,
@@ -237,6 +238,7 @@ function MusicLibraryPageInner() {
         const tick = async () => {
           try {
             const sr = await fetch(`/api/music/library/create-video/status/${jid}`)
+            if (sr.status === 404) { toast.warning(JOB_LOST_MESSAGE); load(); resolve(); return }
             const sd = await sr.json()
             if (sd?.status === "done") {
               toast.success("영상 생성 완료 — 검토 대기에 추가되었습니다.")

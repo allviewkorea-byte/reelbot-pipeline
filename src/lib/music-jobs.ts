@@ -36,6 +36,19 @@ export const JOB_TYPE_LABEL: Record<MusicJobType, string> = {
   auto_run: "자동 회차",
 }
 
+// 복구 G — 상태 폴링이 404(서버 재시작으로 인메모리 작업 소실)면 무한 스피너 대신 이 안내.
+export const JOB_LOST_MESSAGE = "작업이 끊겼습니다(서버 재시작) — 진행 카드에서 복구 상태를 확인하세요."
+
+/** 복구 상태 문구(metadata.recovery_status / render_check) — 진행 카드 표시용. 없으면 null. */
+export function recoveryNote(job: MusicJob): string | null {
+  const m = job.metadata || {}
+  const s = typeof m.recovery_status === "string" ? m.recovery_status : null
+  const rc = m.render_check as { ok?: boolean; reason?: string } | undefined
+  if (s) return s
+  if (rc && rc.ok === false && rc.reason) return rc.reason
+  return null
+}
+
 export const STEP_LABEL: Record<string, string> = {
   theme: "주제 결정",
   vocal: "음원 생성",
