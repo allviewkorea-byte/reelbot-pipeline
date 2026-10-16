@@ -77,7 +77,7 @@ def test_prepare_for_render_exception_falls_back(monkeypatch, tmp_path):
 
 def test_retry_skipped_when_deadline_near(monkeypatch, tmp_path):
     from services import music_auto_image as mai
-    monkeypatch.setattr(mai, "build_prompt", lambda a: "p")
+    monkeypatch.setattr(mai, "build_prompt", lambda a, avoid=None: "p")
     calls = []
 
     def _gen(prompt, path):

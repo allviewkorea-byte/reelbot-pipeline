@@ -177,6 +177,9 @@ function MusicQueueGridPageInner() {
               if (sd?.image_review && sd.image_review.ok === false) {
                 toast.warning(`AI 배경 이미지 불합격 — 이미지 없이 추가됨 (${sd.image_review.summary || "사유 없음"})`)
               }
+              if (sd?.image_review?.reused) {
+                toast.warning(`AI 배경 이미지 생성분 전부 불합격 — 이전 합격 이미지를 재사용했습니다 (${sd.image_review.reused.archived_at || ""})`)
+              }
               load() // 큐 새로고침 → 새 pending 카드 등장(일반 카드)
               loadJobs() // 완료된 작업은 진행 카드에서 사라짐
               resolve(); return

@@ -200,7 +200,7 @@ def run_with_ai_image(job_id: str) -> None:
             pass
         tmpdir = Path(tempfile.mkdtemp(prefix="aiimg_"))
         bg_path, summary = music_auto_image.prepare_for_render(
-            job_id, (row.get("tag_combo") or {}).get("action"), str(tmpdir),
+            job_id, (row.get("tag_combo") or {}).get("action"), str(tmpdir), reuse=False,
         )
         if not bg_path:
             raise RuntimeError(f"AI 이미지 검수 불합격 — 기존 상태 유지. {summary.get('summary', '')}"[:300])
