@@ -365,7 +365,11 @@ def _run_publish(monkeypatch, channel, match):
     monkeypatch.setattr(music_uploads, "get_upload", lambda mix_id: row)
     monkeypatch.setattr(music_uploads, "get_localizations", lambda mix_id: None)
     monkeypatch.setattr(music_theme, "get_theme", lambda slug: None)
-    monkeypatch.setattr(md, "_ensure_localizations", lambda *a, **k: ({"source_lang": "ko", "meta": {}, "hashtags": ["#a"]}, [], True))
+    # 공개 직전 AI 고지 검사(설명란 머리 재조립 PR) — 정상 설명란·채널 설정을 채워 둔다.
+    from services import music_channel
+    monkeypatch.setattr(music_channel, "get_channel_config", lambda *, channel=None: {"ai_disclosure": "AI 고지"})
+    monkeypatch.setattr(md, "_ensure_localizations", lambda *a, **k: (
+        {"source_lang": "ko", "meta": {"ko": {"title": "t", "description": "멘트"}}, "hashtags": ["#a"]}, [], True))
     monkeypatch.setattr(music_translate, "detect_source_lang", lambda t: "ko")
     monkeypatch.setattr(music_meta, "build_hashtags", lambda *a: ["#a"])
     monkeypatch.setattr(r2_storage, "music_mix_url", lambda *a: "u")

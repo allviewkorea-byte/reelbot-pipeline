@@ -813,12 +813,6 @@ def build_description_parts(
     조립은 assemble_description 이 담당하며, 조립 순서·구분선·이모지·줄바꿈은
     기존 build_description 과 동일하다.
     """
-    vs = viz_spec or {}
-    cfg = config or {}
-    where = str(vs.get("location_en") or "").strip() or "City View"
-    flag = _flag(vs)
-    emoji = _emoji(theme, vs)
-
     # [1] 감성 멘트(LLM, 폴백 결정적) — 유일한 번역 대상
     intro = generate_vibe_intro(theme, viz_spec)
 
@@ -826,7 +820,26 @@ def build_description_parts(
     tl = build_tracklist(tracks, total_sec)
     tracklist = ("🎵 Track list\n\n" + "\n".join(tl)) if tl else ""
 
-    # [3] 고정 정보 블록(머리 부분) — 번역 금지
+    return {
+        "intro": intro,
+        "tracklist": tracklist,
+        # [3] 고정 정보 블록(머리 부분) — 번역 금지
+        "info_head": build_info_head(theme, viz_spec, config),
+        "copyright": build_copyright(theme, channel_name=channel_name),
+    }
+
+
+def build_info_head(theme: dict, viz_spec: dict | None, config: dict | None) -> str:
+    """설명란 머리(정보줄·AI 고지·Spotify·소셜). 번역하지 않는 고정 블록.
+
+    build_description_parts 와 공개 직전 재조립(rebuild_description_head)이 같이 쓴다 —
+    두 경로가 같은 문자열을 만들어야 재조립이 기존 결과를 바꾸지 않는다.
+    """
+    vs = viz_spec or {}
+    cfg = config or {}
+    where = str(vs.get("location_en") or "").strip() or "City View"
+    flag = _flag(vs)
+    emoji = _emoji(theme, vs)
     info: list[str] = []
     info.append(f"📍 where;{where} {flag} {emoji}")
     ai = (cfg.get("ai_disclosure") or "").strip()
@@ -844,16 +857,15 @@ def build_description_parts(
         social.append(f"🎵 TikTok: @{cfg['tiktok'].strip().lstrip('@')}")
     if social:
         info.extend(social)
-    return {
-        "intro": intro,
-        "tracklist": tracklist,
-        "info_head": "\n".join(info),
-        # 채널명 — 인자 > theme["channel"] 별 env·기본값. theme 에 channel 이 없으면 where.
-        "copyright": (
-            f"Copyright Ⓒ {channel_name or _channel_name(theme.get('channel'))}"
-            " All rights reserved."
-        ),
-    }
+    return "\n".join(info)
+
+
+def build_copyright(theme: dict, *, channel_name: str | None = None) -> str:
+    """Copyright 줄. 채널명 — 인자 > theme["channel"] 별 env·기본값. theme 에 channel 이 없으면 where."""
+    return (
+        f"Copyright Ⓒ {channel_name or _channel_name(theme.get('channel'))}"
+        " All rights reserved."
+    )
 
 
 def assemble_description(
@@ -881,3 +893,40 @@ def assemble_description(
         blocks.append(" ".join(hashtags))
     sep = f"\n\n{SEP}\n\n"
     return sep.join(blocks).strip()
+
+
+def rebuild_description_head(desc: str, lang: str, info_head: str, copyright_line: str) -> str:
+    """완성된 설명란(언어별)에서 **머리 블록만** 새 info_head·copyright 로 교체한다.
+
+    공개 직전 재조립용. 감성 멘트(번역본)·트랙리스트·고정 안내문·끝의 해시태그는 그대로 둔다.
+    머리 블록 = assemble_description 이 만드는 "info_head \n\n 고정안내문 \n copyright" 블록.
+    - 그 블록을 고정 안내문(fixed_outro(lang))으로 찾는다. 찾으면 안내문 앞(=머리)과 바로 뒤
+      Copyright 줄만 바꾸고, 그 뒤(해시태그 등)는 보존한다.
+    - 못 찾으면(검수 UI 에서 손으로 고친 경우 등) 첫 블록을 감성 멘트로 보고 표준 순서로 다시
+      조립한다. 해시태그는 호출부(publish)의 병합 단계가 다시 붙인다.
+    같은 입력으로 만든 설명란이면 결과가 원본과 바이트 동일하다(멱등).
+    """
+    from services.music_i18n import fixed_outro
+
+    sep = f"\n\n{SEP}\n\n"
+    marker = "\n\n" + fixed_outro(lang) + "\n"
+    blocks = (desc or "").split(sep)
+    for k, blk in enumerate(blocks):
+        pos = blk.find(marker)
+        if pos < 0:
+            continue
+        after = blk[pos + len(marker):]
+        nl = after.find("\n")
+        first = after if nl < 0 else after[:nl]
+        if first.startswith("Copyright"):
+            rest = "" if nl < 0 else after[nl:]   # Copyright 줄 다음(해시태그 등) 보존
+        else:
+            rest = "\n" + after if after else ""  # Copyright 줄이 없던 블록 — 원래 뒤 내용을 그대로 둔다
+        blocks[k] = info_head + marker + copyright_line + rest
+        return sep.join(blocks)
+    intro = blocks[0] if blocks else ""
+    tracklist = next((b for b in blocks[1:] if b.startswith("🎵 Track list")), "")
+    return assemble_description(
+        {"intro": intro, "tracklist": tracklist, "info_head": info_head, "copyright": copyright_line},
+        lang,
+    )
