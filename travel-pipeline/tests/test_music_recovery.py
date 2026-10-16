@@ -53,9 +53,16 @@ def test_check_render_fallback_and_local_path(monkeypatch):
     assert rc.check_render(OK_VIDEO)["ok"] is True
 
 
-@pytest.mark.parametrize("all_logo,ok", [(False, False), (True, True)])
-def test_check_render_vision_sheet(monkeypatch, all_logo, ok):
+@pytest.mark.parametrize("all_logo,mode,ok", [
+    (False, "block", False), (True, "block", True),   # block: 비전 판정으로 차단
+    (False, None, True), (True, None, True),          # 기본 warn: 기록만, 차단 안 함
+])
+def test_check_render_vision_sheet(monkeypatch, all_logo, mode, ok):
     monkeypatch.delenv("MUSIC_RENDER_CHECK", raising=False)
+    if mode:
+        monkeypatch.setenv("MUSIC_RENDER_CHECK_VISION", mode)
+    else:
+        monkeypatch.delenv("MUSIC_RENDER_CHECK_VISION", raising=False)
     monkeypatch.setattr(rc, "build_contact_sheet", lambda url, times, dest: Path(dest).write_bytes(b"jpg") and dest)
     monkeypatch.setattr(rc, "_logo_text", lambda ch: "GYM;_____")
     seen = {}
@@ -66,6 +73,7 @@ def test_check_render_vision_sheet(monkeypatch, all_logo, ok):
     monkeypatch.setattr(rc, "vision_logo_check", _vision)
     r = rc.check_render(OK_VIDEO, channel="workout_music")
     assert r["ok"] is ok and seen["logo"] == "GYM;_____" and seen["cells"] == len(rc.frame_times(600.0))
+    assert ("warning" in r) is (not all_logo and mode is None)  # warn 모드에서 로고 없음 판정은 경고로 남는다
 
 
 def test_vision_failure_only_skips_that_check(monkeypatch):

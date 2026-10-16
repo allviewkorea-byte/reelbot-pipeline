@@ -150,6 +150,16 @@ def _check_enabled() -> bool:
     return (os.getenv("MUSIC_RENDER_CHECK") or "on").strip().lower() not in ("0", "off", "false", "no")
 
 
+def _vision_blocks() -> bool:
+    """비전(밀착 시트) 판정으로 차단할지. 기본 warn — 기록만 하고 업로드를 막지 않는다.
+
+    밝은 배경 위 흰 로고를 작은 칸에서 "없음"으로 잘못 볼 수 있어, 정확도 확인 전까지는 경고만 남긴다
+    (대표 결정 2026-10-16). 로고 누락의 실제 원인(ffmpeg 폴백·비 http mp4)은 확정 신호로 계속 차단한다.
+    env MUSIC_RENDER_CHECK_VISION=block 일 때만 비전 판정으로 차단.
+    """
+    return (os.getenv("MUSIC_RENDER_CHECK_VISION") or "warn").strip().lower() == "block"
+
+
 def frame_times(duration: float) -> list[float]:
     """청크 구간마다 1프레임(구간 가운데) 시각. 렌더와 같은 청크 계획(music_video._plan_chunks)."""
     if not duration or duration <= 0:
@@ -240,10 +250,14 @@ def check_render(video: dict | None, *, channel: str | None = None) -> dict:
         if _check_enabled():
             out["vision"] = _vision_part(url, float(v.get("duration") or 0), channel)
             if out["vision"].get("all_logo") is False:
-                out = {"ok": False, "reason": f"렌더 검증 실패(로고 없음, 칸 {out['vision'].get('missing_cells')})",
-                       "vision": out["vision"]}
-    logger.warning("[render-check] mix_id=%s ok=%s %s%s", mix_id, out["ok"], out["reason"] or "정상",
-                   f" vision={out.get('vision')}" if out.get("vision") else "")
+                if _vision_blocks():
+                    out = {"ok": False, "reason": f"렌더 검증 실패(로고 없음, 칸 {out['vision'].get('missing_cells')})",
+                           "vision": out["vision"]}
+                else:
+                    out["warning"] = f"비전 검증 경고(로고 없음으로 판정, 칸 {out['vision'].get('missing_cells')}) — warn 모드라 차단 안 함"
+    logger.warning("[render-check] mix_id=%s ok=%s %s%s%s", mix_id, out["ok"], out["reason"] or "정상",
+                   f" vision={out.get('vision')}" if out.get("vision") else "",
+                   f" ⚠️ {out['warning']}" if out.get("warning") else "")
     return out
 
 
