@@ -1,15 +1,16 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { Suspense, useCallback, useEffect, useState } from "react"
 import Link from "next/link"
+import { useSearchParams } from "next/navigation"
 import { toast } from "sonner"
 import { ArrowLeft, Loader2, Save, ExternalLink, CheckCircle2, AlertTriangle } from "lucide-react"
 import { API_BASE } from "@/lib/proxy"
 import {
   MUSIC_CHANNELS,
-  MUSIC_CHANNEL_ID,
-  MUSIC_CHANNEL_NAME,
   DEFAULT_MUSIC_CONFIG,
+  resolveMusicChannel,
+  withChannel,
   type MusicChannelConfig,
 } from "@/lib/music"
 
@@ -89,17 +90,34 @@ const FIELDS: { key: keyof MusicChannelConfig; label: string; placeholder: strin
 ]
 
 export default function MusicSettingsPage() {
+  return (
+    <Suspense fallback={null}>
+      <MusicSettingsPageInner />
+    </Suspense>
+  )
+}
+
+function MusicSettingsPageInner() {
+  const searchParams = useSearchParams()
+  // 선택된 채널 — URL 쿼리가 단일 진실. 미지정·미등록 → where(현행과 같은 링크·조회·저장).
+  const channel = resolveMusicChannel(searchParams.get("channel"))
+  // key=channel — 채널이 바뀌면 폼 상태를 통째로 새로 만든다(이전 채널 값이 남아 저장되는 사고 방지).
+  return <MusicSettingsBody key={channel} channel={channel} />
+}
+
+function MusicSettingsBody({ channel }: { channel: string }) {
+  const chInfo = MUSIC_CHANNELS[channel]
   const [config, setConfig] = useState<MusicChannelConfig>(DEFAULT_MUSIC_CONFIG)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    fetch(`/api/music/config?channelId=${MUSIC_CHANNEL_ID}`)
+    fetch(`/api/music/config?channelId=${channel}`)
       .then((r) => r.json())
       .then((d) => { if (d?.config) setConfig(d.config) })
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [])
+  }, [channel])
 
   const update = (key: keyof MusicChannelConfig, v: string) => setConfig((c) => ({ ...c, [key]: v }))
 
@@ -109,7 +127,7 @@ export default function MusicSettingsPage() {
       const res = await fetch("/api/music/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channelId: MUSIC_CHANNEL_ID, config }),
+        body: JSON.stringify({ channelId: channel, config }),
       })
       const d = await res.json()
       if (!d?.success) throw new Error(d?.error || "저장 실패")
@@ -120,30 +138,32 @@ export default function MusicSettingsPage() {
     } finally {
       setSaving(false)
     }
-  }, [config])
+  }, [config, channel])
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-auto p-4 md:p-6">
       <header className="pl-10 md:pl-0">
         {/* 모바일: 버튼 가로 한 줄(좌/우 정렬, 줄바꿈 없음). 데스크탑은 아래 인라인 행 사용. */}
         <div className="mb-3 flex items-center justify-between gap-2 md:hidden">
-          <Link href="/music" className="inline-flex min-h-[44px] items-center gap-1.5 whitespace-nowrap rounded-lg border border-border px-3 text-sm text-muted-foreground hover:bg-white/5 hover:text-foreground">
+          <Link href={withChannel("/music", channel)} className="inline-flex min-h-[44px] items-center gap-1.5 whitespace-nowrap rounded-lg border border-border px-3 text-sm text-muted-foreground hover:bg-white/5 hover:text-foreground">
             <ArrowLeft className="h-4 w-4" /> 대시보드
           </Link>
-          <Link href="/music/design" className="inline-flex min-h-[44px] items-center gap-1.5 whitespace-nowrap rounded-lg border border-border px-3 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground">
+          <Link href={withChannel("/music/design", channel)} className="inline-flex min-h-[44px] items-center gap-1.5 whitespace-nowrap rounded-lg border border-border px-3 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground">
             디자인 본부
           </Link>
         </div>
         {/* 데스크탑 인라인 행(기존 그대로) + 제목(모바일 공통) */}
         <div className="flex items-center gap-3">
-          <Link href="/music" className="hidden items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-white/5 hover:text-foreground md:inline-flex">
+          <Link href={withChannel("/music", channel)} className="hidden items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-white/5 hover:text-foreground md:inline-flex">
             <ArrowLeft className="h-4 w-4" /> 대시보드
           </Link>
           <div>
-            <h1 className="text-xl font-semibold text-foreground">채널 설정</h1>
+            <h1 className="text-xl font-semibold text-foreground">
+              채널 설정 <span className="text-base font-normal text-muted-foreground">· {chInfo.icon} {chInfo.name}</span>
+            </h1>
             <p className="text-sm text-muted-foreground">공개 업로드 본문·SEO 에 쓰이는 운영 정보입니다. 빈 칸은 본문에 출력되지 않아요.</p>
           </div>
-          <Link href="/music/design" className="ml-auto hidden items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground md:inline-flex">
+          <Link href={withChannel("/music/design", channel)} className="ml-auto hidden items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground md:inline-flex">
             디자인 본부
           </Link>
         </div>
@@ -207,7 +227,7 @@ export default function MusicSettingsPage() {
             <h2 className="text-sm font-semibold text-foreground">미리보기 — 본문에 이렇게 들어가요</h2>
             <p className="text-[11px] text-muted-foreground">제목·트랙리스트·해시태그는 곡 분석 기반으로 영상마다 자동 생성됩니다.</p>
             <pre className="mt-1 whitespace-pre-wrap break-words rounded-md border border-border bg-background p-3 text-xs leading-relaxed text-foreground/90">
-{previewText(config)}
+{previewText(config, COPYRIGHT_PREVIEW_NAME[channel] || chInfo.name)}
             </pre>
           </div>
         </div>
@@ -216,8 +236,12 @@ export default function MusicSettingsPage() {
   )
 }
 
+// 미리보기 Copyright 채널명 — 백엔드 music_meta._CHANNEL_NAME_DEFAULT 와 맞춘다(env 로 덮으면 그 값이 실제로 쓰임).
+// where 는 표 밖 → chInfo.name(= MUSIC_CHANNEL_NAME, 기존 미리보기와 동일).
+const COPYRIGHT_PREVIEW_NAME: Record<string, string> = { workout_music: "2SHAPE" }
+
 // 입력값 반영 미리보기(백엔드 music_meta 와 동일 규칙의 축약 버전 — 빈 값은 생략).
-function previewText(c: MusicChannelConfig): string {
+function previewText(c: MusicChannelConfig, channelName: string): string {
   const SEP = "━".repeat(20)
   const blocks: string[] = []
   const s1 = ["📍 Dawn Highway 🌍 🌃", "", "오늘 하루도 수고 많으셨어요. (자동 생성 멘트)", "", "오늘도 좋은 음악과 함께하세요 🎧"]
@@ -234,7 +258,7 @@ function previewText(c: MusicChannelConfig): string {
   if (social.length) blocks.push(social.join("\n"))
   blocks.push("🎵 Track list\n\n[00:00:00] (곡 제목 자동)\n[00:03:30] (곡 제목 자동)")
   blocks.push("🎵 가장 마음에 드는 노래는 무엇인가요? …\n🔔 채널 구독 …")
-  blocks.push(`Copyright Ⓒ ${MUSIC_CHANNEL_NAME} All rights reserved.`)
+  blocks.push(`Copyright Ⓒ ${channelName} All rights reserved.`)
   blocks.push("#playlist #플레이리스트 #citypop #시티팝 … (30~50개 자동)")
   return blocks.join(`\n\n${SEP}\n\n`)
 }

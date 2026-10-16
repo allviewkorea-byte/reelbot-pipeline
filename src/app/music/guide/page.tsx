@@ -1,7 +1,9 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { Suspense, useEffect, useState } from "react"
 import Link from "next/link"
+import { useSearchParams } from "next/navigation"
+import { withChannel } from "@/lib/music"
 import { ArrowLeft, Loader2, TrendingUp } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 
@@ -29,6 +31,16 @@ function fmtViews(n: number): string {
 }
 
 export default function MusicGuidePage() {
+  return (
+    <Suspense fallback={null}>
+      <MusicGuidePageInner />
+    </Suspense>
+  )
+}
+
+function MusicGuidePageInner() {
+  // 들어온 채널로 돌아간다(미지정 → where, 기존 "/music" 그대로).
+  const channel = useSearchParams().get("channel")
   const [palette, setPalette] = useState<string[]>([])
   const [recent, setRecent] = useState<RecentTheme[]>([])
   const [trend, setTrend] = useState<TrendInsight | null>(null)
@@ -57,7 +69,7 @@ export default function MusicGuidePage() {
     <div className="flex h-full min-h-0 flex-col gap-6 overflow-auto p-4 md:p-6">
       <header className="flex items-center gap-3 pl-10 md:pl-0">
         <Link
-          href="/music"
+          href={withChannel("/music", channel)}
           className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-white/5 hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" /> 큐로
