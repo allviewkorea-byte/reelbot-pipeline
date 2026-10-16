@@ -37,7 +37,14 @@ _CHANNEL_NAME_ENV: dict[str, tuple[str, ...]] = {
 # env 미설정 시 채널별 기본값. where 는 기존 리터럴 그대로(회귀 0).
 _CHANNEL_NAME_DEFAULT: dict[str, str] = {
     "rooftop_music": "Revezen",
-    "workout_music": "2SHAPE",
+    "workout_music": "2주안에몸매만들기",
+}
+
+# 운동 채널 설명란 정보줄의 축 문구(axis_for_action 의 strength/cardio/warmup).
+_WORKOUT_INFO_AXIS: dict[str, str] = {
+    "strength": "근력 운동 플레이리스트",
+    "cardio": "러닝·유산소 플레이리스트",
+    "warmup": "스트레칭·워밍업 플레이리스트",
 }
 
 
@@ -835,13 +842,20 @@ def build_info_head(theme: dict, viz_spec: dict | None, config: dict | None) -> 
     build_description_parts 와 공개 직전 재조립(rebuild_description_head)이 같이 쓴다 —
     두 경로가 같은 문자열을 만들어야 재조립이 기존 결과를 바꾸지 않는다.
     """
+    from services.music_workout_style import axis_for_action, is_workout_channel
+
     vs = viz_spec or {}
     cfg = config or {}
-    where = str(vs.get("location_en") or "").strip() or "City View"
-    flag = _flag(vs)
-    emoji = _emoji(theme, vs)
     info: list[str] = []
-    info.append(f"📍 where;{where} {flag} {emoji}")
+    if is_workout_channel(theme.get("channel")):
+        # 운동 채널엔 where 브랜드(📍 where;도시)를 쓰지 않는다 — 채널명 · 운동 축.
+        action = (theme.get("tag_combo") or {}).get("action")
+        info.append(f"💪 {_channel_name(theme.get('channel'))} · {_WORKOUT_INFO_AXIS[axis_for_action(action)]}")
+    else:
+        where = str(vs.get("location_en") or "").strip() or "City View"
+        flag = _flag(vs)
+        emoji = _emoji(theme, vs)
+        info.append(f"📍 where;{where} {flag} {emoji}")
     ai = (cfg.get("ai_disclosure") or "").strip()
     if ai:
         info.append(ai)

@@ -92,3 +92,26 @@ def test_publish_aborts_without_ai_disclosure(monkeypatch):
     with pytest.raises(HTTPException) as ei:
         _publish(monkeypatch, ai="")
     assert ei.value.status_code == 500 and "AI 고지" in ei.value.detail
+
+
+@pytest.mark.parametrize("action,expected", [
+    ("workout", "근력 운동 플레이리스트"), ("running", "러닝·유산소 플레이리스트"),
+    ("yoga", "스트레칭·워밍업 플레이리스트"), (None, "근력 운동 플레이리스트"),
+])
+def test_workout_info_line_has_no_where_brand(monkeypatch, action, expected):
+    monkeypatch.delenv("MUSIC_CHANNEL_NAME_WORKOUT", raising=False)
+    theme = dict(THEME, tag_combo={"action": action} if action else {})
+    head = music_meta.build_info_head(theme, VIZ, {"ai_disclosure": AI})
+    assert head.splitlines()[0] == f"💪 2주안에몸매만들기 · {expected}"
+    assert "where;" not in head
+    assert music_meta.build_copyright(theme) == "Copyright Ⓒ 2주안에몸매만들기 All rights reserved."
+
+
+def test_workout_channel_name_env_wins(monkeypatch):
+    monkeypatch.setenv("MUSIC_CHANNEL_NAME_WORKOUT", "GYMNAME")
+    assert music_meta.build_info_head(THEME, VIZ, None).startswith("💪 GYMNAME · ")
+
+
+@pytest.mark.parametrize("theme", [{"slug": "s"}, {"slug": "s", "channel": "rooftop_music"}])
+def test_where_info_line_unchanged(theme):
+    assert music_meta.build_info_head(theme, VIZ, None).startswith("📍 where;Seoul ")

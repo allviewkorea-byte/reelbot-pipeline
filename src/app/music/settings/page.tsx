@@ -238,7 +238,7 @@ function MusicSettingsBody({ channel }: { channel: string }) {
 
 // 미리보기 Copyright 채널명 — 백엔드 music_meta._CHANNEL_NAME_DEFAULT 와 맞춘다(env 로 덮으면 그 값이 실제로 쓰임).
 // where 는 표 밖 → chInfo.name(= MUSIC_CHANNEL_NAME, 기존 미리보기와 동일).
-const COPYRIGHT_PREVIEW_NAME: Record<string, string> = { workout_music: "2SHAPE" }
+const COPYRIGHT_PREVIEW_NAME: Record<string, string> = { workout_music: "2주안에몸매만들기" }
 
 // 입력값 반영 미리보기(백엔드 music_meta 와 동일 규칙의 축약 버전 — 빈 값은 생략).
 function previewText(c: MusicChannelConfig, channelName: string): string {
