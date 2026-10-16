@@ -6,7 +6,7 @@ import { toast } from "sonner"
 import { Users, Eye, BarChart3, Video, ClipboardList, Play, Square, Loader2, Settings, Palette, Music2 } from "lucide-react"
 import { PLATFORM_BADGE, PLATFORM_LABELS, TRACK_BADGE, TRACK_LABELS } from "@/lib/channels"
 import {
-  MUSIC_CHANNELS, MUSIC_CHANNEL_ID, channelParam, fmtCount,
+  AUTO_RUN_CHANNELS, MUSIC_CHANNELS, channelParam, fmtCount, normalizePublishHours,
   estimateProductionTime, fmtMinutes, resolveMusicChannel, withChannel, type MusicMetrics,
 } from "@/lib/music"
 import { useSearchParams } from "next/navigation"
@@ -45,14 +45,16 @@ function MusicDashboardPageInner() {
   const [busy, setBusy] = useState(false)
   const [activeJobs, setActiveJobs] = useState<MusicJob[]>([])
 
+  // 채널별 상태(PR-2a) — 가동·공개·AI 표시·하루 개수·곡수를 **지금 화면 채널** 행에서 읽고 쓴다.
+  // where 화면은 channel === "rooftop_music"(기존 MUSIC_CHANNEL_ID)라 요청이 이전과 바이트 동일.
   const loadStatus = useCallback(() => {
-    fetch(`/api/channel-status?channelId=${MUSIC_CHANNEL_ID}`)
+    fetch(`/api/channel-status?channelId=${channel}`)
       .then((r) => r.json())
       .then((d) => {
         if (d?.success) setStatus({ isActive: d.isActive, mode: d.mode, syntheticMedia: d.syntheticMedia, dailyCap: d.dailyCap, trackCount: d.trackCount })
       })
       .catch(() => {})
-  }, [])
+  }, [channel])
 
   useEffect(() => {
     loadStatus()
@@ -83,7 +85,7 @@ function MusicDashboardPageInner() {
         const res = await fetch("/api/channel-status", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ channelId: MUSIC_CHANNEL_ID, ...body }),
+          body: JSON.stringify({ channelId: channel, ...body }),
         })
         const d = await res.json()
         if (!d?.success) throw new Error(d?.error || "저장 실패")
@@ -95,7 +97,7 @@ function MusicDashboardPageInner() {
         setBusy(false)
       }
     },
-    [loadStatus],
+    [loadStatus, channel],
   )
 
   const { isActive, mode, syntheticMedia, dailyCap, trackCount } = status
@@ -197,6 +199,8 @@ function MusicDashboardPageInner() {
             </div>
             <span className="text-muted-foreground">개</span>
           </div>
+          {/* 공개 시각(PR-2a) — 자동 회차 채널(운동)만. where 화면엔 없다. */}
+          {AUTO_RUN_CHANNELS.includes(channel) && <PublishHoursInput key={channel} channel={channel} dailyCap={dailyCap} />}
           </div>{/* /토글 그룹 */}
 
           {/* 곡수 + 시작(모바일) — 같은 행(곡수 좌 / 시작 우). 예상시간은 곡수 아래. PC contents. */}
@@ -307,6 +311,83 @@ function MusicDashboardPageInner() {
 
 // #41 곡수 입력창(1~100) — 숫자 입력 + [적용] + 예상 영상 길이·제작 시간·크레딧(접기/펼치기).
 // estimateProductionTime(클라이언트 계산, API 호출 없음)으로 곡수↔길이(#40) 반영.
+// 자동 회차 공개 시각(시 단위 2개, 기본 06·18). 분은 백엔드가 매일·회차마다 랜덤으로 정한다.
+// 제작은 공개 120분 전에 시작해 유튜브 예약 공개(publishAt)로 올린다. 하루 개수만큼 앞에서부터 쓴다.
+function PublishHoursInput({ channel, dailyCap }: { channel: string; dailyCap: number }) {
+  const [saved, setSaved] = useState<number[] | null>(null)
+  const [vals, setVals] = useState<string[]>(["6", "18"])
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    fetch(`/api/music/publish-hours?channelId=${encodeURIComponent(channel)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!alive || !d?.success) return
+        const h = normalizePublishHours(d.hours)
+        setSaved(h)
+        setVals([String(h[0] ?? 6), String(h[1] ?? 18)])
+      })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [channel])
+
+  const nums = vals.map((v) => Number(v))
+  const valid = nums.every((n) => Number.isInteger(n) && n >= 0 && n <= 23) && nums[0] !== nums[1]
+  const next = valid ? normalizePublishHours(nums) : null
+  const changed = next !== null && JSON.stringify(next) !== JSON.stringify(saved)
+
+  const save = async () => {
+    if (!next) return
+    setSaving(true)
+    try {
+      const res = await fetch("/api/music/publish-hours", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channelId: channel, hours: next }),
+      })
+      const d = await res.json()
+      if (!d?.success) throw new Error(d?.error || "저장 실패")
+      setSaved(normalizePublishHours(d.hours))
+      toast.success(`공개 시각 저장: ${normalizePublishHours(d.hours).map((h) => `${h}시대`).join(" · ")}`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "저장 실패")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div
+      className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-2 text-xs font-medium"
+      title={`자동 회차 공개 시각(분은 매일 랜덤). 제작은 2시간 전 시작, 유튜브 예약 공개. 하루 ${dailyCap}개 → 앞에서부터 ${Math.min(dailyCap, 2)}개 사용`}
+    >
+      <span className="text-muted-foreground">공개</span>
+      {vals.map((v, i) => (
+        <input
+          key={i}
+          type="number"
+          min={0}
+          max={23}
+          value={v}
+          aria-label={`공개 시각 ${i + 1}`}
+          onChange={(e) => setVals((p) => p.map((x, j) => (j === i ? e.target.value : x)))}
+          className="h-7 w-11 rounded-md border border-border bg-background px-1 text-center text-xs text-foreground"
+        />
+      ))}
+      <span className="text-muted-foreground">시대</span>
+      <button
+        type="button"
+        disabled={saving || !changed}
+        onClick={save}
+        className="rounded-md bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-40"
+      >
+        저장
+      </button>
+    </div>
+  )
+}
+
 function TrackCountInput({ current, busy, onApply }: { current: number; busy: boolean; onApply: (n: number) => void }) {
   // current 변경 시 부모가 key={current} 로 재마운트 → 입력값 재초기화(setState-in-effect 회피).
   const [val, setVal] = useState(String(current))

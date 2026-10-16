@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from services import trend_settings_store
 from services.trend_analyzer import analyze_category
@@ -59,6 +60,14 @@ def run_daily_analysis() -> None:
     logger.info("일일 트렌드 분석 종료")
 
 
+def _music_auto_run_tick() -> None:
+    try:
+        from services import music_auto_run
+        music_auto_run.tick()
+    except Exception:  # noqa: BLE001 - tick 실패가 스케줄러를 멈추지 않게
+        logger.exception("[auto-run] tick 실패")
+
+
 def start_scheduler() -> BackgroundScheduler:
     """FastAPI lifespan 에서 호출. 매일 04:00 KST 트리거를 등록한다."""
     global _scheduler
@@ -75,9 +84,19 @@ def start_scheduler() -> BackgroundScheduler:
         id="daily_trend_analysis",
         replace_existing=True,
     )
+    # 음악 채널 자동 회차(PR-2a) — 1분마다 시작할 회차를 찾는다(외부 cron 불필요).
+    # 대상은 music_auto_run.auto_run_channels()(기본 운동 채널만). MUSIC_AUTO_RUN=off 로 끈다.
+    scheduler.add_job(
+        _music_auto_run_tick,
+        trigger=IntervalTrigger(seconds=60),
+        id="music_auto_run_tick",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
     scheduler.start()
     _scheduler = scheduler
-    logger.info("트렌드 스케줄러 시작 (매일 04:00 KST)")
+    logger.info("트렌드 스케줄러 시작 (매일 04:00 KST) + 음악 자동 회차 tick(1분)")
     return scheduler
 
 

@@ -130,6 +130,13 @@ def produce(background: BackgroundTasks, authorization: str | None = Header(defa
     if not _authorized_cron(authorization):
         raise HTTPException(status_code=401, detail="unauthorized")
 
+    # PR-2a: 자동 생산은 백엔드 스케줄러(services/music_auto_run, 채널별 회차)로 일원화.
+    # 이 라우트(Vercel cron UTC 00:00 · cron-job.org 8/9/10시)는 채널 구분·가동 게이트 없이
+    # where 영상을 만들던 옛 경로라 기본 no-op 이다. MUSIC_LEGACY_PRODUCE=on 일 때만 옛 동작.
+    if (os.getenv("MUSIC_LEGACY_PRODUCE") or "").strip().lower() not in ("1", "on", "true", "yes"):
+        logger.warning("[music-produce] 옛 cron 호출 수신 → no-op(자동 생산은 [auto-run] 스케줄러가 담당)")
+        return {"ok": True, "skipped": True, "reason": "자동 생산은 채널별 스케줄러([auto-run])로 일원화됨"}
+
     global _produced_date, _produced_at
     today = datetime.now(_KST).strftime("%Y-%m-%d")
     now_utc = datetime.now(timezone.utc)

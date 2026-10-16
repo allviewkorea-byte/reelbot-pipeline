@@ -397,6 +397,10 @@ class PublishBody(BaseModel):
     """공개 업로드 옵션. 프론트 프록시가 채널 토글에서 주입한다(미지정 시 백엔드 env 폴백)."""
 
     synthetic_media: bool | None = None
+    # 자동 회차(PR-2a) 전용 — 대시보드 프록시는 보내지 않는다(미지정 → 기존 동작 그대로).
+    privacy: str | None = None          # "private" 면 비공개 업로드(기본 public)
+    publish_at: str | None = None       # RFC3339(UTC). 있으면 private + status.publishAt(예약 공개)
+    require_remotion: bool = False      # True 면 폴백 렌더(첫프레임 없음)·비 http mp4 는 업로드 거부
 
 
 @router.post("/queue/{mix_id}/publish")
@@ -562,6 +566,13 @@ def publish(mix_id: str, body: PublishBody | None = None):
                 show_playlist=(True if _sp is None else bool(_sp)),
             )
         new_mp4_url = vres["video_url"]
+        if body and body.require_remotion and (
+            not vres.get("frame_thumb_key") or not str(new_mp4_url or "").startswith("http")
+        ):
+            raise HTTPException(
+                status_code=500,
+                detail="Remotion 렌더가 아님(ffmpeg 폴백 또는 비 http 영상) — 업로드하지 않았습니다(검토대기에 남김).",
+            )
 
         # 3) 유튜브 썸네일 = 영상 첫 프레임(#20, Remotion 텍스트 포함) — 있으면 다운로드해 사용,
         #    없으면(폴백 렌더) 대표가 올린 이미지로.
@@ -576,8 +587,12 @@ def publish(mix_id: str, body: PublishBody | None = None):
                 logger.warning("[music-dashboard] 첫프레임 썸네일 다운로드 실패(업로드본 사용): %s", e)
 
         # 4) 재생성 mp4 + 썸네일 set + 풍부화 제목·본문(#37)으로 공개 업로드.
+        _privacy = "public"
+        _publish_at = (body.publish_at if body else None) or None
+        if _publish_at or (body and (body.privacy or "").strip().lower() == "private"):
+            _privacy = "private"  # 예약 공개는 private + publishAt 이어야 한다(유튜브 규칙)
         result = upload_music_video(
-            new_mp4_url, theme, mix, privacy="public", thumbnail_path=yt_thumb,
+            new_mp4_url, theme, mix, privacy=_privacy, thumbnail_path=yt_thumb, publish_at=_publish_at,
             title=base_meta.get("title") or None,
             description=base_meta.get("description") or None,
             synthetic_media=(body.synthetic_media if body else None),
