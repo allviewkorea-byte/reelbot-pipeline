@@ -296,7 +296,7 @@ function SidebarBody({ activeChannel }: { activeChannel: string }) {
               onNavigate={closeMobile}
             />
             <ChannelCard
-              href="/music"
+              href={withChannel("/music", DEFAULT_MUSIC_CHANNEL)}
               active={musicActive}
               icon="🎵"
               name={MUSIC_CHANNEL_NAME}

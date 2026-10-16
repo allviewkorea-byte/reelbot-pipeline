@@ -64,10 +64,15 @@ export function resolveMusicChannel(channel: string | null | undefined): string 
   return c && c in MUSIC_CHANNELS ? c : DEFAULT_MUSIC_CHANNEL
 }
 
-/** where 채널이면 쿼리를 붙이지 않는다 — 기존 URL 과 완전히 동일하게 유지(회귀 0). */
+/** 화면 링크용 — where 를 포함해 항상 ?channel= 을 붙인다.
+ *
+ * where 만 쿼리 없이 두면(예전 방식) 앱을 운동 화면(?channel=workout_music)으로 처음 연 뒤
+ * 쿼리 없는 /music 으로 이동할 때 Next 라우터가 같은 화면으로 보고 운동 주소를 되살려,
+ * where 를 눌러도 운동 채널이 떴다(2026-10-17 로컬 프로덕션 빌드로 재현). 쿼리가 없는 주소는
+ * 지금처럼 where 로 해석되므로 예전 링크·북마크는 그대로 동작한다.
+ */
 export function withChannel(path: string, channel: string | null | undefined): string {
   const c = resolveMusicChannel(channel)
-  if (c === DEFAULT_MUSIC_CHANNEL) return path
   return `${path}${path.includes("?") ? "&" : "?"}channel=${encodeURIComponent(c)}`
 }
 
