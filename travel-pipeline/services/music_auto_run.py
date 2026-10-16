@@ -224,18 +224,24 @@ def _try_launch(r: dict, st: dict, now: datetime) -> bool:
 
 
 def _stale(row: dict) -> bool:
-    """마지막 갱신이 이 프로세스 시작 전이면 끊긴 회차(재시작으로 실행 주체가 사라짐)."""
+    """끊긴 회차 = 하트비트(updated_at) 10분 경과 + 이 프로세스 시작 전(복구 E 와 같은 기준).
+
+    회차 실행 중에는 Heartbeat 가 1분마다 claim 행을 갱신하므로, 배포 중 두 서버가 겹쳐도
+    살아 있는 회차를 새 서버가 가져가지 않는다.
+    """
+    from services import music_recovery
     try:
         ts = datetime.fromisoformat(str(row.get("updated_at")).replace("Z", "+00:00"))
     except ValueError:
         return False
-    return ts < _STARTED_AT
+    return ts < _STARTED_AT and ts < datetime.now(timezone.utc) - timedelta(minutes=music_recovery.STALE_MIN)
 
 
 def _run_round_safe(r: dict, st: dict, resume: dict | None) -> None:
-    from services import music_jobs
+    from services import music_jobs, music_recovery
     try:
-        run_round(r, st, resume=resume)
+        with music_recovery.Heartbeat(r["key"]):
+            run_round(r, st, resume=resume)
     except Exception as e:  # noqa: BLE001
         logger.warning("[auto-run] 회차 실패 %s: %s", _fmt(r), e)
         music_jobs.merge_metadata(r["key"], {"state": "failed", "error": str(e)[:300]})
@@ -255,6 +261,10 @@ def run_round(r: dict, st: dict, *, resume: dict | None = None, sleep=time.sleep
     mix_id = (resume or {}).get("mix_id") if (resume or {}).get("state") == "rendered" else None
     if mix_id:
         logger.warning("[auto-run] 렌더 완료분 재사용 → 업로드만 %s mix_id=%s", _fmt(r), mix_id)
+    elif (resume or {}).get("state") == "producing" and (resume or {}).get("job_id"):
+        # 제작 중에 끊긴 회차 — 곡은 이미 (일부) 만들어졌을 수 있다. Suno 를 다시 부르지 않고
+        # 복구 E(music_recovery)가 그 제작 작업을 같은 곡으로 재개하길 기다렸다가 결과만 쓴다.
+        mix_id = _await_recovered(r, resume["job_id"], sleep=sleep)
     else:
         mix_id = _produce(r, st, sleep=sleep)
     music_jobs.merge_metadata(key, {"state": "rendered", "mix_id": mix_id})
@@ -265,6 +275,25 @@ def run_round(r: dict, st: dict, *, resume: dict | None = None, sleep=time.sleep
     logger.warning("[auto-run] 회차 완료 %s mix_id=%s video=%s privacy=%s publishAt=%s", _fmt(r),
                    mix_id, up.get("youtube_video_id"), up.get("privacy"), up.get("publish_at") or "-")
     return {"mix_id": mix_id, **up}
+
+
+AWAIT_MAX_SEC = 3 * 3600
+
+
+def _await_recovered(r: dict, job_id: str, *, sleep) -> str:
+    """끊긴 제작 작업(job_id)이 복구 E 로 완료되길 기다린다 → mix_id. 실패·시간 초과면 예외."""
+    from services import music_jobs
+    waited = 0
+    while waited <= AWAIT_MAX_SEC:
+        row = music_jobs.get_job(job_id) or {}
+        if row.get("status") == "completed" and row.get("mix_id"):
+            logger.warning("[auto-run] 끊긴 제작이 복구로 완료 → 업로드 %s mix_id=%s", _fmt(r), row["mix_id"])
+            return row["mix_id"]
+        if row.get("status") == "failed":
+            raise RuntimeError(f"끊긴 제작 복구 실패: {row.get('error_message') or '-'}")
+        sleep(60)
+        waited += 60
+    raise RuntimeError("끊긴 제작 복구 대기 시간 초과")
 
 
 def _produce(r: dict, st: dict, *, sleep) -> str:

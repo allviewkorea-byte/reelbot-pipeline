@@ -4,7 +4,7 @@ import { useState } from "react"
 import { toast } from "sonner"
 import { Loader2, AlertTriangle, RotateCcw, X } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { JOB_TYPE_LABEL, STEP_LABEL, STEP_NODE_INDEX, relTime, type MusicJob } from "@/lib/music-jobs"
+import { JOB_TYPE_LABEL, STEP_LABEL, STEP_NODE_INDEX, recoveryNote, relTime, type MusicJob } from "@/lib/music-jobs"
 import { comboLabelsKr, type TagCombo } from "@/lib/music-tags"
 
 // 검토대기 상단 진행/실패 카드(#36) — 페이지 이동·기기 전환에도 DB 기준으로 유지.
@@ -19,6 +19,7 @@ export function MusicJobCard({ job, onChanged }: { job: MusicJob; onChanged: () 
   const typeLabel = JOB_TYPE_LABEL[job.type] ?? job.type
   const stepLabel = job.step ? STEP_LABEL[job.step] ?? job.step : "준비 중"
   const idx = job.step ? STEP_NODE_INDEX[job.step] ?? 0 : 0
+  const recovery = recoveryNote(job)
 
   const dismiss = async () => {
     setBusy(true)
@@ -80,11 +81,13 @@ export function MusicJobCard({ job, onChanged }: { job: MusicJob; onChanged: () 
         <p className="text-xs text-muted-foreground">
           단계: <span className="text-foreground/90">{stepLabel}</span>
           {job.error_message ? <><br />원인: <span className="text-red-400">{job.error_message}</span></> : null}
+          {recovery ? <><br />복구: <span className="text-foreground/90">{recovery}</span></> : null}
         </p>
       ) : (
         <>
           <p className="text-xs text-muted-foreground">
             단계: <span className="text-foreground/90">{stepLabel}</span>
+            {recovery ? <> · <span className="text-amber-400">{recovery}</span></> : null}
           </p>
           {/* 6단계 진행 바(파이프라인과 동일 순서) */}
           <div className="flex flex-wrap items-center gap-1">

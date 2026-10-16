@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
 import { MusicQueueCard, TestCard, type QueueItem } from "@/components/music/MusicQueueCard"
 import { SwipeVideoViewer } from "@/components/music/SwipeVideoViewer"
 import { MusicJobCard } from "@/components/music/MusicJobCard"
-import type { MusicJob } from "@/lib/music-jobs"
+import { JOB_LOST_MESSAGE, type MusicJob } from "@/lib/music-jobs"
 import {
   MUSIC_CHANNELS, WORKOUT_CHANNEL_ID, channelParam, estimateProductionTime, fmtMinutes, resolveMusicChannel, withChannel,
 } from "@/lib/music"
@@ -171,6 +171,7 @@ function MusicQueueGridPageInner() {
         const tick = async () => {
           try {
             const sr = await fetch(`/api/music/manual-render/status/${jobId}`)
+            if (sr.status === 404) { toast.warning(JOB_LOST_MESSAGE); loadJobs(); resolve(); return }
             const sd = await sr.json()
             if (sd?.status === "done") {
               toast.success("영상 생성 완료 — 검토 큐에 추가되었습니다.")

@@ -150,7 +150,8 @@ def list_pending(*, channel: str | None = None) -> list[dict]:
                 f"{url}/rest/v1/{_TABLE}",
                 headers=_headers(key),
                 params={
-                    "status": "eq.pending",
+                    # render_failed(복구 C 최종 실패)도 검토대기에 보인다 — 카드에 배지, 공개 차단.
+                    "status": "in.(pending,render_failed)",
                     "channel": f"eq.{_resolve_channel(channel)}",
                     "select": _SELECT,
                     "order": "created_at.desc",
@@ -285,6 +286,32 @@ def set_channel(mix_id: str, channel: str | None) -> dict:
         msg = _http_err(e)
         logger.warning("[music-uploads] channel 보정 실패(mix_id=%s): %s", mix_id, msg)
         return {"stored": False, "error": msg}
+
+
+def mark_render_failed(mix_id: str, reason: str, *, clear_mp4: bool = False) -> dict:
+    """렌더 실패 표시(복구 C) — status=render_failed. 자동 업로드 대상에서 빠지고 카드에 배지.
+
+    clear_mp4: mp4 가 로컬 경로(R2 업로드 실패)면 mp4_url 을 비워 깨진 재생을 막는다.
+    재렌더가 성공하면 record_pending 이 같은 mix_id 를 status=pending 으로 덮어쓴다.
+    """
+    url, key = _supabase_cfg()
+    if not (url and key):
+        return {"stored": False, "error": "supabase 미설정"}
+    patch: dict = {"status": "render_failed"}
+    if clear_mp4:
+        patch["mp4_url"] = ""  # NOT NULL 여부 미확인 → 빈 문자열(재생 버튼만 비활성)
+    logger.warning("[music-uploads] render_failed mix_id=%s 사유=%s", mix_id, (reason or "")[:160])
+    try:
+        with httpx.Client(timeout=30.0) as c:
+            r = c.patch(
+                f"{url}/rest/v1/{_TABLE}?mix_id=eq.{mix_id}",
+                headers=_headers(key, patch=True),
+                json=patch,
+            )
+            r.raise_for_status()
+        return {"stored": True, "error": None}
+    except Exception as e:  # noqa: BLE001
+        return {"stored": False, "error": _http_err(e)}
 
 
 def set_thumbnail(mix_id: str, thumbnail_r2_key: str) -> dict:

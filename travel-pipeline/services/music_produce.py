@@ -52,13 +52,42 @@ def _vocal_style(base: str, gender: str) -> str:
 
 
 
-def _generate_with_retry(theme: dict, log, *, max_retries: int | None = None) -> dict:
+def _emit(checkpoint, event: dict) -> None:
+    """복구 체크포인트(A) 이벤트 전달 — 실패해도 제작은 계속(best-effort)."""
+    if not checkpoint:
+        return
+    try:
+        checkpoint(event)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[produce] 체크포인트 기록 실패(무시): %s", e)
+
+
+def _track_brief(rec: dict) -> dict:
+    """체크포인트에 남길 곡 요약(복구 시 마스터·믹스 입력으로 충분한 최소 필드)."""
+    return {k: rec.get(k) for k in ("audio_id", "r2_key", "duration", "title", "tags") if rec.get(k) is not None}
+
+
+def _generate_with_retry(theme: dict, log, *, max_retries: int | None = None, checkpoint=None) -> dict:
     """generate_and_store 1회 호출. 결과를 그대로 반환(재생성 없음).
 
     길이 재시도는 Suno 크레딧 낭비(8곡 폭발)를 유발하므로 제거됨.
     max_retries 인자는 하위호환용으로 남겨두되 무시한다.
+    checkpoint(복구 A·F): 제출 직후 taskId, 저장 최종 실패 시 taskId·audio_url 을 남긴다.
     """
-    return music_suno.generate_and_store(theme)
+    if not checkpoint:
+        return music_suno.generate_and_store(theme)
+    try:
+        return music_suno.generate_and_store(
+            theme, on_task=lambda tid: _emit(checkpoint, {"type": "task", "task_id": tid}),
+        )
+    except music_suno.StoreFailed as e:
+        _emit(checkpoint, {
+            "type": "store_failed", "task_id": e.task_id,
+            "slug": theme.get("theme_slug"), "genre": theme.get("genre_id") or "",
+            "action": theme.get("action") or "", "channel": theme.get("channel"),
+            "audio_urls": [t.get("audio_url") or t.get("audioUrl") for t in (e.tracks or [])][:4],
+        })
+        raise
 
 
 # ── Suno 재활용(#46) ───────────────────────────────────────────────────
@@ -142,6 +171,7 @@ def _gen_vocal(
     theme_slug: str, songs: list[dict], base_style: str, genre_theme: str, log,
     *, genre_id: str | None = None, seen: set[str] | None = None,
     is_tag_path: bool = False, action: str = "", channel: str | None = None,
+    checkpoint=None,
 ) -> tuple[list[dict], dict[str, str]]:
     """보컬 경로: 곡별 가사로 보컬곡 생성(부분 실패 허용) + 가사 원문 R2 보존.
 
@@ -188,7 +218,7 @@ def _gen_vocal(
         }
         try:
             log(f"보컬 생성 {i}/{len(valid)} [{gender}]: {s.get('title')}")
-            res = _generate_with_retry(theme, log, max_retries=1 if is_tag_path else None)
+            res = _generate_with_retry(theme, log, max_retries=1 if is_tag_path else None, checkpoint=checkpoint)
         except Exception as e:  # noqa: BLE001 - 1곡 실패가 전체를 막지 않게
             logger.warning("[produce] 곡 %d 보컬 생성 실패: %s", i, e)
             continue
@@ -212,6 +242,7 @@ def _gen_vocal(
                 "core_message": s.get("core_message", ""),
                 "lyrics": lyric,
             })
+            _emit(checkpoint, {"type": "track", "record": _track_brief(rec)})
     return produced, lyrics_by_id
 
 
@@ -220,6 +251,7 @@ def _gen_instrumental(
     *, genre_id: str | None = None, seen: set[str] | None = None,
     is_tag_path: bool = False, action: str = "", channel: str | None = None,
     theme_dict: dict | None = None,
+    checkpoint=None,
 ) -> tuple[list[dict], dict[str, str]]:
     """연주 경로: 가사 없이 style 만으로 연주곡 N회 생성(instrumental=True, 부분 실패 허용).
 
@@ -262,6 +294,7 @@ def _gen_instrumental(
             if title:
                 recycled["title"] = title
             produced.append({**recycled})
+            _emit(checkpoint, {"type": "track", "record": _track_brief(recycled)})
             continue
         # ② 없으면 Suno 정상 호출(폴백).
         from services import music_workout_style as _ws  # 5단계 B (지연 import)
@@ -277,7 +310,7 @@ def _gen_instrumental(
         }
         try:
             log(f"연주 생성 {i}/{n}: {title or '(자동)'}")
-            res = _generate_with_retry(theme, log, max_retries=tag_retries)
+            res = _generate_with_retry(theme, log, max_retries=tag_retries, checkpoint=checkpoint)
         except Exception as e:  # noqa: BLE001 - 1곡 실패가 전체를 막지 않게
             logger.warning("[produce] 연주 %d 생성 실패: %s", i, e)
             continue
@@ -287,6 +320,7 @@ def _gen_instrumental(
                 if title and not (rec.get("title") or "").strip():
                     rec["title"] = title
                 produced.append({**rec})
+                _emit(checkpoint, {"type": "track", "record": _track_brief(rec)})
     return produced, {}
 
 
@@ -311,8 +345,14 @@ def produce(
     action: str = "",
     channel: str | None = None,
     progress=None,
+    checkpoint=None,
+    top_up: bool = True,
 ) -> dict:
     """주제 → N곡 생성 → 마스터 → 믹스. 완성 오디오 메타 반환.
+
+    checkpoint(복구 A): 이벤트 콜백 — {"type":"task"|"track"|"store_failed", ...}. 없으면 기존 그대로.
+    top_up(복구 D): 성공 M곡(≥1) < 요청 N곡이면 모자란 N−M곡만 1회 추가 생성. 그래도 모자라면
+      있는 곡으로 진행. 0곡이면 보충하지 않는다(전체 재생성 금지 — 기존처럼 "전 곡 실패").
 
     channel: 채널 축. 재활용 풀 조회(find_unused_track)와 신규 트랙 적립(upsert_track)이
     이 채널로 갈린다. None → DEFAULT_CHANNEL(where) — 기존 호출부 무수정, 회귀 0.
@@ -354,6 +394,7 @@ def produce(
             is_tag_path=not cfg, action=action, channel=channel,
             theme_dict={"slug": theme_slug, "genre": genre_theme,
                         "genre_theme": genre_theme, "action": action},
+            checkpoint=checkpoint,
         )
     else:
         # ① 가사(헌법 3-스테이지) — 주어지면 재사용(검수본), lyric_tone 반영.
@@ -371,7 +412,42 @@ def produce(
             theme_slug, songs, base_style, genre_theme, _log,
             genre_id=genre_id, seen=seen,
             is_tag_path=not cfg, action=action, channel=channel,
+            checkpoint=checkpoint,
         )
+
+    # ②-보충(복구 D) — 일부만 성공했으면 모자란 곡만 1회 추가. 같은 장르 고정·소재 풀·채널 규칙.
+    missing = n - len(produced)
+    if top_up and produced and missing > 0:
+        _log(f"부족 {missing}곡 보충 생성(1회) — 성공 {len(produced)}/{n}")
+        try:
+            if is_instrumental:
+                extra, extra_lyrics = _gen_instrumental(
+                    theme_slug, missing, style_prompt or base_style, genre_theme, _log,
+                    genre_id=genre_id, seen=seen, is_tag_path=not cfg, action=action, channel=channel,
+                    theme_dict={"slug": theme_slug, "genre": genre_theme,
+                                "genre_theme": genre_theme, "action": action},
+                    checkpoint=checkpoint,
+                )
+            else:
+                extra_songs = music_lyrics.generate_lyrics(
+                    genre_theme, missing, sub_theme_pool=sub_theme_pool, language=language,
+                    model=model, tone=lyric_tone, genre_id=genre_id,
+                )
+                if cfg:
+                    for s in extra_songs:
+                        s["style"] = cfg["style"]
+                songs = list(songs) + list(extra_songs)
+                extra, extra_lyrics = _gen_vocal(
+                    theme_slug, extra_songs, base_style, genre_theme, _log,
+                    genre_id=genre_id, seen=seen, is_tag_path=not cfg, action=action, channel=channel,
+                    checkpoint=checkpoint,
+                )
+            produced.extend(extra)
+            lyrics_by_id.update(extra_lyrics)
+        except Exception as e:  # noqa: BLE001 - 보충 실패는 있는 곡으로 진행
+            logger.warning("[produce] 보충 생성 실패 — 있는 %d곡으로 진행: %s", len(produced), e)
+        if len(produced) < n:
+            logger.warning("[produce] 보충 후에도 %d/%d곡 — 있는 곡으로 진행", len(produced), n)
 
     if not produced:
         raise RuntimeError("생성 결과가 없습니다(전 곡 실패).")

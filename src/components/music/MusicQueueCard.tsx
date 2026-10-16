@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
+import { JOB_LOST_MESSAGE } from "@/lib/music-jobs"
 import { Loader2, Music, Copy, Check, Upload, Globe, Trash2, MonitorPlay, Languages, ChevronDown, ChevronUp, RefreshCw, FileText, Maximize2, PictureInPicture2, Sparkles } from "lucide-react"
 import { isPipSupported, togglePip } from "@/lib/pip"
 import { cn } from "@/lib/utils"
@@ -433,6 +434,7 @@ export function MusicQueueCard({ item, onChanged, onOpenViewer }: { item: QueueI
         const tick = async () => {
           try {
             const sr = await fetch(`/api/music/queue/rerender/status/${jobId}`)
+            if (sr.status === 404) { toast.warning(JOB_LOST_MESSAGE); resolve(); return }
             const sd = await sr.json()
             if (sd?.step) setRerenderStep(sd.step)
             if (sd?.status === "done") {
@@ -469,6 +471,7 @@ export function MusicQueueCard({ item, onChanged, onOpenViewer }: { item: QueueI
         const tick = async () => {
           try {
             const sr = await fetch(`/api/music/queue/rerender/status/${jobId}`)
+            if (sr.status === 404) { toast.warning(JOB_LOST_MESSAGE); resolve(); return }
             const sd = await sr.json()
             if (sd?.step) setRerenderStep(sd.step)
             if (sd?.thumbnail_url) setThumbUrl(sd.thumbnail_url)
@@ -516,6 +519,12 @@ export function MusicQueueCard({ item, onChanged, onOpenViewer }: { item: QueueI
           <video ref={videoRef} src={item.mp4_url} controls playsInline preload="metadata" className="h-full w-full" />
         ) : (
           <div className="flex h-full items-center justify-center text-muted-foreground"><Music className="h-7 w-7" /></div>
+        )}
+        {/* 복구 G — 렌더 실패(로고 없음·폴백·업로드 실패) 영상은 공개 불가. [재렌더] 로 다시 만든다. */}
+        {item.status === "render_failed" && (
+          <span className="absolute left-2 top-2 rounded-full bg-red-600 px-2 py-0.5 text-[11px] font-semibold text-white" title="렌더 실패 — 재렌더 후 공개할 수 있습니다">
+            렌더 실패
+          </span>
         )}
         {/* 영상 우상단 오버레이 — PiP(작은 창) + 확대(스와이프 뷰어). 카드 레이아웃 무영향. */}
         {item.mp4_url && (

@@ -413,6 +413,9 @@ def publish(mix_id: str, body: PublishBody | None = None):
     row = music_uploads.get_upload(mix_id)
     if not row:
         raise HTTPException(status_code=404, detail="해당 mix_id 의 큐 항목이 없습니다.")
+    # ⛔ 렌더 실패(복구 C 최종 실패) 영상은 공개하지 않는다 — [재렌더] 로 정상 영상을 만든 뒤 공개.
+    if row.get("status") == "render_failed":
+        raise HTTPException(status_code=400, detail="렌더 실패 영상입니다(로고 없음 등). 재렌더 후 공개하세요.")
     # ⛔ 게이트: 썸네일 없으면 공개 업로드 불가.
     if not row.get("thumbnail_r2_key"):
         raise HTTPException(status_code=400, detail="썸네일을 먼저 업로드하세요(공개 업로드 게이트).")

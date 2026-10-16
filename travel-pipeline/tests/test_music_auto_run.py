@@ -140,7 +140,7 @@ def test_restart_resumes_interrupted_round_only_once(env, monkeypatch):
     jobs.rows[r["key"]]["status"] = "running"
     jobs.rows[r["key"]]["metadata"].update({"state": "rendered", "mix_id": "m9"})
     # 재시작: 마지막 갱신(이전 프로세스)이 지금 프로세스 시작보다 앞선다
-    jobs.rows[r["key"]]["updated_at"] = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    jobs.rows[r["key"]]["updated_at"] = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat()  # 하트비트 10분+ 끊김
     monkeypatch.setattr(ar, "_STARTED_AT", datetime.now(timezone.utc) - timedelta(minutes=1))
     ar._RUNNING.clear()
     assert ar.tick(r["start_at"] + timedelta(minutes=30)) == [r["key"]]

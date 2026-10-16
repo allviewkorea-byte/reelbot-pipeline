@@ -60,6 +60,22 @@ def run_daily_analysis() -> None:
     logger.info("일일 트렌드 분석 종료")
 
 
+_RECOVERY_BOOTED = False
+
+
+def _music_recovery_tick() -> None:
+    """복구 E·F — 끊긴 작업 재개/정리(1분마다), 서버 시작 후 첫 tick 에 곡 재취득 1회."""
+    global _RECOVERY_BOOTED
+    try:
+        from services import music_recovery
+        if not _RECOVERY_BOOTED:
+            _RECOVERY_BOOTED = True
+            music_recovery.reacquire_pending_stores()
+        music_recovery.recover_stale_jobs()
+    except Exception:  # noqa: BLE001 - tick 실패가 스케줄러를 멈추지 않게
+        logger.exception("[recovery] tick 실패")
+
+
 def _music_auto_run_tick() -> None:
     try:
         from services import music_auto_run
@@ -90,6 +106,15 @@ def start_scheduler() -> BackgroundScheduler:
         _music_auto_run_tick,
         trigger=IntervalTrigger(seconds=60),
         id="music_auto_run_tick",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    # 음악 제작 자동 복구(E·F) — 끊긴 작업(하트비트 10분+, 이 서버 시작 전) 재개·정리.
+    scheduler.add_job(
+        _music_recovery_tick,
+        trigger=IntervalTrigger(seconds=60),
+        id="music_recovery_tick",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

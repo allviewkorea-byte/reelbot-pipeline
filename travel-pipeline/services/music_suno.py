@@ -293,22 +293,61 @@ def store_tracks(
     return records
 
 
+# 복구 F — 곡 R2 저장 재시도(백오프 초). 다 실패하면 taskId·audio_url 을 호출부에 넘겨 보존한다.
+STORE_RETRY_DELAYS = (2, 4, 8)
+
+
+class StoreFailed(RuntimeError):
+    """Suno 생성은 성공했는데 R2/DB 저장이 끝내 실패 — 나중에 record-info 로 재취득할 정보를 싣는다."""
+
+    def __init__(self, task_id: str, tracks: list[dict], cause: Exception):
+        super().__init__(f"곡 저장 실패(taskId={task_id}): {cause}")
+        self.task_id = task_id
+        self.tracks = tracks
+
+
+def store_with_retry(
+    theme_slug: str, task_id: str, tracks: list[dict], *, genre: str = "", action: str = "",
+    channel: str | None = None, sleep=time.sleep,
+) -> list[dict]:
+    """store_tracks 를 백오프로 최대 1+len(STORE_RETRY_DELAYS)회. 멱등(R2 존재·DB upsert)이라 재시도 안전."""
+    last: Exception | None = None
+    for i, delay in enumerate((0, *STORE_RETRY_DELAYS)):
+        if delay:
+            logger.warning("[suno] R2 저장 재시도 %d/%d (%ds 후) taskId=%s", i, len(STORE_RETRY_DELAYS), delay, task_id)
+            sleep(delay)
+        try:
+            return store_tracks(theme_slug, task_id, tracks, genre=genre, action=action, channel=channel)
+        except Exception as e:  # noqa: BLE001
+            last = e
+            logger.warning("[suno] R2 저장 실패 taskId=%s: %s", task_id, e)
+    raise StoreFailed(task_id, tracks, last or RuntimeError("unknown"))
+
+
 def generate_and_store(
     theme: dict,
     *,
     timeout: int = POLL_TIMEOUT,
     interval: int = POLL_INTERVAL,
     channel: str | None = None,
+    on_task=None,
 ) -> dict:
     """생성 → 폴링(SUCCESS) → R2 저장 + DB 기록을 한 번에. 검증/운영 진입점.
 
     theme: {theme_slug, instrumental, model, style, title, negativeTags?, genre_id?, ...}
+    on_task(task_id): 제출 직후 호출 — 체크포인트(복구 A)가 taskId 를 먼저 남긴다(선택).
+    R2 저장은 백오프 재시도 후에도 실패하면 StoreFailed(taskId·트랙 정보 포함)를 던진다.
     Returns: {task_id, tracks:[record...]}
     """
     theme_slug = theme.get("theme_slug") or "untitled"
     task_id = submit_generation(theme)
+    if on_task:
+        try:
+            on_task(task_id)
+        except Exception:  # noqa: BLE001 - 체크포인트 실패가 제작을 막지 않게
+            pass
     tracks = poll_task(task_id, timeout=timeout, interval=interval)
-    records = store_tracks(
+    records = store_with_retry(
         theme_slug, task_id, tracks,
         genre=theme.get("genre_id") or "",
         action=theme.get("action") or "",
