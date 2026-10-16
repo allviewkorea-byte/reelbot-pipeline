@@ -37,7 +37,42 @@ _CHANNEL_NAME_ENV: dict[str, tuple[str, ...]] = {
 # env 미설정 시 채널별 기본값. where 는 기존 리터럴 그대로(회귀 0).
 _CHANNEL_NAME_DEFAULT: dict[str, str] = {
     "rooftop_music": "Revezen",
-    "workout_music": "2SHAPE",
+    "workout_music": "2주안에몸매만들기",
+}
+
+# 운동 채널 설명란 정보줄 카피(axis_for_action 의 strength/cardio/warmup 축별 풀).
+# 영상마다 slug 로 결정적으로 하나 고른다(_pick) — 같은 영상은 재조립해도 같은 문구.
+_WORKOUT_INFO_COPY: dict[str, list[str]] = {
+    "strength": [
+        "운동할 때 집중하기 좋은 플레이리스트",
+        "마지막 한 세트까지 밀어붙이는 플레이리스트",
+        "무게를 드는 순간 힘이 되는 비트",
+        "헬스장에서 볼륨 높이고 듣는 음악",
+        "한계를 넘고 싶은 날 듣는 운동 음악",
+        "땀 흘리는 시간을 더 뜨겁게 만드는 플레이리스트",
+        "오늘 운동, 끝까지 버티게 해줄 음악",
+        "근육이 깨어나는 하이텐션 플레이리스트",
+    ],
+    "cardio": [
+        "달릴 때 페이스를 지켜주는 플레이리스트",
+        "숨이 차도 멈추지 않게 해줄 음악",
+        "러닝 리듬에 딱 맞는 비트",
+        "유산소 시간이 순식간에 지나가는 플레이리스트",
+        "한 바퀴 더 달리고 싶어지는 음악",
+        "심박수를 끌어올리는 러닝 플레이리스트",
+        "땀 흘리며 달리기 좋은 음악",
+        "오늘의 목표 거리까지 함께할 플레이리스트",
+    ],
+    "warmup": [
+        "몸을 천천히 깨우는 워밍업 음악",
+        "스트레칭할 때 듣기 좋은 플레이리스트",
+        "운동 전 호흡을 고르는 음악",
+        "굳은 몸을 부드럽게 풀어주는 플레이리스트",
+        "운동 후 쿨다운에 어울리는 음악",
+        "가볍게 몸을 풀며 듣는 플레이리스트",
+        "요가·필라테스와 함께하기 좋은 음악",
+        "오늘 운동을 준비하는 시간의 플레이리스트",
+    ],
 }
 
 
@@ -813,12 +848,6 @@ def build_description_parts(
     조립은 assemble_description 이 담당하며, 조립 순서·구분선·이모지·줄바꿈은
     기존 build_description 과 동일하다.
     """
-    vs = viz_spec or {}
-    cfg = config or {}
-    where = str(vs.get("location_en") or "").strip() or "City View"
-    flag = _flag(vs)
-    emoji = _emoji(theme, vs)
-
     # [1] 감성 멘트(LLM, 폴백 결정적) — 유일한 번역 대상
     intro = generate_vibe_intro(theme, viz_spec)
 
@@ -826,9 +855,36 @@ def build_description_parts(
     tl = build_tracklist(tracks, total_sec)
     tracklist = ("🎵 Track list\n\n" + "\n".join(tl)) if tl else ""
 
-    # [3] 고정 정보 블록(머리 부분) — 번역 금지
+    return {
+        "intro": intro,
+        "tracklist": tracklist,
+        # [3] 고정 정보 블록(머리 부분) — 번역 금지
+        "info_head": build_info_head(theme, viz_spec, config),
+        "copyright": build_copyright(theme, channel_name=channel_name),
+    }
+
+
+def build_info_head(theme: dict, viz_spec: dict | None, config: dict | None) -> str:
+    """설명란 머리(정보줄·AI 고지·Spotify·소셜). 번역하지 않는 고정 블록.
+
+    build_description_parts 와 공개 직전 재조립(rebuild_description_head)이 같이 쓴다 —
+    두 경로가 같은 문자열을 만들어야 재조립이 기존 결과를 바꾸지 않는다.
+    """
+    from services.music_workout_style import axis_for_action, is_workout_channel
+
+    vs = viz_spec or {}
+    cfg = config or {}
     info: list[str] = []
-    info.append(f"📍 where;{where} {flag} {emoji}")
+    if is_workout_channel(theme.get("channel")):
+        # 운동 채널엔 where 브랜드(📍 where;도시)도 채널명도 쓰지 않는다 — 축별 카피 1줄.
+        action = (theme.get("tag_combo") or {}).get("action")
+        pool = _WORKOUT_INFO_COPY[axis_for_action(action)]
+        info.append(f"💪 {_pick(pool, str(theme.get('slug') or theme.get('title_kr') or ''))}")
+    else:
+        where = str(vs.get("location_en") or "").strip() or "City View"
+        flag = _flag(vs)
+        emoji = _emoji(theme, vs)
+        info.append(f"📍 where;{where} {flag} {emoji}")
     ai = (cfg.get("ai_disclosure") or "").strip()
     if ai:
         info.append(ai)
@@ -844,16 +900,15 @@ def build_description_parts(
         social.append(f"🎵 TikTok: @{cfg['tiktok'].strip().lstrip('@')}")
     if social:
         info.extend(social)
-    return {
-        "intro": intro,
-        "tracklist": tracklist,
-        "info_head": "\n".join(info),
-        # 채널명 — 인자 > theme["channel"] 별 env·기본값. theme 에 channel 이 없으면 where.
-        "copyright": (
-            f"Copyright Ⓒ {channel_name or _channel_name(theme.get('channel'))}"
-            " All rights reserved."
-        ),
-    }
+    return "\n".join(info)
+
+
+def build_copyright(theme: dict, *, channel_name: str | None = None) -> str:
+    """Copyright 줄. 채널명 — 인자 > theme["channel"] 별 env·기본값. theme 에 channel 이 없으면 where."""
+    return (
+        f"Copyright Ⓒ {channel_name or _channel_name(theme.get('channel'))}"
+        " All rights reserved."
+    )
 
 
 def assemble_description(
@@ -881,3 +936,40 @@ def assemble_description(
         blocks.append(" ".join(hashtags))
     sep = f"\n\n{SEP}\n\n"
     return sep.join(blocks).strip()
+
+
+def rebuild_description_head(desc: str, lang: str, info_head: str, copyright_line: str) -> str:
+    """완성된 설명란(언어별)에서 **머리 블록만** 새 info_head·copyright 로 교체한다.
+
+    공개 직전 재조립용. 감성 멘트(번역본)·트랙리스트·고정 안내문·끝의 해시태그는 그대로 둔다.
+    머리 블록 = assemble_description 이 만드는 "info_head \n\n 고정안내문 \n copyright" 블록.
+    - 그 블록을 고정 안내문(fixed_outro(lang))으로 찾는다. 찾으면 안내문 앞(=머리)과 바로 뒤
+      Copyright 줄만 바꾸고, 그 뒤(해시태그 등)는 보존한다.
+    - 못 찾으면(검수 UI 에서 손으로 고친 경우 등) 첫 블록을 감성 멘트로 보고 표준 순서로 다시
+      조립한다. 해시태그는 호출부(publish)의 병합 단계가 다시 붙인다.
+    같은 입력으로 만든 설명란이면 결과가 원본과 바이트 동일하다(멱등).
+    """
+    from services.music_i18n import fixed_outro
+
+    sep = f"\n\n{SEP}\n\n"
+    marker = "\n\n" + fixed_outro(lang) + "\n"
+    blocks = (desc or "").split(sep)
+    for k, blk in enumerate(blocks):
+        pos = blk.find(marker)
+        if pos < 0:
+            continue
+        after = blk[pos + len(marker):]
+        nl = after.find("\n")
+        first = after if nl < 0 else after[:nl]
+        if first.startswith("Copyright"):
+            rest = "" if nl < 0 else after[nl:]   # Copyright 줄 다음(해시태그 등) 보존
+        else:
+            rest = "\n" + after if after else ""  # Copyright 줄이 없던 블록 — 원래 뒤 내용을 그대로 둔다
+        blocks[k] = info_head + marker + copyright_line + rest
+        return sep.join(blocks)
+    intro = blocks[0] if blocks else ""
+    tracklist = next((b for b in blocks[1:] if b.startswith("🎵 Track list")), "")
+    return assemble_description(
+        {"intro": intro, "tracklist": tracklist, "info_head": info_head, "copyright": copyright_line},
+        lang,
+    )

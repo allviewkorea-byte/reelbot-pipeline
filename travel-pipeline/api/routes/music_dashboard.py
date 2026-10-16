@@ -473,8 +473,30 @@ def publish(mix_id: str, body: PublishBody | None = None):
             "[music-dashboard] 공개 직전 다국어 repair mix_id=%s 누락=%s",
             mix_id, ",".join(_repaired),
         )
+    # 공개 직전 머리 재조립 — 설명란 머리(정보줄·AI 고지·Spotify·소셜·Copyright)를 **이 영상
+    # 채널의 channel_config** 로 항상 다시 만든다. 렌더 시점에 미리 만든 다국어(make_video,
+    # config=None)에는 AI 고지·소셜이 빠져 있고, 검수본이어도 머리는 최신 설정이 맞다.
+    # 감성 멘트(번역본)·트랙리스트·고정 안내문·해시태그는 그대로 둔다. 미리 만든 게 없어
+    # 이 함수가 방금 같은 설정으로 만든 설명란이면 결과는 바이트 동일(멱등).
+    from services import music_channel, music_meta
+    _cfg = music_channel.get_channel_config(channel=theme.get("channel"))
+    _head = music_meta.build_info_head(theme, row.get("viz_spec"), _cfg)
+    _copy = music_meta.build_copyright(theme)
+    _head_changed: list[str] = []
+    for _lng, _d in (loc.get("meta") or {}).items():
+        _old = str(_d.get("description") or "")
+        _new = music_meta.rebuild_description_head(_old, _lng, _head, _copy)
+        if _new != _old:
+            _d["description"] = _new
+            _head_changed.append(_lng)
+    if _head_changed:
+        logger.warning("[music-dashboard] 공개 직전 머리 재조립 mix_id=%s 언어=%s", mix_id, ",".join(_head_changed))
+        try:
+            music_uploads.set_localizations(mix_id, loc)  # 검수 UI 미리보기도 같은 내용이 되게
+        except Exception as e:  # noqa: BLE001 - 저장 실패해도 업로드는 재조립본으로 진행
+            logger.warning("[music-dashboard] 재조립본 저장 실패(업로드는 진행): %s", e)
+
     # 보정: 구버전 캐시(#33)는 description에 해시태그가 빠져 있음 — 있으면 합침(idempotent).
-    from services import music_meta
     _ht = loc.get("hashtags") or music_meta.build_hashtags(theme, row.get("viz_spec"))
     _ht_line = " ".join(_ht)
     if _ht_line:
@@ -486,6 +508,20 @@ def publish(mix_id: str, body: PublishBody | None = None):
             loc["hashtags"] = _ht
     src_lang = loc.get("source_lang", "ko")
     base_meta = (loc.get("meta") or {}).get(src_lang) or (loc.get("meta") or {}).get("ko") or {}
+
+    # ⛔ AI 고지 필수 — 최종 설명란(기본 + 모든 언어) 중 하나라도 AI 고지가 없으면 업로드하지 않는다.
+    # 기본 설명이 비면 upload_music_video 가 AI 고지 없는 간이 설명으로 폴백하므로 그것도 막는다.
+    _ai = (_cfg.get("ai_disclosure") or "").strip()
+    _no_ai = [
+        _lng for _lng, _d in (loc.get("meta") or {}).items()
+        if not _ai or _ai not in str(_d.get("description") or "")
+    ]
+    if not _ai or _no_ai or _ai not in str(base_meta.get("description") or ""):
+        logger.error("[music-dashboard] AI 고지 누락 — 업로드 중단 mix_id=%s 언어=%s", mix_id, _no_ai or ["기본"])
+        raise HTTPException(
+            status_code=500,
+            detail=f"AI 고지 문구가 설명란에 없어 업로드를 중단했습니다(언어: {', '.join(_no_ai) or '기본 설명'}).",
+        )
 
     tmpdir = Path(tempfile.mkdtemp(prefix="pub_"))
     try:
