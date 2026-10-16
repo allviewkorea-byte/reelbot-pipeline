@@ -90,8 +90,12 @@ def test_env_overrides(monkeypatch):
 def test_wants_auto_image():
     assert mai.wants_auto_image("workout_music", None) is True
     assert mai.wants_auto_image("workout_music", False) is False
-    for ch in (None, "", "rooftop_music", "unknown"):
+    for ch in (None, "", "unknown"):
         assert mai.wants_auto_image(ch, True) is False
+    # where: 자동 회차가 채널을 'rooftop_music' 으로 명시하고 True 를 줄 때만(수동 화면은 미전송 → False)
+    assert mai.wants_auto_image("rooftop_music", True) is True
+    assert mai.wants_auto_image("rooftop_music", None) is False
+    assert mai.wants_auto_image(None, None) is False
 
 
 # ── 이미지 생성(응답 형식 방어) ───────────────────────────────────────
@@ -331,7 +335,7 @@ def _run_manual(monkeypatch, channel, auto_image=None, image_ok=True, tmp_path=N
         p.write_bytes(b"BG")
         return str(p), {"ok": True, "summary": "합격"}
     prep_calls = []
-    monkeypatch.setattr(mai, "prepare_for_render", lambda *a: prep_calls.append(a) or _prep(*a))
+    monkeypatch.setattr(mai, "prepare_for_render", lambda *a, **k: prep_calls.append(a) or _prep(*a))
     started = music_manual.start(mood="citypop", channel=channel, auto_image=auto_image)
     music_manual.run(started["job_id"])
     return calls, attached, prep_calls, music_manual.get_status(started["job_id"])
@@ -392,12 +396,18 @@ def _run_publish(monkeypatch, channel, match):
     return renders, matches, uploads
 
 
-def test_publish_where_always_rerenders_without_judgement(monkeypatch):
+def test_publish_where_rerenders_unless_auto_marker(monkeypatch):
+    # where 수동 영상: 렌더 표식이 없다(matching_render → None) → 지금처럼 항상 재렌더(회귀 0)
     for ch in ("rooftop_music", None):
-        renders, matches, uploads = _run_publish(monkeypatch, ch, match={"frame_thumb_key": "x"})
-        assert not matches  # where 는 판정 자체를 하지 않는다
+        renders, matches, uploads = _run_publish(monkeypatch, ch, match=None)
         assert len(renders) == 1 and set(renders[0]) == {"background_path", "character_path", "show_playlist"}
         assert uploads[0][0] == "https://r2/new.mp4"
+    # 채널 값이 없는 옛 행은 판정 자체를 하지 않는다
+    _, matches, _ = _run_publish(monkeypatch, None, match={"frame_thumb_key": "x"})
+    assert not matches
+    # where 자동 회차 영상(자동 배경 표식 일치) → 재렌더 생략
+    renders, matches, uploads = _run_publish(monkeypatch, "rooftop_music", match={"frame_thumb_key": "x"})
+    assert matches and not renders
 
 
 def test_publish_workout_skips_when_marker_matches(monkeypatch):

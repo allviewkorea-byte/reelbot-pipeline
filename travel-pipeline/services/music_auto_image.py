@@ -107,12 +107,26 @@ def review_model() -> str:
     return _env("MUSIC_IMAGE_REVIEW_MODEL", CLAUDE_MODEL)
 
 
+WHERE_CHANNEL = "rooftop_music"
+
+
+def is_where_auto(channel: str | None) -> bool:
+    """where 자동 배경 프로필을 쓸지 — 채널이 'rooftop_music' 으로 **명시**된 경우만(자동 회차).
+
+    where 수동 화면은 채널을 None 으로 보내므로 이 프로필을 타지 않는다(기존 동작 그대로).
+    """
+    return isinstance(channel, str) and channel.strip() == WHERE_CHANNEL
+
+
 def wants_auto_image(channel: str | None, requested: bool | None) -> bool:
     """수동/라이브러리 생성에서 이미지 자동 생성을 할지. 운동 채널은 기본 ON(명시 False 만 끔).
 
-    where(미지정 포함)는 무조건 False — 요청값과 무관하게 기존 동작 그대로.
+    where 는 요청값이 **명시 True** 이고 채널이 'rooftop_music' 으로 명시될 때만(자동 회차).
+    where 수동 화면(채널 None·auto_image 미전송)은 기존처럼 항상 False.
     """
     from services.music_workout_style import is_workout_channel
+    if is_where_auto(channel):
+        return requested is True
     return is_workout_channel(channel) and requested is not False
 
 
@@ -296,8 +310,11 @@ def _parse_review(text: str) -> dict:
     return {"pass": passed, "reasons": [str(r)[:120] for r in reasons][:5]}
 
 
-def review_image(path: str) -> dict:
-    """이미지 1장을 Claude 비전으로 검수 → {pass, reasons, model}. 호출·파싱 실패 시 예외."""
+def review_image(path: str, system: str | None = None) -> dict:
+    """이미지 1장을 Claude 비전으로 검수 → {pass, reasons, model}. 호출·파싱 실패 시 예외.
+
+    system: 검수 기준(기본 운동 _REVIEW_SYSTEM, where 는 music_where_image.REVIEW_SYSTEM).
+    """
     from services import music_lyrics
 
     timeout = review_timeout_sec()
@@ -311,7 +328,7 @@ def review_image(path: str) -> dict:
         msg = client.messages.create(
             model=model,
             max_tokens=400,
-            system=_REVIEW_SYSTEM,
+            system=system or _REVIEW_SYSTEM,
             messages=[{
                 "role": "user",
                 "content": [
@@ -332,7 +349,20 @@ def review_image(path: str) -> dict:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
-def generate_reviewed(action: str | None, out_path: str, *, deadline: float | None = None) -> dict:
+def _profile(action: str | None, channel: str | None, genre: str | None):
+    """채널별 (프롬프트 함수(avoid)->str, 검수 기준, 보관함 축). 기본은 운동(기존 그대로)."""
+    if is_where_auto(channel):
+        from services import music_where_image as mwi
+        g = (genre or "").strip() or "citypop"
+        return (lambda avoid: mwi.build_prompt(g, avoid)), mwi.REVIEW_SYSTEM, f"where/{g}"
+    from services.music_workout_style import axis_for_action
+    return (lambda avoid: build_prompt(action, avoid)), None, axis_for_action(action)
+
+
+def generate_reviewed(
+    action: str | None, out_path: str, *, deadline: float | None = None,
+    channel: str | None = None, genre: str | None = None,
+) -> dict:
     """생성 → 검수. 불합격이면 재생성 최대 1회. {ok, path, attempts, summary}.
 
     API 오류·검수 실패(응답 파싱 불가 포함)도 그 시도의 불합격으로 친다 — 검수를 못 했으면
@@ -342,6 +372,7 @@ def generate_reviewed(action: str | None, out_path: str, *, deadline: float | No
     out = Path(out_path)
     attempts: list[dict] = []
     avoid: list[str] = []  # 앞 시도들의 검수 불합격 사유(중복 제거) → 다음 프롬프트에 붙인다
+    make_prompt, review_system, _ = _profile(action, channel, genre)
     for i in range(1, _MAX_ATTEMPTS + 1):
         rec: dict = {"attempt": i}
         cand = out.with_name(f"{out.stem}_try{i}.png")
@@ -355,13 +386,13 @@ def generate_reviewed(action: str | None, out_path: str, *, deadline: float | No
         t_try = time.monotonic()
         logger.warning("[auto-image] 시도 %d/%d 시작", i, _MAX_ATTEMPTS)
         try:
-            prompt = build_prompt(action, avoid)
+            prompt = make_prompt(avoid)
             rec["prompt"] = prompt[:400]
             if avoid:
                 rec["avoid"] = list(avoid)
             info = generate_image(prompt, str(cand))
             rec.update({k: info.get(k) for k in ("model", "output_tokens", "est_output_usd", "response_format")})
-            review = review_image(str(cand))
+            review = review_image(str(cand), review_system) if review_system else review_image(str(cand))
             rec["pass"] = review["pass"]
             rec["reasons"] = review["reasons"]
             rec["review_model"] = review.get("model")
@@ -424,7 +455,8 @@ def _archive_dir(axis: str) -> str:
 
 
 def _last_key(axis: str) -> str:
-    return f"{_ARCHIVE_PREFIX}/_last_{axis}.txt"
+    # where 축은 "where/{장르}" — 파일 이름에는 "/" 대신 "_"(운동 축 키는 그대로).
+    return f"{_ARCHIVE_PREFIX}/_last_{axis.replace('/', '_')}.txt"
 
 
 def _write_last(axis: str, key: str) -> None:
@@ -629,6 +661,7 @@ def matching_render(row: dict, *, bg_path: str, char_path: str | None, show_play
 
 def prepare_for_render(
     job_id: str, action: str | None, workdir: str, *, reuse: bool = True,
+    channel: str | None = None, genre: str | None = None,
 ) -> tuple[str | None, dict]:
     """렌더 직전 — 생성·검수 후 (배경 경로 또는 None, 요약). 요약은 music_jobs.metadata 에 남긴다.
 
@@ -648,7 +681,9 @@ def prepare_for_render(
 
     def _work() -> None:
         try:
-            box["res"] = generate_reviewed(action, str(Path(workdir) / "auto_bg.png"), deadline=t0 + limit)
+            box["res"] = generate_reviewed(
+                action, str(Path(workdir) / "auto_bg.png"), deadline=t0 + limit, channel=channel, genre=genre,
+            )
         except Exception as e:  # noqa: BLE001
             box["err"] = e
 
@@ -664,8 +699,7 @@ def prepare_for_render(
         logger.warning("[auto-image] 이미지 단계 오류 → 이미지 없이 렌더 진행 job=%s: %s", job_id, box["err"])
     else:
         res = box.get("res") or {"ok": False, "path": None, "attempts": [], "summary": "결과 없음"}
-    from services.music_workout_style import axis_for_action
-    axis = axis_for_action(action)
+    axis = _profile(action, channel, genre)[2]  # 운동: strength/cardio/warmup, where: where/{장르}
     if res.get("ok"):
         archive_passed(res["path"], axis)
     elif reuse:

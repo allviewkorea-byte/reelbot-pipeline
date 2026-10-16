@@ -307,16 +307,16 @@ export async function setMusicChannelConfig(
 // 신규 컬럼 없이 기존 jsonb 에 둔다. 나머지 키(슬로건·소셜·AI 명시)는 그대로 보존(read-modify-write).
 export async function getMusicPublishHours(channelId: string): Promise<number[]> {
   try {
-    return normalizePublishHours((await readRawChannelConfig(channelId)).publish_hours)
+    return normalizePublishHours((await readRawChannelConfig(channelId)).publish_hours, channelId)
   } catch {
-    return normalizePublishHours(null)
+    return normalizePublishHours(null, channelId)
   }
 }
 
 export async function setMusicPublishHours(channelId: string, hours: number[]): Promise<number[]> {
   const supabase = getSupabaseAdmin()
   const prev = await readRawChannelConfig(channelId)
-  const next = normalizePublishHours(hours)
+  const next = normalizePublishHours(hours, channelId)
   const { error } = await supabase
     .from(CHANNEL_STATUS_TABLE)
     .upsert(

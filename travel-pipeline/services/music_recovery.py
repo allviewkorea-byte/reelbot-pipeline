@@ -108,7 +108,7 @@ class Checkpoint:
 def _theme_brief(theme: dict) -> dict:
     """복구 재렌더에 필요한 주제 필드(제목·장르·tag_combo·채널 등) — 원래 주제를 그대로 쓰기 위함."""
     keep = ("slug", "title_kr", "title_en", "genre", "mood", "situation", "type", "style_prompt",
-            "lyric_tone", "tag_combo", "channel", "genre_id", "track_count")
+            "lyric_tone", "tag_combo", "channel", "genre_id", "track_count")  # genre_id: where 자동 회차
     return {k: theme.get(k) for k in keep if theme.get(k) is not None}
 
 
@@ -519,6 +519,7 @@ def _resume_safe(job_id: str, rec: dict) -> None:
                 img_dir = tempfile.mkdtemp(prefix="recimg_")
                 bg_path, review = music_auto_image.prepare_for_render(
                     job_id, ((rec.get("theme") or {}).get("tag_combo") or {}).get("action"), img_dir,
+                    channel=rec.get("channel"), genre=rec.get("genre_id"),
                 )
             try:
                 video, chk = recover_video(rec, job_id=job_id, first_error=RuntimeError("서버 재시작으로 중단"),

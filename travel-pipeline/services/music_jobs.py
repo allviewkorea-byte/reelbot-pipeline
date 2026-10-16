@@ -151,6 +151,25 @@ def list_recent_with_metadata(limit: int = 50) -> list[dict]:
         return []
 
 
+def list_recent_by_type(job_type: str, channel: str | None, limit: int = 2) -> list[dict]:
+    """채널의 최근 작업(유형별, created_at 최신순). where 자동 회차 장르 연속 방지용. 오류 → 빈 리스트."""
+    url, key = _supabase_cfg()
+    if not (url and key):
+        return []
+    try:
+        params = {"select": "job_id,metadata,created_at", "type": f"eq.{job_type}",
+                  "channel": f"eq.{_resolve_channel(channel)}", "metadata->>genre": "not.is.null",
+                  "order": "created_at.desc", "limit": str(max(1, min(20, limit)))}
+        with httpx.Client(timeout=15.0) as c:
+            r = c.get(f"{url}/rest/v1/{_TABLE}", headers=_headers(key), params=params)
+            r.raise_for_status()
+            rows = r.json()
+        return rows if isinstance(rows, list) else []
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[music-jobs] 최근 작업 조회 실패: %s", _http_err(e))
+        return []
+
+
 def claim_job(job_id: str, job_type: str, *, channel: str | None = None, metadata: dict | None = None) -> bool:
     """회차 선점 — job_id(unique)로 insert. 새로 만들었으면 True, 이미 있으면(409)·오류면 False.
 
