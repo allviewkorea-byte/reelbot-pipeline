@@ -289,7 +289,7 @@ function MusicDashboardPageInner() {
       {/* 좌 트렌드 / 우 오늘콘텐츠 — 5:5 */}
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         <div className="[&>div]:h-full">
-          <MusicTrendPanel />
+          <MusicTrendPanel channel={channel} />
         </div>
         <div className="[&>div]:h-full">
           <MusicQueuePreview key={channel} channel={channel} />

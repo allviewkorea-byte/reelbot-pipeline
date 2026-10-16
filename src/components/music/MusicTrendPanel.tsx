@@ -6,6 +6,7 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { ChevronDown, Loader2, TrendingUp } from "lucide-react"
 import { MUSIC_GENRES } from "@/lib/music-genres"
+import { withChannel } from "@/lib/music"
 
 interface TrendInsight {
   analyzed_at?: string
@@ -54,7 +55,9 @@ function ConceptBar({ bar, maxShare }: { bar: Bar; maxShare: number }) {
   )
 }
 
-export function MusicTrendPanel() {
+// channel: 가이드 링크에 채널을 이어 붙인다(운동 대시보드에서 눌러도 사이드바가 where 로 안 넘어가게).
+// 미지정 → where(기존 링크 "/music/guide" 그대로).
+export function MusicTrendPanel({ channel }: { channel?: string } = {}) {
   const [loading, setLoading] = useState(true)
   const [trend, setTrend] = useState<TrendInsight | null>(null)
   const [error, setError] = useState(false)
@@ -86,7 +89,7 @@ export function MusicTrendPanel() {
           {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
         </h2>
         <Link
-          href="/music/guide"
+          href={withChannel("/music/guide", channel)}
           className="flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-primary/5"
         >
           전체 보기
