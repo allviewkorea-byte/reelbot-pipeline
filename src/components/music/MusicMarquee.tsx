@@ -20,10 +20,11 @@ interface RecentVideo {
 }
 
 function VideoCard({ v }: { v: RecentVideo }) {
+  // 폭 기준 고정 카드 — 높이(%)에서 폭을 파생하던 방식은 휴대폰(Safari)에서 부모 높이가
+  // 정해지지 않아 카드 폭이 0 에 가깝게 줄어 썸네일이 겹치고 제목이 잘렸다(2026-10-16 실측).
   const inner = (
-    <div className="mr-4 flex h-full shrink-0 flex-col items-center">
-      {/* 16:9 가로 썸네일(음악) — 높이 확정 후 aspect-video 로 폭 파생 */}
-      <div className="flex aspect-video h-[calc(100%_-_4.5rem)] w-auto items-center justify-center overflow-hidden rounded-lg border border-border/60 bg-secondary/50">
+    <div className="mr-3 flex w-56 shrink-0 flex-col md:mr-4 md:w-64">
+      <div className="flex aspect-video w-full items-center justify-center overflow-hidden rounded-lg border border-border/60 bg-secondary/50">
         {v.thumbnail_url ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={v.thumbnail_url} alt={v.title_kr || ""} className="h-full w-full object-cover" />
@@ -31,17 +32,17 @@ function VideoCard({ v }: { v: RecentVideo }) {
           <Film className="h-10 w-10 text-muted-foreground" />
         )}
       </div>
-      <div className="mt-2 h-16 w-0 min-w-full shrink-0 overflow-hidden px-0.5">
+      <div className="mt-2 w-full px-0.5">
         <p className="line-clamp-2 text-sm font-medium leading-snug text-foreground">{v.localizations?.meta?.ko?.title || v.title_kr || v.mix_id}</p>
         <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-          {v.genre && <span>{v.genre}</span>}
-          <span>유튜브</span>
+          {v.genre && <span className="truncate">{v.genre}</span>}
+          <span className="shrink-0">유튜브</span>
         </div>
       </div>
     </div>
   )
   return v.youtube_url ? (
-    <a href={v.youtube_url} target="_blank" rel="noreferrer">{inner}</a>
+    <a href={v.youtube_url} target="_blank" rel="noreferrer" className="shrink-0">{inner}</a>
   ) : (
     inner
   )
@@ -68,7 +69,7 @@ export function MusicMarquee({ channel }: { channel?: string | null }) {
   }, [channel])
 
   return (
-    <div className="flex min-h-[300px] flex-1 flex-col rounded-xl border border-border bg-card p-3 md:min-h-0">
+    <div className="flex flex-col rounded-xl border border-border bg-card p-3">
       <div className="mb-2 flex shrink-0 items-center justify-between gap-3">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
           최근 업로드 영상
@@ -85,7 +86,7 @@ export function MusicMarquee({ channel }: { channel?: string | null }) {
           아직 업로드된 영상이 없습니다.
         </div>
       ) : (
-        <div className="marquee flex min-h-0 flex-1 items-center">
+        <div className="marquee">
           <div className="marquee__track">
             {[0, 1].map((copy) => videos.map((v) => <VideoCard key={`${v.mix_id}-${copy}`} v={v} />))}
           </div>
@@ -95,10 +96,9 @@ export function MusicMarquee({ channel }: { channel?: string | null }) {
             }
             .marquee__track {
               display: flex;
-              height: 100%;
-              max-height: 330px;
+              align-items: flex-start;
               width: max-content;
-              animation: marquee-scroll 15s linear infinite;
+              animation: marquee-scroll 40s linear infinite;
             }
             .marquee:hover .marquee__track {
               animation-play-state: paused;
