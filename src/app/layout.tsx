@@ -1,9 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import "./theme-light.css";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { ChannelProvider } from "@/components/channels/ChannelProvider";
 import { Toaster } from "sonner";
+import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -63,7 +65,13 @@ export default function RootLayout({
     <html
       lang="ko"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      // 화이트 모드: 아래 스크립트가 하이드레이션 전에 data-theme 을 붙이므로 속성 불일치 경고를 끈다.
+      suppressHydrationWarning
     >
+      <head>
+        {/* 첫 화면 깜빡임 방지 — 저장된 모드를 그리기 전에 적용(기본 다크면 아무것도 안 함). */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body className="flex h-full bg-background text-foreground">
         <ChannelProvider>
           <Sidebar />

@@ -4,6 +4,7 @@ import Link from "next/link"
 import { usePathname, useSearchParams } from "next/navigation"
 import { useEffect, useState, Suspense } from "react"
 import { Settings, PlayCircle, Menu, Plus, Activity } from "lucide-react"
+import { ThemeToggle } from "@/components/theme/ThemeToggle"
 import { cn } from "@/lib/utils"
 import {
   DEFAULT_MUSIC_CHANNEL,
@@ -145,8 +146,8 @@ function ChannelCard({
       className={cn(
         "flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-all duration-150",
         active
-          ? "border-primary/30 bg-primary/20 text-white"
-          : "border-transparent text-muted-foreground hover:bg-white/5 hover:text-foreground",
+          ? "border-primary/30 bg-primary/20 text-foreground"
+          : "border-transparent text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
       )}
     >
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-secondary/40 text-base">
@@ -329,8 +330,8 @@ function SidebarBody({ activeChannel }: { activeChannel: string }) {
             className={cn(
               "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150",
               systemActive
-                ? "bg-primary/20 text-white border border-primary/30"
-                : "text-muted-foreground hover:bg-white/5 hover:text-foreground"
+                ? "bg-primary/20 text-foreground border border-primary/30"
+                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
             )}
           >
             <Activity
@@ -344,14 +345,15 @@ function SidebarBody({ activeChannel }: { activeChannel: string }) {
               <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-red-500" />
             )}
           </Link>
+          <div className="flex items-center gap-1">
           <Link
             href="/settings"
             onClick={closeMobile}
             className={cn(
-              "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150",
+              "flex flex-1 items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150",
               settingsActive
-                ? "bg-primary/20 text-white border border-primary/30"
-                : "text-muted-foreground hover:bg-white/5 hover:text-foreground"
+                ? "bg-primary/20 text-foreground border border-primary/30"
+                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
             )}
           >
             <Settings
@@ -362,6 +364,9 @@ function SidebarBody({ activeChannel }: { activeChannel: string }) {
             />
             <span>설정</span>
           </Link>
+          {/* 다크/화이트 전환(해/달) — 앱 전체 공통, 기기에 저장 */}
+          <ThemeToggle />
+          </div>
           <Separator className="my-3" />
           <HealthIndicator />
         </div>

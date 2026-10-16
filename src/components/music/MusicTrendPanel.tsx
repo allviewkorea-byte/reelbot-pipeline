@@ -40,7 +40,7 @@ function ConceptBar({ bar, maxShare }: { bar: Bar; maxShare: number }) {
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center gap-2">
-        <span className="flex w-16 shrink-0 items-center gap-1 truncate text-xs font-medium" style={{ color: bar.color }}>
+        <span className="concept-label flex w-16 shrink-0 items-center gap-1 truncate text-xs font-medium" style={{ color: bar.color }}>
           <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: bar.color }} />
           {bar.label}
         </span>

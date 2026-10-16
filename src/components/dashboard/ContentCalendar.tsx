@@ -198,7 +198,7 @@ export function ContentCalendar({
               className="h-1.5 w-1.5 shrink-0 rounded-full"
               style={{ backgroundColor: conceptColor(p.concept) }}
             />
-            <span className="truncate" style={{ color: conceptColor(p.concept) }}>
+            <span className="concept-label truncate" style={{ color: conceptColor(p.concept) }}>
               {p.concept}
             </span>
           </span>
@@ -299,7 +299,7 @@ export function ContentCalendar({
                       className="h-1.5 w-1.5 shrink-0 rounded-full"
                       style={{ backgroundColor: conceptColor(p.concept) }}
                     />
-                    <span className="truncate font-medium" style={{ color: conceptColor(p.concept) }}>
+                    <span className="concept-label truncate font-medium" style={{ color: conceptColor(p.concept) }}>
                       {p.concept}
                     </span>
                     {p.scheduled_time && (
@@ -595,7 +595,7 @@ function DayEditor({
                             onClick={() => patch(s.id, { concept: c })}
                             style={selected ? { color: conceptColor(c), borderColor: conceptColor(c) } : undefined}
                             className={`rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                              selected ? "bg-white/5" : "border-border text-muted-foreground hover:text-foreground"
+                              selected ? "bg-foreground/5" : "border-border text-muted-foreground hover:text-foreground"
                             }`}
                           >
                             {c}
