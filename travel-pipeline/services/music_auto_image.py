@@ -4,7 +4,10 @@
 이 모듈은 그 손 단계를 대신한다.
 
   ① generate_reviewed  — GPT-Image-2.5 로 1장 생성 → Claude 비전으로 검수.
-                         불합격이면 재생성 최대 1회, 그래도 불합격이면 이미지 없음(ok=False).
+                         불합격이면 사유를 다음 프롬프트에 "반드시 피할 것"으로 붙여 재생성(최대 3회).
+                         합격본은 R2 축별 보관함(music-auto-bg/{축}/)에 쌓는다.
+                         전부 불합격이면 같은 축 합격본(최근 30일) 중 1장을 재사용하고,
+                         보관함이 비었을 때만 이미지 없음(ok=False → 블랙 배경).
   ② attach_after_render — 렌더가 끝난 뒤 그 이미지를 대표 업로드와 **같은 자리**
                          (R2 music-thumbnails/{slug}/{mix_id}.png + thumbnail_r2_key)에 둔다.
                          그래야 재렌더·썸네일·검토대기 표시가 기존 경로를 그대로 탄다.
@@ -43,7 +46,7 @@ _DEFAULT_SIZE = "2048x1152"  # 16:9, 양 변 16의 배수, 2560x1440(실험 구�
 _DEFAULT_QUALITY = "high"
 # 이미지 출력 토큰 단가(USD / 1M) — 비용 추정 로그용. 공식 가격표가 바뀌면 env 로 덮는다.
 _DEFAULT_OUTPUT_USD_PER_M = 30.0
-_MAX_ATTEMPTS = 2  # 1회 + 불합격 시 재생성 최대 1회
+_MAX_ATTEMPTS = 3  # 1회 + 불합격 시 재생성 최대 2회(1회 ≈ 20초 — 6분 상한 안에 충분)
 
 # 단계 상한(2026-10: 수동 생성이 이미지 단계에서 멈춘 사례). SDK 기본값은 OpenAI·Anthropic 모두
 # read timeout 600초 × 재시도 2회라, 상한 없이는 이미지 단계 하나가 1시간 넘게 잡을 수 있었다.
@@ -129,17 +132,21 @@ def api_prefix() -> str:
     )
 
 
-def build_prompt(action: str | None) -> str:
+def build_prompt(action: str | None, avoid: list[str] | None = None) -> str:
     """5단계 운동 풀(get_workout_image_prompt) + API 전용 프리픽스. [WORKOUT] 태그는 뗀다.
 
     [WORKOUT] 은 폰 ChatGPT 지침의 조건 분기용 표식이라 API 에는 의미가 없다.
+    avoid: 앞 시도의 검수 불합격 사유 — "이번엔 반드시 피할 것"으로 맨 끝에 붙인다.
     """
     from services import music_image_prompts as mip
 
     raw = mip.get_workout_image_prompt(action, include_prefix=False).strip()
     if raw.startswith(mip.WORKOUT_TAG):
         raw = raw[len(mip.WORKOUT_TAG):].strip()
-    return f"{api_prefix()} {raw}".strip()
+    prompt = f"{api_prefix()} {raw}".strip()
+    if avoid:
+        prompt += " 이번엔 반드시 피할 것(직전 시도 검수 불합격 사유): " + "; ".join(avoid) + "."
+    return prompt
 
 
 # ── 이미지 생성 ────────────────────────────────────────────────────────
@@ -243,16 +250,23 @@ def generate_image(prompt: str, out_path: str) -> dict:
 # ── 자동 검수(Claude 비전) ─────────────────────────────────────────────
 _REVIEW_SYSTEM = (
     "너는 운동·피트니스 유튜브 음악 채널의 배경 이미지 검수자다. 이 이미지는 영상 전체 배경과 "
-    "썸네일로 그대로 쓰인다. 채널 톤은 '밝은 햇살 + 쨍한 원색 대비'다. "
+    "썸네일로 그대로 쓰인다. 채널 톤은 '밝은 햇살 + 쨍한 원색 대비'다.\n"
+    "합격 기준: 글로벌 스포츠웨어 브랜드 캠페인 화보 수준의 운동 장면. 인물은 허용된다 — "
+    "노출 적은 운동복(티셔츠·탱크탑 + 긴 레깅스·조거팬츠·트레이닝 팬츠)을 입고 운동하는 역동적인 "
+    "순간이면 정상이다. 인물 없는 기구·트랙·스튜디오 장면도 정상이다.\n"
     "아래 불합격 기준 중 하나라도 해당하면 불합격이다.\n"
-    "1. 글자·숫자·로고·워터마크·간판 문구가 보인다(작고 흐릿해도 읽히면 해당).\n"
-    "2. 정면 얼굴 클로즈업, 또는 화보·수영복처럼 몸매·노출을 강조한 인물.\n"
-    "3. 손가락·팔다리·신체 기형, 또는 기구(바벨·덤벨·머신)가 물리적으로 어색하게 생겼다.\n"
-    "4. 운동과 무관한 카페·거리·여행 풍경(헬스장·트랙·해변 러닝·스트레칭 같은 운동 장면이 아니다).\n"
-    "5. 전체가 어둡거나 칙칙하다(야간·저조도·회색조·탁한 색감).\n"
-    "6. 화면 중앙이 하얗게 날아가 있다 — 영상 중앙에 흰 로고가 올라가는데 안 보일 정도로 중앙이 "
-    "희거나 과노출이면 불합격.\n"
-    "실루엣·뒷모습 인물, 밝은 햇살, 선명한 그림자, 쨍한 원색은 정상이다. 애매하면 불합격으로 판단한다.\n"
+    "1. 복장: 크롭탑, 스포츠브라 단독, 짧은 반바지.\n"
+    "2. 가슴·엉덩이·허리 라인을 부각하는 포즈·앵글(화보·수영복처럼 몸매를 강조).\n"
+    "3. 얼굴 정면 클로즈업.\n"
+    "4. 간판·포스터·벽 글자·큰 글자·로고(옷·기구의 브랜드 로고 포함)·워터마크.\n"
+    "5. 화면 중앙이 하얗게 날아가 있다(창문·출입구·역광 광원이 중앙에서 과노출) — 영상 중앙에 "
+    "흰 로고가 올라가는데 안 보일 정도로 중앙이 희면 불합격.\n"
+    "6. 전체가 어둡거나 칙칙하다(야간·저조도·회색조·탁한 색감).\n"
+    "7. AI 티: 손가락·관절·팔다리 왜곡, 기구(바벨·덤벨·머신)가 물리적으로 어색하다.\n"
+    "8. 운동과 무관한 카페·거리·여행 풍경.\n"
+    "허용(불합격 사유 아님): 원판 무게 숫자(예: 15 KG)·덤벨 눈금처럼 기구에 붙은 작고 자연스러운 "
+    "표시는 읽혀도 정상이다. 밝은 햇살, 선명한 그림자, 쨍한 원색, 땀·분필 가루 같은 현장감도 정상이다. "
+    "애매하면 불합격으로 판단한다.\n"
     '반드시 JSON 한 개만 출력한다: {"pass": true 또는 false, "reasons": ["불합격 사유(한국어, 짧게)"]}. '
     "합격이면 reasons 는 빈 배열."
 )
@@ -327,6 +341,7 @@ def generate_reviewed(action: str | None, out_path: str, *, deadline: float | No
     """
     out = Path(out_path)
     attempts: list[dict] = []
+    avoid: list[str] = []  # 앞 시도들의 검수 불합격 사유(중복 제거) → 다음 프롬프트에 붙인다
     for i in range(1, _MAX_ATTEMPTS + 1):
         rec: dict = {"attempt": i}
         cand = out.with_name(f"{out.stem}_try{i}.png")
@@ -340,8 +355,10 @@ def generate_reviewed(action: str | None, out_path: str, *, deadline: float | No
         t_try = time.monotonic()
         logger.warning("[auto-image] 시도 %d/%d 시작", i, _MAX_ATTEMPTS)
         try:
-            prompt = build_prompt(action)
+            prompt = build_prompt(action, avoid)
             rec["prompt"] = prompt[:400]
+            if avoid:
+                rec["avoid"] = list(avoid)
             info = generate_image(prompt, str(cand))
             rec.update({k: info.get(k) for k in ("model", "output_tokens", "est_output_usd", "response_format")})
             review = review_image(str(cand))
@@ -357,6 +374,9 @@ def generate_reviewed(action: str | None, out_path: str, *, deadline: float | No
                 shutil.move(str(cand), str(out))
                 attempts.append(rec)
                 return {"ok": True, "path": str(out), "attempts": attempts, "summary": "합격"}
+            for r in review["reasons"]:
+                if r and r not in avoid:
+                    avoid.append(r)
         except Exception as e:  # noqa: BLE001 - 시도 실패로 기록하고 다음 시도
             rec["pass"] = False
             rec["error"] = str(e)[:300]
@@ -384,11 +404,102 @@ def job_summary(res: dict) -> dict:
         "attempts": [
             {k: a.get(k) for k in (
                 "attempt", "pass", "reasons", "error", "model", "review_model",
-                "output_tokens", "est_output_usd", "response_format", "prompt",
+                "output_tokens", "est_output_usd", "response_format", "prompt", "avoid",
             ) if a.get(k) is not None}
             for a in (res.get("attempts") or [])
         ],
+        **({"reused": res["reused"]} if res.get("reused") else {}),
     }
+
+
+# ── 합격본 보관함(축별) — 전부 불합격일 때 검은 배경 대신 재사용 ─────────────
+# R2 음악 버킷 music-auto-bg/{axis}/{UTC시각}_{sha12}.png. 직전 영상에 쓴 키는
+# music-auto-bg/_last_{axis}.txt 에 적어 두고 재사용 후보에서 뺀다.
+_ARCHIVE_PREFIX = "music-auto-bg"
+_REUSE_MAX_AGE_SEC = 30 * 24 * 3600
+
+
+def _archive_dir(axis: str) -> str:
+    return f"{_ARCHIVE_PREFIX}/{axis}/"
+
+
+def _last_key(axis: str) -> str:
+    return f"{_ARCHIVE_PREFIX}/_last_{axis}.txt"
+
+
+def _write_last(axis: str, key: str) -> None:
+    """직전 영상에 쓴 배경 키 기록(best-effort)."""
+    try:
+        from adapters import r2_storage
+        r2_storage._get_client().put_object(
+            Bucket=r2_storage._music_bucket(), Key=_last_key(axis),
+            Body=key.encode("utf-8"), ContentType="text/plain",
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[auto-image] 직전 배경 기록 실패(무시): %s", str(e)[:160])
+
+
+def _read_last(axis: str) -> str | None:
+    try:
+        from adapters import r2_storage
+        obj = r2_storage._get_client().get_object(Bucket=r2_storage._music_bucket(), Key=_last_key(axis))
+        return obj["Body"].read().decode("utf-8").strip() or None
+    except Exception:  # noqa: BLE001 - 없음 → 제외할 키 없음
+        return None
+
+
+def archive_passed(path: str, axis: str) -> str | None:
+    """합격 이미지를 축별 보관함에 올리고 직전 배경으로 기록. 키 반환, 실패 시 None."""
+    try:
+        from adapters import r2_storage
+        if not r2_storage.is_available():
+            return None
+        stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+        key = f"{_archive_dir(axis)}{stamp}_{(_sha256(path) or 'x')[:12]}.png"
+        r2_storage.upload_image(
+            path, key, bucket=r2_storage._music_bucket(),
+            public_base_url=r2_storage._music_public_base(), content_type="image/png",
+        )
+        _write_last(axis, key)
+        logger.warning("[auto-image] 합격본 보관 axis=%s key=%s", axis, key)
+        return key
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[auto-image] 합격본 보관 실패(무시): %s", str(e)[:160])
+        return None
+
+
+def pick_reuse(axis: str, dest: str) -> dict | None:
+    """같은 축 합격본(최근 30일) 중 직전 영상 배경을 뺀 무작위 1장 → dest. 없으면 None.
+
+    후보가 직전 배경 1장뿐이면 그것이라도 쓴다(검은 배경보다 낫다).
+    """
+    import random
+    try:
+        from adapters import r2_storage
+        if not r2_storage.is_available():
+            return None
+        client, bucket = r2_storage._get_client(), r2_storage._music_bucket()
+        cutoff = time.time() - _REUSE_MAX_AGE_SEC
+        cands: list[tuple[str, float]] = []
+        for page in client.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=_archive_dir(axis)):
+            for obj in page.get("Contents", []):
+                lm = obj.get("LastModified")
+                ts = lm.timestamp() if lm is not None else 0.0
+                if obj["Key"].endswith(".png") and ts >= cutoff:
+                    cands.append((obj["Key"], ts))
+        if not cands:
+            logger.warning("[auto-image] 재사용할 합격본 없음 axis=%s(최근 30일)", axis)
+            return None
+        last = _read_last(axis)
+        pool = [c for c in cands if c[0] != last] or cands
+        key, ts = random.choice(pool)
+        client.download_file(bucket, key, dest)
+        _write_last(axis, key)
+        return {"key": key, "archived_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts)),
+                "candidates": len(cands), "avoided_last": bool(last and len(pool) < len(cands))}
+    except Exception as e:  # noqa: BLE001 - 재사용 실패 → 블랙 배경(기존 동작)
+        logger.warning("[auto-image] 합격본 재사용 실패 axis=%s: %s", axis, str(e)[:160])
+        return None
 
 
 # ── 렌더 정합 표식(publish 재렌더 건너뛰기 판정) ───────────────────────
@@ -516,10 +627,15 @@ def matching_render(row: dict, *, bg_path: str, char_path: str | None, show_play
     return marker
 
 
-def prepare_for_render(job_id: str, action: str | None, workdir: str) -> tuple[str | None, dict]:
+def prepare_for_render(
+    job_id: str, action: str | None, workdir: str, *, reuse: bool = True,
+) -> tuple[str | None, dict]:
     """렌더 직전 — 생성·검수 후 (배경 경로 또는 None, 요약). 요약은 music_jobs.metadata 에 남긴다.
 
-    None 이면 호출부는 지금까지처럼 background_path 없이 렌더한다(블랙 배경, 반자동으로 떨어짐).
+    합격 → 축별 보관함에 보관. 전부 불합격·시간 초과 → reuse 면 같은 축 합격본 재사용
+    (요약에 reused). 그것도 없으면 None → 호출부는 지금까지처럼 블랙 배경으로 렌더한다.
+    reuse=False: 검토 카드의 [AI 이미지 다시 만들기] 처럼 "새 이미지"를 원한 경로 — 옛 이미지로
+    바꾸지 않고 실패로 돌려준다(기존 상태 유지).
     """
     limit = prepare_timeout_sec()
     t0 = time.monotonic()
@@ -548,8 +664,24 @@ def prepare_for_render(job_id: str, action: str | None, workdir: str) -> tuple[s
         logger.warning("[auto-image] 이미지 단계 오류 → 이미지 없이 렌더 진행 job=%s: %s", job_id, box["err"])
     else:
         res = box.get("res") or {"ok": False, "path": None, "attempts": [], "summary": "결과 없음"}
+    from services.music_workout_style import axis_for_action
+    axis = axis_for_action(action)
+    if res.get("ok"):
+        archive_passed(res["path"], axis)
+    elif reuse:
+        dest = str(Path(workdir) / "reuse_bg.png")
+        picked = pick_reuse(axis, dest)
+        if picked:
+            fail = res.get("summary") or ""
+            res = {**res, "ok": True, "path": dest, "reused": picked,
+                   "summary": f"생성 이미지 전부 불합격 → 합격본 재사용({picked['key']}) · {fail}"[:400]}
+            logger.warning(
+                "[auto-image] 생성 전부 불합격 → 합격본 재사용 job=%s axis=%s key=%s (불합격: %s)",
+                job_id, axis, picked["key"], fail[:200],
+            )
     logger.warning(
-        "[auto-image] 이미지 단계 끝 job=%s ok=%s 소요=%.1fs", job_id, bool(res.get("ok")), time.monotonic() - t0,
+        "[auto-image] 이미지 단계 끝 job=%s ok=%s reused=%s 소요=%.1fs",
+        job_id, bool(res.get("ok")), bool(res.get("reused")), time.monotonic() - t0,
     )
     summary = job_summary(res)
     try:

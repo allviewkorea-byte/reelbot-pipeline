@@ -44,7 +44,11 @@ def test_build_prompt_strips_tag_and_uses_bright_tone(monkeypatch):
         "빨강·노랑·코발트 블루",
         "어둡고 칙칙한 톤·회색조 금지",
         "화면 중앙은 하얗게 날리지 말 것",
-        "실루엣·뒷모습·움직이는 순간",
+        "화면 중앙에 창문·출입구·역광 광원을 두지 말 것",
+        "간판·포스터·벽 글자 등 읽히는 문구 금지",
+        "글로벌 스포츠웨어 브랜드 캠페인 화보",
+        "크롭탑·스포츠브라 단독·짧은 반바지 금지",
+        "얼굴 정면 클로즈업 금지",
         "완벽하게 정돈하지 말 것",
         "보는 순간 몸을 움직이고 싶어지는 느낌",
     ):
@@ -70,6 +74,9 @@ def test_review_criteria_updated():
     r = mai._REVIEW_SYSTEM
     assert "전체가 어둡거나 칙칙하다" in r and "화면 중앙이 하얗게 날아가" in r
     assert "운동과 무관한 카페·거리" in r and "밝고 화사한" not in r
+    for phrase in ("크롭탑", "스포츠브라 단독", "짧은 반바지", "얼굴 정면 클로즈업", "간판·포스터",
+                   "AI 티", "원판 무게 숫자", "읽혀도 정상", "글로벌 스포츠웨어 브랜드 캠페인 화보"):
+        assert phrase in r, phrase
 
 
 def test_env_overrides(monkeypatch):
@@ -174,7 +181,7 @@ def test_review_image_sends_image_block(monkeypatch, tmp_path):
 
 
 def test_generate_reviewed_retry_then_pass(monkeypatch, tmp_path):
-    monkeypatch.setattr(mai, "build_prompt", lambda a: "p")
+    monkeypatch.setattr(mai, "build_prompt", lambda a, avoid=None: "p")
     calls = {"gen": 0}
 
     def _gen(prompt, path):
@@ -191,8 +198,8 @@ def test_generate_reviewed_retry_then_pass(monkeypatch, tmp_path):
     assert [a["pass"] for a in res["attempts"]] == [False, True]
 
 
-def test_generate_reviewed_gives_up_after_one_retry(monkeypatch, tmp_path):
-    monkeypatch.setattr(mai, "build_prompt", lambda a: "p")
+def test_generate_reviewed_gives_up_after_three_attempts(monkeypatch, tmp_path):
+    monkeypatch.setattr(mai, "build_prompt", lambda a, avoid=None: "p")
     calls = {"gen": 0}
 
     def _gen(prompt, path):
@@ -205,7 +212,7 @@ def test_generate_reviewed_gives_up_after_one_retry(monkeypatch, tmp_path):
     monkeypatch.setattr(mai, "generate_image", _gen)
     monkeypatch.setattr(mai, "review_image", lambda p: {"pass": False, "reasons": ["글자 보임"]})
     res = mai.generate_reviewed(None, str(tmp_path / "bg.png"))
-    assert res["ok"] is False and res["path"] is None and calls["gen"] == 2
+    assert res["ok"] is False and res["path"] is None and calls["gen"] == 3
     assert "403" in res["summary"] and "글자 보임" in res["summary"]
     assert not list(tmp_path.glob("*.png"))  # 불합격 후보는 남기지 않는다
 
@@ -445,7 +452,7 @@ def test_ai_image_fail_keeps_existing_and_releases_lock(monkeypatch):
     touched = []
     monkeypatch.setattr(music_uploads, "set_thumbnail", lambda *a: touched.append(a) or {"error": None})
     monkeypatch.setattr(music_uploads, "clear_localizations", lambda *a: touched.append(a) or {"error": None})
-    monkeypatch.setattr(mai, "prepare_for_render", lambda *a: (None, {"ok": False, "summary": "1차 불합격: 글자 보임"}))
+    monkeypatch.setattr(mai, "prepare_for_render", lambda *a, **k: (None, {"ok": False, "summary": "1차 불합격: 글자 보임"}))
     jid = rr.start("m1", channel="workout_music")["job_id"]
     rr.run_with_ai_image(jid)
     st = rr.get_status(jid)
@@ -462,8 +469,8 @@ def test_ai_image_pass_replaces_then_rerenders(monkeypatch):
     monkeypatch.setattr(music_uploads, "set_thumbnail", lambda *a: calls.append(("set",) + a) or {"error": None})
     monkeypatch.setattr(music_uploads, "clear_localizations", lambda *a: calls.append(("clear",) + a) or {"error": None})
 
-    def _prep(job_id, action, workdir):
-        assert action == "running"
+    def _prep(job_id, action, workdir, **kw):
+        assert action == "running" and kw == {"reuse": False}  # 다시 만들기는 옛 이미지로 바꾸지 않는다
         p = Path(workdir) / "auto_bg.png"
         p.write_bytes(b"BG")
         return str(p), {"ok": True}
