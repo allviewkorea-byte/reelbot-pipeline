@@ -94,22 +94,24 @@ def test_publish_aborts_without_ai_disclosure(monkeypatch):
     assert ei.value.status_code == 500 and "AI 고지" in ei.value.detail
 
 
-@pytest.mark.parametrize("action,expected", [
-    ("workout", "근력 운동 플레이리스트"), ("running", "러닝·유산소 플레이리스트"),
-    ("yoga", "스트레칭·워밍업 플레이리스트"), (None, "근력 운동 플레이리스트"),
+@pytest.mark.parametrize("action,axis", [
+    ("workout", "strength"), ("running", "cardio"), ("yoga", "warmup"), (None, "strength"),
 ])
-def test_workout_info_line_has_no_where_brand(monkeypatch, action, expected):
+def test_workout_info_line_is_axis_copy_without_brand(monkeypatch, action, axis):
     monkeypatch.delenv("MUSIC_CHANNEL_NAME_WORKOUT", raising=False)
     theme = dict(THEME, tag_combo={"action": action} if action else {})
     head = music_meta.build_info_head(theme, VIZ, {"ai_disclosure": AI})
-    assert head.splitlines()[0] == f"💪 2주안에몸매만들기 · {expected}"
-    assert "where;" not in head
+    first = head.splitlines()[0]
+    assert first.startswith("💪 ") and first[2:] in music_meta._WORKOUT_INFO_COPY[axis]
+    assert "where;" not in head and "2주안에몸매만들기" not in head   # 브랜드·채널명 없음
+    assert head == music_meta.build_info_head(theme, VIZ, {"ai_disclosure": AI})  # 같은 영상은 같은 문구
     assert music_meta.build_copyright(theme) == "Copyright Ⓒ 2주안에몸매만들기 All rights reserved."
 
 
-def test_workout_channel_name_env_wins(monkeypatch):
-    monkeypatch.setenv("MUSIC_CHANNEL_NAME_WORKOUT", "GYMNAME")
-    assert music_meta.build_info_head(THEME, VIZ, None).startswith("💪 GYMNAME · ")
+def test_workout_info_copy_varies_across_videos():
+    lines = {music_meta.build_info_head(dict(THEME, slug=f"mix-{i}", tag_combo={"action": "workout"}), VIZ, None)
+             for i in range(40)}
+    assert len(lines) >= 4
 
 
 @pytest.mark.parametrize("theme", [{"slug": "s"}, {"slug": "s", "channel": "rooftop_music"}])

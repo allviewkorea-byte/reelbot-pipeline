@@ -40,11 +40,39 @@ _CHANNEL_NAME_DEFAULT: dict[str, str] = {
     "workout_music": "2주안에몸매만들기",
 }
 
-# 운동 채널 설명란 정보줄의 축 문구(axis_for_action 의 strength/cardio/warmup).
-_WORKOUT_INFO_AXIS: dict[str, str] = {
-    "strength": "근력 운동 플레이리스트",
-    "cardio": "러닝·유산소 플레이리스트",
-    "warmup": "스트레칭·워밍업 플레이리스트",
+# 운동 채널 설명란 정보줄 카피(axis_for_action 의 strength/cardio/warmup 축별 풀).
+# 영상마다 slug 로 결정적으로 하나 고른다(_pick) — 같은 영상은 재조립해도 같은 문구.
+_WORKOUT_INFO_COPY: dict[str, list[str]] = {
+    "strength": [
+        "운동할 때 집중하기 좋은 플레이리스트",
+        "마지막 한 세트까지 밀어붙이는 플레이리스트",
+        "무게를 드는 순간 힘이 되는 비트",
+        "헬스장에서 볼륨 높이고 듣는 음악",
+        "한계를 넘고 싶은 날 듣는 운동 음악",
+        "땀 흘리는 시간을 더 뜨겁게 만드는 플레이리스트",
+        "오늘 운동, 끝까지 버티게 해줄 음악",
+        "근육이 깨어나는 하이텐션 플레이리스트",
+    ],
+    "cardio": [
+        "달릴 때 페이스를 지켜주는 플레이리스트",
+        "숨이 차도 멈추지 않게 해줄 음악",
+        "러닝 리듬에 딱 맞는 비트",
+        "유산소 시간이 순식간에 지나가는 플레이리스트",
+        "한 바퀴 더 달리고 싶어지는 음악",
+        "심박수를 끌어올리는 러닝 플레이리스트",
+        "땀 흘리며 달리기 좋은 음악",
+        "오늘의 목표 거리까지 함께할 플레이리스트",
+    ],
+    "warmup": [
+        "몸을 천천히 깨우는 워밍업 음악",
+        "스트레칭할 때 듣기 좋은 플레이리스트",
+        "운동 전 호흡을 고르는 음악",
+        "굳은 몸을 부드럽게 풀어주는 플레이리스트",
+        "운동 후 쿨다운에 어울리는 음악",
+        "가볍게 몸을 풀며 듣는 플레이리스트",
+        "요가·필라테스와 함께하기 좋은 음악",
+        "오늘 운동을 준비하는 시간의 플레이리스트",
+    ],
 }
 
 
@@ -848,9 +876,10 @@ def build_info_head(theme: dict, viz_spec: dict | None, config: dict | None) -> 
     cfg = config or {}
     info: list[str] = []
     if is_workout_channel(theme.get("channel")):
-        # 운동 채널엔 where 브랜드(📍 where;도시)를 쓰지 않는다 — 채널명 · 운동 축.
+        # 운동 채널엔 where 브랜드(📍 where;도시)도 채널명도 쓰지 않는다 — 축별 카피 1줄.
         action = (theme.get("tag_combo") or {}).get("action")
-        info.append(f"💪 {_channel_name(theme.get('channel'))} · {_WORKOUT_INFO_AXIS[axis_for_action(action)]}")
+        pool = _WORKOUT_INFO_COPY[axis_for_action(action)]
+        info.append(f"💪 {_pick(pool, str(theme.get('slug') or theme.get('title_kr') or ''))}")
     else:
         where = str(vs.get("location_en") or "").strip() or "City View"
         flag = _flag(vs)
