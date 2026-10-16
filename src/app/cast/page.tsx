@@ -414,7 +414,7 @@ export default function CastPage() {
                     className={`flex min-h-0 flex-1 items-center gap-2.5 rounded-lg border px-2 py-1.5 text-left transition-colors ${
                       active
                         ? "border-primary/40 bg-primary/15"
-                        : "border-transparent hover:bg-white/5"
+                        : "border-transparent hover:bg-foreground/5"
                     }`}
                   >
                     <div className="relative h-full w-auto shrink-0 overflow-hidden rounded bg-secondary/30 aspect-[3/4]">

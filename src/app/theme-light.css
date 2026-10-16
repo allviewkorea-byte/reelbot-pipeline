@@ -1,0 +1,60 @@
+/*
+ * 화이트 모드 — <html data-theme="light"> 일 때만 적용된다(기본은 다크, 이 파일은 아무것도 안 바꿈).
+ *
+ * 규칙: globals.css(불변파일)를 건드리지 않고, **이미 있는 변수의 값만** 덮어쓴다. 새 토큰 이름 없음.
+ *  1) 디자인 토큰(--background, --card, --foreground …): globals.css 의 @theme inline 이
+ *     hsl(var(--x)) 로 참조하므로 값만 바꾸면 bg-background·text-foreground 등이 전부 따라온다.
+ *     --primary 는 흰 바탕 대비(약 6:1)를 위해 밝기만 66% → 55%.
+ *  2) Tailwind 기본 색 변수(--color-{emerald,red,amber,sky}-{300,400,500}): 앱이 실제로 쓰는 밝은
+ *     상태색 글자(text-emerald-400 등)가 흰 바탕에서 대비 1.4~2.9 라, 같은 색 700 색조 값으로 덮는다
+ *     (대비 5.0~6.4). 불변파일(sayeon 에러 문구 등)도 파일 수정 없이 함께 맞춰진다. 대표 승인(A안).
+ *  3) 영상·썸네일 위 흰 글씨(text-white)와 --color-white 는 건드리지 않는다 — 이미지 위에서는
+ *     화이트 모드에서도 흰색이어야 한다.
+ */
+
+html[data-theme="light"] {
+  color-scheme: light;
+
+  --background: 220 20% 97%;
+  --foreground: 222 47% 11%;
+  --sidebar: 0 0% 100%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --primary: 265 89% 55%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 220 16% 90%;
+  --secondary-foreground: 222 47% 15%;
+  --muted: 220 16% 92%;
+  --muted-foreground: 215 16% 40%;
+  --accent: 265 89% 55%;
+  --accent-foreground: 0 0% 100%;
+  --border: 220 14% 85%;
+  --input: 220 14% 85%;
+  --ring: 265 89% 55%;
+
+  /* 밝은 상태색 → 700 색조 값(Tailwind 기본 팔레트 값 그대로) */
+  --color-emerald-300: oklch(50.8% 0.118 165.612);
+  --color-emerald-400: oklch(50.8% 0.118 165.612);
+  --color-emerald-500: oklch(50.8% 0.118 165.612);
+  --color-red-300: oklch(50.5% 0.213 27.518);
+  --color-red-400: oklch(50.5% 0.213 27.518);
+  --color-red-500: oklch(50.5% 0.213 27.518);
+  --color-amber-300: oklch(55.5% 0.163 48.998);
+  --color-amber-400: oklch(55.5% 0.163 48.998);
+  --color-amber-500: oklch(55.5% 0.163 48.998);
+  --color-sky-300: oklch(50% 0.134 242.749);
+  --color-sky-400: oklch(50% 0.134 242.749);
+  --color-sky-500: oklch(50% 0.134 242.749);
+}
+
+/* 불변파일(music/design/page.tsx) "대시보드" 버튼의 hover:bg-white/5 — 흰 바탕에서 안 보여 보정.
+   다른 파일들은 이 클래스를 hover:bg-foreground/5 로 바꿔서, 이 선택자는 그 버튼에만 걸린다. */
+html[data-theme="light"] .hover\:bg-white\/5:hover {
+  background-color: hsl(var(--foreground) / 0.05);
+}
+
+/* 트렌드 막대 라벨 — 컨셉 원색 글자는 흰 바탕 대비가 1.7~2.8 이라 글자만 기본 글자색.
+   점·막대는 원색 유지(대표 승인). 인라인 style color 를 덮으려 !important. */
+html[data-theme="light"] .concept-label {
+  color: hsl(var(--foreground)) !important;
+}

@@ -70,7 +70,7 @@ function MusicGuidePageInner() {
       <header className="flex items-center gap-3 pl-10 md:pl-0">
         <Link
           href={withChannel("/music", channel)}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-white/5 hover:text-foreground"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" /> 큐로
         </Link>

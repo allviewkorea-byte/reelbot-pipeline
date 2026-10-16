@@ -141,7 +141,7 @@ export default function SystemPage() {
           type="button"
           onClick={refresh}
           disabled={loading}
-          className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground transition hover:bg-white/5 disabled:opacity-50"
+          className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground transition hover:bg-foreground/5 disabled:opacity-50"
         >
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
           새로고침
@@ -207,7 +207,7 @@ export default function SystemPage() {
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     <span>{formatTime(err.created_at)}</span>
                     {err.step && (
-                      <span className="rounded bg-white/5 px-1.5 py-0.5">
+                      <span className="rounded bg-foreground/5 px-1.5 py-0.5">
                         {err.step}
                       </span>
                     )}

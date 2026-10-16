@@ -264,7 +264,7 @@ function MusicQueueGridPageInner() {
       <header className="pl-10 md:pl-0">
         {/* 모바일: 버튼 가로 한 줄(좌/우 정렬, 줄바꿈 없음). 데스크탑은 아래 인라인 행 사용. */}
         <div className="mb-3 flex items-center justify-between gap-2 md:hidden">
-          <Link href={withChannel("/music", channel)} className="inline-flex min-h-[44px] items-center gap-1.5 whitespace-nowrap rounded-lg border border-border px-3 text-sm text-muted-foreground hover:bg-white/5 hover:text-foreground">
+          <Link href={withChannel("/music", channel)} className="inline-flex min-h-[44px] items-center gap-1.5 whitespace-nowrap rounded-lg border border-border px-3 text-sm text-muted-foreground hover:bg-foreground/5 hover:text-foreground">
             <ArrowLeft className="h-4 w-4" /> 대시보드
           </Link>
           <Link href={withChannel("/music/design", channel)} className="inline-flex min-h-[44px] items-center gap-1.5 whitespace-nowrap rounded-lg border border-border px-3 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground">
@@ -272,7 +272,7 @@ function MusicQueueGridPageInner() {
           </Link>
         </div>
         <div className="flex items-center gap-3">
-          <Link href={withChannel("/music", channel)} className="hidden items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-white/5 hover:text-foreground md:inline-flex">
+          <Link href={withChannel("/music", channel)} className="hidden items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-foreground/5 hover:text-foreground md:inline-flex">
             <ArrowLeft className="h-4 w-4" /> 대시보드
           </Link>
           <div>
