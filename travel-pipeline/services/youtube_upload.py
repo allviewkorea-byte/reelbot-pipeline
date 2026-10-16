@@ -534,6 +534,7 @@ def upload_music_video(
     tags: list[str] | None = None,
     synthetic_media: bool | None = None,
     channel: str | None = None,
+    publish_at: str | None = None,
 ) -> dict:
     """음악 영상(mp4)을 음악 채널(Revezen)에 업로드. Returns {video_id, video_url}.
 
@@ -597,6 +598,11 @@ def upload_music_video(
             _src = "대시보드 토글"
         if synthetic:
             body["status"]["containsSyntheticMedia"] = True
+        # 예약 공개(자동 회차 PR-2a) — publishAt 은 privacyStatus=private 일 때만 유효하다.
+        if publish_at:
+            body["status"]["privacyStatus"] = "private"
+            body["status"]["publishAt"] = publish_at
+            logger.warning("[music-youtube] 예약 공개 publishAt=%s", publish_at)
         logger.warning(
             "[youtube-debug] containsSyntheticMedia=%s (출처: %s)", synthetic, _src
         )

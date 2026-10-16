@@ -12,6 +12,23 @@ export const MUSIC_CHANNEL_NAME =
 export const DEFAULT_MUSIC_CHANNEL = MUSIC_CHANNEL_ID // "rooftop_music"
 export const WORKOUT_CHANNEL_ID = "workout_music"
 
+// 자동 회차(PR-2a) 대상 — 백엔드 music_auto_run.auto_run_channels() 기본값과 같다.
+// where 는 넣지 않는다(자동 생산 off). 공개 시각 입력은 이 채널들 화면에만 보인다.
+export const AUTO_RUN_CHANNELS: readonly string[] = [WORKOUT_CHANNEL_ID]
+export const DEFAULT_PUBLISH_HOURS = [6, 18]
+
+/** 공개 시 목록 정규화(0~23 정수, 중복 제거·정렬). 비면 기본 [6, 18]. 백엔드 normalize_hours 와 같은 규칙. */
+export function normalizePublishHours(raw: unknown): number[] {
+  const out: number[] = []
+  if (Array.isArray(raw)) {
+    for (const v of raw) {
+      const h = Math.trunc(Number(v))
+      if (Number.isFinite(h) && h >= 0 && h <= 23 && !out.includes(h)) out.push(h)
+    }
+  }
+  return out.length ? out.sort((a, b) => a - b) : [...DEFAULT_PUBLISH_HOURS]
+}
+
 export interface MusicChannelInfo {
   id: string
   name: string

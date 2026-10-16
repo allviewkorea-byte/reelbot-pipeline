@@ -316,6 +316,8 @@ def run(job_id: str) -> None:
 
         job["video_url"] = video.get("video_url")
         job["mix_id"] = video.get("video_id")
+        # 자동 회차(PR-2a)가 폴백 렌더(첫프레임 없음)를 거르는 데 쓴다. 응답·DB 무변경.
+        job["frame_thumb_key"] = video.get("frame_thumb_key")
         # 채널 보정 — record_pending 은 렌더 경로(music_video, 수정 금지)에서 불려 채널을
         # 못 받는다. 렌더를 시킨 이쪽이 mix_id 로 사후에 박는다. best-effort.
         if job.get("channel") and job.get("mix_id"):

@@ -1,6 +1,6 @@
 // 음악 파이프라인 작업(운영 가시성, #36) — 프론트 공용 타입 + 단계 매핑.
 
-export type MusicJobType = "manual_render" | "cron" | "rerender"
+export type MusicJobType = "manual_render" | "cron" | "rerender" | "auto_run"
 export type MusicJobStatus = "queued" | "running" | "completed" | "failed"
 
 export interface MusicJob {
@@ -33,6 +33,7 @@ export const JOB_TYPE_LABEL: Record<MusicJobType, string> = {
   manual_render: "수동 영상 생성",
   cron: "자동 제작",
   rerender: "재렌더",
+  auto_run: "자동 회차",
 }
 
 export const STEP_LABEL: Record<string, string> = {

@@ -109,6 +109,65 @@ def start_job(
     return jid
 
 
+def claim_job(job_id: str, job_type: str, *, channel: str | None = None, metadata: dict | None = None) -> bool:
+    """회차 선점 — job_id(unique)로 insert. 새로 만들었으면 True, 이미 있으면(409)·오류면 False.
+
+    자동 회차(music_auto_run)의 중복 실행 방지용. start_job 과 달리 결과를 돌려준다.
+    오류 시 False(안전 쪽: 중복 제작보다 한 회차 누락이 싸다). completed_at 을 채워 두어
+    진행 카드에는 안 뜬다(실제 제작은 manual_render 카드가 보여준다). 실패 시 show_failed 로 연다.
+    """
+    url, key = _supabase_cfg()
+    if not (url and key):
+        logger.warning("[music-jobs] claim 불가(supabase 미설정) job=%s", job_id)
+        return False
+    record = {
+        "job_id": job_id, "type": job_type, "channel": _resolve_channel(channel),
+        "status": "queued", "step": None, "step_progress": 0, "steps_completed": [],
+        "metadata": metadata or {}, "completed_at": _now(), "updated_at": _now(),
+    }
+    try:
+        with httpx.Client(timeout=15.0) as c:
+            r = c.post(
+                f"{url}/rest/v1/{_TABLE}",
+                headers={**_headers(key, write=True), "Prefer": "return=minimal"},
+                json=[record],
+            )
+        if r.status_code == 409:
+            return False
+        r.raise_for_status()
+        return True
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[music-jobs] claim 실패(job=%s): %s", job_id, _http_err(e))
+        return False
+
+
+def reclaim_job(job_id: str, old_updated_at: str | None) -> bool:
+    """끊긴 회차 재선점 — updated_at 이 그대로일 때만 갱신(조건부 PATCH). 성공하면 True."""
+    url, key = _supabase_cfg()
+    if not (url and key and old_updated_at):
+        return False
+    try:
+        with httpx.Client(timeout=15.0) as c:
+            r = c.patch(
+                f"{url}/rest/v1/{_TABLE}",
+                params={"job_id": f"eq.{job_id}", "updated_at": f"eq.{old_updated_at}",
+                        "status": "in.(queued,running)"},
+                headers={**_headers(key, write=True), "Prefer": "return=representation"},
+                json={"updated_at": _now()},
+            )
+            r.raise_for_status()
+            rows = r.json()
+        return isinstance(rows, list) and len(rows) == 1
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[music-jobs] reclaim 실패(job=%s): %s", job_id, _http_err(e))
+        return False
+
+
+def show_failed(job_id: str, error: str) -> None:
+    """실패 기록 + 진행 카드에 실패로 보이게(completed_at 비움)."""
+    _patch(job_id, {"status": "failed", "error_message": (error or "")[:500], "completed_at": None})
+
+
 def _patch(job_id: str, patch: dict) -> None:
     url, key = _supabase_cfg()
     if not (url and key):

@@ -11,7 +11,7 @@ import {
 import { DEFAULT_DAILY_CAP, clampDailyCap, type ContentPlan } from "./content-plan"
 import type { TrendRankingRow, ChannelVideosRow } from "./trend-concepts"
 import type { ChannelMode } from "./channel-status"
-import { DEFAULT_MUSIC_CONFIG, normalizeMusicConfig, type MusicChannelConfig } from "./music"
+import { DEFAULT_MUSIC_CONFIG, normalizeMusicConfig, normalizePublishHours, type MusicChannelConfig } from "./music"
 
 export const CHARACTER_BUCKET = "character-seeds"
 export const CONTENT_PLANS_TABLE = "content_plans"
@@ -260,14 +260,35 @@ export async function getMusicChannelConfig(channelId: string): Promise<MusicCha
   }
 }
 
+// channel_config 안에서 설정 화면이 다루지 않는 키(PR-2a 공개 시각 publish_hours)를 읽는다.
+async function readRawChannelConfig(channelId: string): Promise<Record<string, unknown>> {
+  const supabase = getSupabaseAdmin()
+  const { data, error } = await supabase
+    .from(CHANNEL_STATUS_TABLE)
+    .select("channel_config")
+    .eq("channel_id", channelId)
+    .maybeSingle()
+  if (error) throw new Error(`채널 설정 조회 실패: ${error.message}`)
+  const raw = data?.channel_config
+  return raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {}
+}
+
 export async function setMusicChannelConfig(
   channelId: string,
   config: MusicChannelConfig,
 ): Promise<void> {
   const supabase = getSupabaseAdmin()
+  // 설정 화면 저장이 공개 시각(publish_hours)을 지우지 않게 보존한다(같은 jsonb 에 산다).
+  const keep: Record<string, unknown> = {}
+  try {
+    const prev = await readRawChannelConfig(channelId)
+    if (Array.isArray(prev.publish_hours)) keep.publish_hours = prev.publish_hours
+  } catch {
+    /* 조회 실패 → 보존할 것 없음(기존 동작) */
+  }
   const row = {
     channel_id: channelId,
-    channel_config: normalizeMusicConfig(config),
+    channel_config: { ...normalizeMusicConfig(config), ...keep },
     updated_at: new Date().toISOString(),
   }
   const { error } = await supabase
@@ -280,6 +301,30 @@ export async function setMusicChannelConfig(
     const extra = error.details ? ` | ${error.details}` : ""
     throw new Error(`채널 설정 저장 실패: ${error.message}${extra}`)
   }
+}
+
+// ── 음악 자동 회차 공개 시각 (channel_status.channel_config.publish_hours, PR-2a) ──
+// 신규 컬럼 없이 기존 jsonb 에 둔다. 나머지 키(슬로건·소셜·AI 명시)는 그대로 보존(read-modify-write).
+export async function getMusicPublishHours(channelId: string): Promise<number[]> {
+  try {
+    return normalizePublishHours((await readRawChannelConfig(channelId)).publish_hours)
+  } catch {
+    return normalizePublishHours(null)
+  }
+}
+
+export async function setMusicPublishHours(channelId: string, hours: number[]): Promise<number[]> {
+  const supabase = getSupabaseAdmin()
+  const prev = await readRawChannelConfig(channelId)
+  const next = normalizePublishHours(hours)
+  const { error } = await supabase
+    .from(CHANNEL_STATUS_TABLE)
+    .upsert(
+      { channel_id: channelId, channel_config: { ...prev, publish_hours: next }, updated_at: new Date().toISOString() },
+      { onConflict: "channel_id" },
+    )
+  if (error) throw new Error(`공개 시각 저장 실패: ${error.message}`)
+  return next
 }
 
 // ── 트렌드 컨셉 랭킹 캐시 (Postgres `trend_rankings` 테이블) ──────────
