@@ -79,7 +79,8 @@ def env(monkeypatch):
     jobs = _Jobs()
     for name in ("claim_job", "get_job", "reclaim_job"):
         monkeypatch.setattr(music_jobs, name, getattr(jobs, name))
-    state = {WORKOUT: dict(ACTIVE), "rooftop_music": dict(ACTIVE)}  # where 도 is_active=true 로 둔다
+    # where 는 기본 꺼 둔다(가동 OFF) — where 를 켜는 테스트는 따로.
+    state = {WORKOUT: dict(ACTIVE), "rooftop_music": {**ACTIVE, "is_active": False, "publish_hours": [8, 21]}}
     monkeypatch.setattr(ar, "get_channel_state", lambda ch: state[ch])
     started: list = []
 
@@ -118,13 +119,16 @@ def test_same_round_runs_once(env):
     assert jobs.rows[r["key"]]["metadata"]["publish_at"] == r["publish_at"].isoformat()
 
 
-def test_where_never_runs_even_if_active(env):
+def test_where_runs_only_when_active(env):
     jobs, state, started = env
     r = _r1()
     ar.tick(r["start_at"])
-    assert all(a[0]["channel"] == WORKOUT for a in started)
-    assert not [k for k in jobs.rows if "rooftop" in k]
-    assert "rooftop_music" not in ar.auto_run_channels()
+    assert not [k for k in jobs.rows if "rooftop" in k]          # where 가동 OFF → 0회
+    assert "rooftop_music" in ar.auto_run_channels()
+    state["rooftop_music"]["is_active"] = True
+    w = ar.rounds_for_day("rooftop_music", date(2026, 10, 17), [8, 21], 2)
+    assert [x["publish_at"].hour for x in w] == [8, 21] and all(x["publish_at"] - x["start_at"] == timedelta(minutes=120) for x in w)
+    assert ar.tick(w[0]["start_at"]) == [w[0]["key"]]
 
 
 def test_inactive_channel_does_not_run(env):

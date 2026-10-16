@@ -555,7 +555,10 @@ def publish(mix_id: str, body: PublishBody | None = None):
         # 확실하면(R2 렌더 표식 전부 일치) 재렌더를 건너뛴다. 하나라도 다르거나 표식이 없으면
         # None → 아래 기존 재렌더 그대로. where 는 판정 자체를 하지 않는다(회귀 0).
         _same = None
-        if _row_channel == "workout_music":
+        # where 도 판정한다 — 렌더 표식은 자동 배경(attach_after_render)이 붙은 영상에만 있으므로
+        # where 수동 영상은 표식이 없어 None → 지금처럼 항상 재렌더(회귀 0). where 자동 회차 영상만
+        # 이미 같은 배경으로 렌더된 게 확실하면 재렌더를 건너뛴다(예약 공개 시간 확보).
+        if _row_channel in ("workout_music", "rooftop_music"):
             from services import music_auto_image
             _same = music_auto_image.matching_render(
                 row, bg_path=str(thumb), char_path=char_path,

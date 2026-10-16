@@ -304,6 +304,35 @@ _TITLE_TAG_SYSTEM = (
 )
 
 
+_HANGUL_RE = re.compile(r"[가-힣]")
+
+
+def _has_hangul(s: str) -> bool:
+    return bool(_HANGUL_RE.search(s or ""))
+
+
+def _split_title_line(raw: str) -> tuple[str, str] | None:
+    """LLM 한 줄 "한국어 | 영어" → (ko, en). 앞자리에 한글이 없으면 None(재생성·폴백 대상)."""
+    line = (raw or "").strip().splitlines()[0].strip().strip('"').strip("'").strip() if (raw or "").strip() else ""
+    if "|" not in line:
+        return None
+    parts = [p.strip() for p in line.split("|", 1)]
+    if len(parts) == 2 and parts[0] and parts[1] and _has_hangul(parts[0]):
+        return parts[0][:40], parts[1][:50]
+    return None
+
+
+def _call_title(system: str, user: str, tries: int = 2) -> tuple[str, str] | None:
+    """제목 카피 LLM — 앞자리 한국어 검증, 실패면 1회 재생성(총 2회). 둘 다 실패면 None."""
+    from services import music_lyrics
+    for i in range(tries):
+        got = _split_title_line(music_lyrics._call(system, user, max_tokens=100))
+        if got:
+            return got
+        logger.warning("[music-meta] 제목 카피 앞자리 한국어 아님 → %s", "재생성" if i + 1 < tries else "폴백")
+    return None
+
+
 def _generate_title_copy(theme: dict, vs: dict) -> tuple[str, str]:
     """LLM 으로 한국어+영어 카피 생성. 실패 시 결정적 폴백."""
     if _has_tag_combo(theme):
@@ -325,12 +354,9 @@ def _generate_title_copy(theme: dict, vs: dict) -> tuple[str, str]:
             user += f"\n무드 키워드: {moods}"
         if g_style:
             user += f"\n장르 스타일: {g_style}"
-        raw = music_lyrics._call(_TITLE_SYSTEM, user, max_tokens=100)
-        line = (raw or "").strip().splitlines()[0].strip().strip('"').strip("'").strip()
-        if "|" in line:
-            parts = [p.strip() for p in line.split("|", 1)]
-            if len(parts) == 2 and parts[0] and parts[1]:
-                return parts[0][:40], parts[1][:50]
+        got = _call_title(_TITLE_SYSTEM, user)
+        if got:
+            return got
     except Exception as e:  # noqa: BLE001
         logger.warning("[music-meta] 제목 카피 LLM 실패(폴백): %s", e)
     return _copy(theme, vs), _title_genre_en(theme, vs)
@@ -366,15 +392,13 @@ def _generate_title_copy_tag(theme: dict) -> tuple[str, str]:
             f"형식: {'연주곡(instrumental)' if instrumental else '보컬곡(vocal)'}"
             f"{inst_hint}"
         )
-        raw = music_lyrics._call(_TITLE_TAG_SYSTEM, user, max_tokens=100)
-        line = (raw or "").strip().splitlines()[0].strip().strip('"').strip("'").strip()
-        if "|" in line:
-            parts = [p.strip() for p in line.split("|", 1)]
-            if len(parts) == 2 and parts[0] and parts[1]:
-                return parts[0][:40], parts[1][:50]
+        got = _call_title(_TITLE_TAG_SYSTEM, user)
+        if got:
+            return got
     except Exception as e:  # noqa: BLE001
         logger.warning("[music-meta] 태그 제목 카피 LLM 실패(폴백): %s", e)
-    return summary[:30] or "감성 플레이리스트", style_en[:50] or "mood playlist"
+    ko = summary[:30] if _has_hangul(summary) else ""
+    return ko or "감성 플레이리스트", style_en[:50] or "mood playlist"
 
 
 def _title_genre_en(theme: dict, vs: dict) -> str:

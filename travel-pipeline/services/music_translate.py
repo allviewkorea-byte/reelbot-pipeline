@@ -226,6 +226,44 @@ def _translate_one_meta(base_title: str, base_desc: str, src: str, target: str) 
     return None
 
 
+# where 장르별 해시태그(영어 3 + 한국어 3). 공통 #playlist #플레이리스트 + 장소·무드는 함수에서 붙인다.
+_WHERE_GENRE_TAGS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "citypop": (("citypop", "cityPopPlaylist", "80sJapanesePop"), ("시티팝", "시티팝플레이리스트", "드라이브음악")),
+    "sunset_drive": (("sunsetdrive", "drivingmusic", "synthwave"), ("드라이브음악", "노을", "드라이브플리")),
+    "morning_drive": (("morningdrive", "morningmusic", "commutemusic"), ("출근길음악", "아침음악", "드라이브음악")),
+    "cafe": (("cafemusic", "acoustic", "coffeeshopmusic"), ("카페음악", "카페플리", "어쿠스틱")),
+    "jazz": (("jazz", "jazzplaylist", "jazzmusic"), ("재즈", "재즈플레이리스트", "재즈음악")),
+    "ballad": (("ballad", "emotionalmusic", "kballad"), ("발라드", "감성발라드", "발라드플리")),
+    "breakup": (("breakupsongs", "sadsongs", "rainyday"), ("이별노래", "이별플리", "비오는날")),
+    "sleep_study": (("studymusic", "sleepmusic", "focusmusic"), ("공부할때듣는음악", "수면음악", "집중음악")),
+    "lofi": (("lofi", "lofihiphop", "chillbeats"), ("로파이", "공부음악", "칠아웃")),
+    "rnb_soul": (("rnb", "soulmusic", "rnbplaylist"), ("알앤비", "소울", "알앤비플리")),
+    "hotel_lobby": (("hotellobbymusic", "loungemusic", "elegantmusic"), ("호텔음악", "라운지음악", "매장음악")),
+    "cafe_bgm": (("cafebgm", "coffeeshopjazz", "bgm"), ("카페BGM", "매장음악", "카페음악")),
+    "bar_lounge": (("barmusic", "loungejazz", "nightlounge"), ("바음악", "라운지음악", "밤에듣는음악")),
+    "spa_meditation": (("meditationmusic", "spamusic", "relaxingmusic"), ("명상음악", "스파음악", "힐링음악")),
+    "library_study": (("studymusic", "libraryambience", "readingmusic"), ("도서관", "독서할때듣는음악", "공부음악")),
+}
+
+
+def _where_genre_hashtags(gid: str, theme: dict, viz_spec: dict | None) -> list[str]:
+    """where 장르별 해시태그 10~12개(중복 없음). 공통 + 장르(영 3·한 3) + 장소·무드."""
+    vs = viz_spec or {}
+    tags: list[str] = []
+
+    def add(t: str) -> None:
+        t = re.sub(r"\s+", "", str(t or "")).strip("#")
+        if t and f"#{t}" not in tags:
+            tags.append(f"#{t}")
+
+    en, ko = _WHERE_GENRE_TAGS[gid]
+    for t in ("playlist", *en, "플레이리스트", *ko, "감성플리"):
+        add(t)
+    for t in (vs.get("location_en"), vs.get("mood_category")):
+        add(t)
+    return tags[:15]
+
+
 def generate_hashtags(theme: dict, viz_spec: dict | None) -> list[str]:
     """해시태그 — 영어 5~7 + 한국어 3~5 + 무드/장소 2~3 (총 10~15). 결정적(비용 0).
 
@@ -244,6 +282,11 @@ def generate_hashtags(theme: dict, viz_spec: dict | None) -> list[str]:
         from services import music_meta
 
         return music_meta.build_hashtags(theme, viz_spec)
+    # where — 장르별(고정 11개 제거, 대표 승인 2026-10-16). 장르를 알 수 없을 때만 아래 옛 규칙.
+    from services import music_genres
+    gid = theme.get("genre_id") or music_genres.classify_theme(theme)
+    if gid in _WHERE_GENRE_TAGS:
+        return _where_genre_hashtags(gid, theme, viz_spec)
     vs = viz_spec or {}
     genre = (theme.get("genre") or "").strip().replace(" ", "")
     mood = (theme.get("mood") or "").strip()

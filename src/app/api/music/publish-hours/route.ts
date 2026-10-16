@@ -4,7 +4,7 @@ import { AUTO_RUN_CHANNELS } from "@/lib/music"
 
 // 음악 자동 회차 공개 시각(PR-2a) — channel_status.channel_config.publish_hours(jsonb, 신규 컬럼 없음).
 // GET ?channelId= → { success, channelId, hours }. POST { channelId, hours: number[] } → 저장 후 반환.
-// 자동 회차 대상 채널(AUTO_RUN_CHANNELS)만 받는다 — where 행에는 쓰지 않는다.
+// 자동 회차 대상 채널(AUTO_RUN_CHANNELS: 운동·where)만 받는다.
 export const dynamic = "force-dynamic"
 
 export async function GET(req: NextRequest) {

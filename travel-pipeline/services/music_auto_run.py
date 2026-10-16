@@ -56,10 +56,18 @@ _LOGGED_SKIP: set[str] = set()             # "건너뜀" 로그 1회만
 _SETTLED: set[str] = set()                 # 완료·실패가 확인된 회차(매 tick 재조회 생략)
 
 
+WHERE_CHANNEL = "rooftop_music"
+# 채널별 공개 시 기본값(channel_config.publish_hours 가 없을 때). where 는 08시대·21시대(대표 결정).
+CHANNEL_DEFAULT_HOURS: dict[str, list[int]] = {WHERE_CHANNEL: [8, 21]}
+
+
 def auto_run_channels() -> list[str]:
-    """자동 회차 대상 채널. env MUSIC_AUTO_RUN_CHANNELS(쉼표)로 덮는다. where 는 넣지 않는다."""
-    raw = (os.getenv("MUSIC_AUTO_RUN_CHANNELS") or "workout_music").strip()
-    return [c.strip() for c in raw.split(",") if c.strip() and c.strip() != "rooftop_music"]
+    """자동 회차 대상 채널(운동 + where). 각 채널은 channel_status.is_active 로 켜고 끈다.
+
+    env MUSIC_AUTO_RUN_CHANNELS(쉼표)로 덮을 수 있다(예: 운동만 "workout_music").
+    """
+    raw = (os.getenv("MUSIC_AUTO_RUN_CHANNELS") or f"workout_music,{WHERE_CHANNEL}").strip()
+    return [c.strip() for c in raw.split(",") if c.strip()]
 
 
 def enabled() -> bool:
@@ -73,7 +81,7 @@ def get_channel_state(channel: str) -> dict:
     조회 실패·행 없음 → is_active=False(안전: 돌지 않음).
     """
     st = {"is_active": False, "mode": "semi", "synthetic_media": False, "daily_cap": 1,
-          "track_count": 1, "publish_hours": list(DEFAULT_PUBLISH_HOURS)}
+          "track_count": 1, "publish_hours": list(CHANNEL_DEFAULT_HOURS.get(channel) or DEFAULT_PUBLISH_HOURS)}
     url, key = _supabase_cfg()
     if not (url and key):
         return st
@@ -103,11 +111,13 @@ def get_channel_state(channel: str) -> dict:
         st["track_count"] = max(1, min(100, int(row.get("track_count") or 1)))
     except (TypeError, ValueError):
         pass
-    st["publish_hours"] = normalize_hours((row.get("channel_config") or {}).get("publish_hours"))
+    st["publish_hours"] = normalize_hours(
+        (row.get("channel_config") or {}).get("publish_hours"), CHANNEL_DEFAULT_HOURS.get(channel),
+    )
     return st
 
 
-def normalize_hours(raw) -> list[int]:
+def normalize_hours(raw, default: list[int] | None = None) -> list[int]:
     """공개 시 목록(0~23 정수, 중복 제거·정렬). 비었거나 이상하면 기본 [6, 18]."""
     out: list[int] = []
     if isinstance(raw, list):
@@ -118,7 +128,7 @@ def normalize_hours(raw) -> list[int]:
                 continue
             if 0 <= h <= 23 and h not in out:
                 out.append(h)
-    return sorted(out) or list(DEFAULT_PUBLISH_HOURS)
+    return sorted(out) or list(default or DEFAULT_PUBLISH_HOURS)
 
 
 # ── 회차 계산 ─────────────────────────────────────────────────────────
@@ -280,6 +290,22 @@ def run_round(r: dict, st: dict, *, resume: dict | None = None, sleep=time.sleep
 AWAIT_MAX_SEC = 3 * 3600
 
 
+def pick_where_genre(channel: str, *, rng=None) -> str:
+    """where 장르 균등 랜덤(15개). 직전 2회차가 같은 장르면 그 장르는 뺀다(연속 3회 금지).
+
+    직전 장르는 자동 회차 claim 행(metadata.genre, DB)에서 읽는다 — 재시작해도 이어진다.
+    """
+    import random as _r
+    from services import music_jobs
+    from services.music_where_image import WHERE_GENRES
+    r = rng or _r
+    recent = [((row.get("metadata") or {}).get("genre")) for row in music_jobs.list_recent_by_type(JOB_TYPE, channel, limit=2)]
+    pool = list(WHERE_GENRES)
+    if len(recent) == 2 and recent[0] and recent[0] == recent[1] and recent[0] in pool:
+        pool.remove(recent[0])
+    return r.choice(pool)
+
+
 def _await_recovered(r: dict, job_id: str, *, sleep) -> str:
     """끊긴 제작 작업(job_id)이 복구 E 로 완료되길 기다린다 → mix_id. 실패·시간 초과면 예외."""
     from services import music_jobs
@@ -300,15 +326,25 @@ def _produce(r: dict, st: dict, *, sleep) -> str:
     """수동 "곡 만들기" 경로로 1편 제작 → mix_id. 폴백 렌더·비 http 영상이면 예외."""
     from services import music_manual
 
+    # where: 14장르 프리셋 경로(장르 id 를 mood 로) — 장르는 균등 랜덤·같은 장르 연속 3회 금지.
+    # 운동: 기존 그대로(mood None → 운동 기본 조합).
+    genre = pick_where_genre(r["channel"]) if r["channel"] == WHERE_CHANNEL else None
+    if genre:
+        from services import music_jobs as _mj
+        _mj.merge_metadata(r["key"], {"genre": genre})
+        logger.warning("[auto-run] where 장르 선택 %s genre=%s", _fmt(r), genre)
+    # 다른 생성(다른 채널 회차·수동)이 돌고 있으면 기다린다 — 상한은 그 회차 공개 시각 T까지
+    # (T 가 이미 지났거나 가까우면 최소 BUSY_MAX_WAIT_SEC). 동시 1개 락은 그대로.
+    limit = max((r["publish_at"] - datetime.now(KST)).total_seconds(), BUSY_MAX_WAIT_SEC)
     waited = 0
     while True:
         started = music_manual.start(
-            None, st["track_count"], None, channel=r["channel"], auto_image=True,
+            genre, st["track_count"], None, channel=r["channel"], auto_image=True,
         )
         if started.get("ok"):
             break
-        if waited >= BUSY_MAX_WAIT_SEC:
-            raise RuntimeError(f"수동 생성이 계속 진행 중이라 시작 못 함({waited // 60}분 대기)")
+        if waited >= limit:
+            raise RuntimeError(f"다른 생성이 계속 진행 중이라 시작 못 함({waited // 60}분 대기)")
         logger.warning("[auto-run] 다른 생성 진행 중 → %d초 뒤 재시도 %s", BUSY_RETRY_SEC, _fmt(r))
         sleep(BUSY_RETRY_SEC)
         waited += BUSY_RETRY_SEC

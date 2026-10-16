@@ -112,7 +112,7 @@ def _build_theme(
             "channel": channel,
         }
     preset = music_genres.preset(mood)
-    return {
+    theme = {
         "slug": f"manual_{uuid.uuid4().hex[:12]}",
         "title_kr": preset["title_kr"],
         "genre": preset["genre"],
@@ -124,6 +124,11 @@ def _build_theme(
         "track_count": _clamp_track_count(track_count),
         "channel": channel,
     }
+    # where 자동 회차(채널 'rooftop_music' 명시)만 장르 id 를 실어 해시태그·배경 이미지가 장르를 알게 한다.
+    # where 수동 화면(채널 None)은 키 자체를 넣지 않는다(기존 theme 그대로).
+    if channel == "rooftop_music":
+        theme["genre_id"] = music_genres.normalize_mood_key(mood)
+    return theme
 
 
 def start(
@@ -266,6 +271,7 @@ def run(job_id: str) -> None:
             "kind": "manual", "slug": slug, "theme": music_recovery._theme_brief(theme),
             "track_count": tc, "minutes": 3.5, "channel": job.get("channel"),
             "auto_image": bool(job.get("auto_image")),
+            "genre_id": None if job.get("tag_combo") else job.get("mood"),
         })
         cp.save()
         hb = music_recovery.Heartbeat(job_id).__enter__()
@@ -309,6 +315,7 @@ def run(job_id: str) -> None:
                 img_dir = tempfile.mkdtemp(prefix="autoimg_")
                 bg_path, job["image_review"] = music_auto_image.prepare_for_render(
                     job_id, (theme.get("tag_combo") or {}).get("action"), img_dir,
+                    channel=job.get("channel"), genre=None if job.get("tag_combo") else job.get("mood"),
                 )
                 if job.get("cancelled"):
                     logger.info("[music-manual] 취소됨 → 렌더 생략 job=%s", job_id)

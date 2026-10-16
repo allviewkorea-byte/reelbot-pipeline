@@ -6,7 +6,7 @@ import { toast } from "sonner"
 import { Users, Eye, BarChart3, Video, ClipboardList, Play, Square, Loader2, Settings, Palette, Music2 } from "lucide-react"
 import { PLATFORM_BADGE, PLATFORM_LABELS, TRACK_BADGE, TRACK_LABELS } from "@/lib/channels"
 import {
-  AUTO_RUN_CHANNELS, MUSIC_CHANNELS, channelParam, fmtCount, normalizePublishHours,
+  AUTO_RUN_CHANNELS, MUSIC_CHANNELS, channelParam, defaultPublishHours, fmtCount, normalizePublishHours,
   estimateProductionTime, fmtMinutes, resolveMusicChannel, withChannel, type MusicMetrics,
 } from "@/lib/music"
 import { useSearchParams } from "next/navigation"
@@ -311,11 +311,11 @@ function MusicDashboardPageInner() {
 
 // #41 곡수 입력창(1~100) — 숫자 입력 + [적용] + 예상 영상 길이·제작 시간·크레딧(접기/펼치기).
 // estimateProductionTime(클라이언트 계산, API 호출 없음)으로 곡수↔길이(#40) 반영.
-// 자동 회차 공개 시각(시 단위 2개, 기본 06·18). 분은 백엔드가 매일·회차마다 랜덤으로 정한다.
+// 자동 회차 공개 시각(시 단위 2개, 기본 운동 06·18, where 08·21). 분은 백엔드가 매일·회차마다 랜덤으로 정한다.
 // 제작은 공개 120분 전에 시작해 유튜브 예약 공개(publishAt)로 올린다. 하루 개수만큼 앞에서부터 쓴다.
 function PublishHoursInput({ channel, dailyCap }: { channel: string; dailyCap: number }) {
   const [saved, setSaved] = useState<number[] | null>(null)
-  const [vals, setVals] = useState<string[]>(["6", "18"])
+  const [vals, setVals] = useState<string[]>(defaultPublishHours(channel).map(String))
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
@@ -324,9 +324,10 @@ function PublishHoursInput({ channel, dailyCap }: { channel: string; dailyCap: n
       .then((r) => r.json())
       .then((d) => {
         if (!alive || !d?.success) return
-        const h = normalizePublishHours(d.hours)
+        const h = normalizePublishHours(d.hours, channel)
         setSaved(h)
-        setVals([String(h[0] ?? 6), String(h[1] ?? 18)])
+        const dh = defaultPublishHours(channel)
+        setVals([String(h[0] ?? dh[0]), String(h[1] ?? dh[1])])
       })
       .catch(() => {})
     return () => { alive = false }
@@ -334,7 +335,7 @@ function PublishHoursInput({ channel, dailyCap }: { channel: string; dailyCap: n
 
   const nums = vals.map((v) => Number(v))
   const valid = nums.every((n) => Number.isInteger(n) && n >= 0 && n <= 23) && nums[0] !== nums[1]
-  const next = valid ? normalizePublishHours(nums) : null
+  const next = valid ? normalizePublishHours(nums, channel) : null
   const changed = next !== null && JSON.stringify(next) !== JSON.stringify(saved)
 
   const save = async () => {
@@ -348,8 +349,8 @@ function PublishHoursInput({ channel, dailyCap }: { channel: string; dailyCap: n
       })
       const d = await res.json()
       if (!d?.success) throw new Error(d?.error || "저장 실패")
-      setSaved(normalizePublishHours(d.hours))
-      toast.success(`공개 시각 저장: ${normalizePublishHours(d.hours).map((h) => `${h}시대`).join(" · ")}`)
+      setSaved(normalizePublishHours(d.hours, channel))
+      toast.success(`공개 시각 저장: ${normalizePublishHours(d.hours, channel).map((h) => `${h}시대`).join(" · ")}`)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "저장 실패")
     } finally {
