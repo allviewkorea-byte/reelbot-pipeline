@@ -426,15 +426,32 @@ def jobs_retry(job_id: str, background: BackgroundTasks):
     raise HTTPException(status_code=400, detail="이 작업은 재시도를 지원하지 않습니다(cron 은 자동 재시도).")
 
 
+def _design_channel(channel: str | None) -> str | None:
+    """디자인 API 채널 — 미지정이면 None(=where, 현행). 등록되지 않은 값은 400.
+
+    resolve_channel 은 오타를 조용히 where 로 바꾸는데, 저장(POST)에서 그러면 운동 화면에서
+    고친 디자인이 where 에 덮어써진다. 그래서 여기서는 명시적으로 거부한다.
+    """
+    from services import music_channel
+    c = (channel or "").strip()
+    if not c:
+        return None
+    if not music_channel.is_valid_channel(c):
+        raise HTTPException(status_code=400, detail=f"알 수 없는 채널: {c}")
+    return c
+
+
 @router.get("/design-config")
-def design_config_get():
+def design_config_get(channel: str | None = None):
     """디자인 설정(PLAY LIST·Where 폰트/크기/두께/색/투명도/테두리) 조회(#35-A).
 
     저장값 없으면 기본값 반환(UI 초기 표시용). 렌더는 별도로 None 일 때 현재값 폴백.
+    channel: 채널별 디자인(channel_status 의 그 채널 행). 미지정 → where(현행).
     """
     from services import music_channel
+    ch = _design_channel(channel)
     # UI 는 4개 패널 전부 필요 → include_all 로 title/subtitle 기본값까지 채워 반환(렌더 경로와 분리).
-    cfg = music_channel.normalize_design_config(music_channel.get_design_config() or {}, include_all=True)
+    cfg = music_channel.normalize_design_config(music_channel.get_design_config(channel=ch) or {}, include_all=True)
     return {"design_config": cfg, "presets": list(music_channel.PRESET_FONTS)}
 
 
@@ -499,16 +516,18 @@ class DesignConfigBody(BaseModel):
 
 
 @router.post("/design-config")
-def design_config_set(body: DesignConfigBody):
+def design_config_set(body: DesignConfigBody, channel: str | None = None):
     """디자인 설정 저장(#35-A) — 검증·정규화 후 channel_status.design_config 에 upsert.
 
     다음 영상부터 자동 적용. 기존 영상은 /music/queue 재렌더로 반영.
+    channel: 저장할 채널 행. 미지정 → where(현행).
     """
     from services import music_channel
-    res = music_channel.set_design_config(body.model_dump(exclude_none=True))
+    ch = _design_channel(channel)
+    res = music_channel.set_design_config(body.model_dump(exclude_none=True), channel=ch)
     if not res.get("ok"):
         raise HTTPException(status_code=502, detail=res.get("error") or "저장 실패")
-    cfg = music_channel.normalize_design_config(music_channel.get_design_config() or {}, include_all=True)
+    cfg = music_channel.normalize_design_config(music_channel.get_design_config(channel=ch) or {}, include_all=True)
     return {"ok": True, "design_config": cfg}
 
 

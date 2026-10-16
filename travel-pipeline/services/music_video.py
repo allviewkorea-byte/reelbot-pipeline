@@ -891,7 +891,7 @@ def make_video(
             design_config = None
             try:
                 from services import music_channel
-                design_config = music_channel.get_design_config()
+                design_config = music_channel.get_design_config(channel=theme.get("channel"))
             except Exception as e:  # noqa: BLE001 - 조회 실패해도 렌더는 진행(현재값)
                 logger.warning("[video] design_config 조회 실패(현재값 진행): %s", e)
             try:
