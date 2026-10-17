@@ -37,22 +37,47 @@ def detect_source_lang(text: str, default: str = "ko") -> str:
     return "ko" if _KOREAN.search(text) else "en"
 
 
-def missing_langs(meta: dict | None) -> list[str]:
-    """meta({lang:{title,description}}) 에서 빠졌거나 값이 빈 언어 목록. 완전하면 [].
+def missing_langs(
+    meta: dict | None,
+    lyrics: dict | None = None,
+    source_lang: str | None = None,
+) -> list[str]:
+    """meta·lyrics 양쪽에서 빠졌거나 값이 빈 언어 목록. 완전하면 [].
 
     캐시 완전성 판정용. 이전 기준은 `len(meta) >= 2` 라서 11개 중 9개가 번역 실패해도
     '완성' 으로 간주돼 누락이 영구 고착됐다. title·description 이 모두 채워진 언어만
     확보된 것으로 본다.
+
+    lyrics=None 이면 **meta 만 검사**(기존 동작 그대로 — 하위호환).
+
+    ★ 비용 안전장치: lyrics 를 주더라도 **원본 언어 가사가 비어 있으면 가사 검사를
+    건너뛴다**. 인스트곡은 가사가 없는 것이 정상인데 이를 '누락' 으로 판정하면 매번
+    전체 재번역(언어당 1콜 x 곡수)이 돌아 비용이 폭증한다. source_lang 을 주면 그
+    언어의 가사 유무로 판단하고, 없으면 값이 하나라도 차 있는지로 대신 판단한다.
     """
     m = meta if isinstance(meta, dict) else {}
+    ly = lyrics if isinstance(lyrics, dict) else None
+
+    def _filled(v: object) -> bool:
+        return isinstance(v, str) and bool(v.strip())
+
+    check_lyrics = False
+    if ly:
+        if source_lang:
+            check_lyrics = _filled(ly.get(source_lang))  # 원본 가사가 있을 때만(보컬곡)
+        else:
+            check_lyrics = any(_filled(v) for v in ly.values())
+
     out: list[str] = []
     for lng in ALL_LANGS:
         d = m.get(lng)
-        if not (
+        meta_ok = (
             isinstance(d, dict)
             and str(d.get("title") or "").strip()
             and str(d.get("description") or "").strip()
-        ):
+        )
+        lyrics_ok = _filled(ly.get(lng)) if check_lyrics else True
+        if not (meta_ok and lyrics_ok):
             out.append(lng)
     return out
 
@@ -66,23 +91,47 @@ def _translate_map(text: str, source: str, targets: list[str]) -> dict[str, str]
     """text 를 targets 각 언어로 번역 → {lang: 번역}. 한 번의 GPT 호출(JSON). 실패 시 {}."""
     if not text.strip() or not targets:
         return {}
+    from services import music_lyrics
+
+    tnames = ",".join(targets)
+    names = ", ".join(f"{t}={LANG_NAMES.get(t, t)}" for t in targets)
+    system = (
+        "You are a professional song/lyrics translator. Translate the given text from "
+        f"{LANG_NAMES.get(source, source)} into these languages: {names}. "
+        "Keep line breaks and the singable, natural tone (not literal). "
+        'Return STRICT JSON only: {"<lang>": "<translation>", ...}. No markdown.'
+    )
+    # 실패 유형을 구분해 남긴다 — 어느 언어가 왜 빠졌는지 로그만으로 판별 가능해야 한다.
     try:
-        from services import music_lyrics
-        names = ", ".join(f"{t}={LANG_NAMES.get(t, t)}" for t in targets)
-        system = (
-            "You are a professional song/lyrics translator. Translate the given text from "
-            f"{LANG_NAMES.get(source, source)} into these languages: {names}. "
-            "Keep line breaks and the singable, natural tone (not literal). "
-            'Return STRICT JSON only: {"<lang>": "<translation>", ...}. No markdown.'
-        )
         raw = music_lyrics._call(system, text, max_tokens=16000)
-        data = music_lyrics._extract_json(raw)
-        if not isinstance(data, dict):
-            return {}
-        return {t: str(data[t]) for t in targets if isinstance(data.get(t), str) and data[t].strip()}
     except Exception as e:  # noqa: BLE001 - 번역 실패는 원본 유지(회귀 안전)
-        logger.warning("[music-translate] 번역 실패: %s", e)
+        logger.warning("[music-translate] %s 번역 실패(api): %s", tnames, e)
         return {}
+    if not (raw or "").strip():
+        logger.warning("[music-translate] %s 번역 실패(빈 응답)", tnames)
+        return {}
+    try:
+        data = music_lyrics._extract_json(raw)
+    except Exception as e:  # noqa: BLE001 - JSON 파싱 실패(잘림·마크다운 등)
+        logger.warning(
+            "[music-translate] %s 번역 실패(json): %s | 응답 앞부분=%s",
+            tnames, e, raw[:120].replace("\n", " "),
+        )
+        return {}
+    if not isinstance(data, dict):
+        logger.warning(
+            "[music-translate] %s 번역 실패(형식): dict 가 아님(%s)", tnames, type(data).__name__
+        )
+        return {}
+    out = {t: str(data[t]) for t in targets if isinstance(data.get(t), str) and data[t].strip()}
+    absent = [t for t in targets if t not in out]
+    if absent:
+        # 파싱은 됐는데 요청한 언어 키가 없는 경우 — 기존엔 조용히 {} 가 되던 구간.
+        logger.warning(
+            "[music-translate] %s 응답에 해당 언어 키 없음(응답 키=%s)",
+            ",".join(absent), ",".join(list(data)[:12]) or "-",
+        )
+    return out
 
 
 def translate_lyrics(
@@ -108,6 +157,8 @@ def translate_lyrics(
         one = _translate_map(lyrics_text, src, [lng])  # 언어 1개씩 → JSON 잘림 없음
         if one.get(lng, "").strip():
             result[lng] = one[lng]
+        else:
+            logger.warning("[music-translate] 가사 번역 누락: %s", lng)
     return result
 
 
