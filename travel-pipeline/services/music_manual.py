@@ -273,6 +273,8 @@ def run(job_id: str) -> None:
             "track_count": tc, "minutes": 3.5, "channel": job.get("channel"),
             "auto_image": bool(job.get("auto_image")),
             "genre_id": None if job.get("tag_combo") else job.get("mood"),
+            # 재시작 재개(E)가 같은 배경 축·스타일로 다시 만들게(자동 회차가 run() 전에 주입).
+            "image_action": job.get("image_action"), "bg_style": job.get("image_style"),
         })
         cp.save()
         hb = music_recovery.Heartbeat(job_id).__enter__()
@@ -318,6 +320,7 @@ def run(job_id: str) -> None:
                 bg_path, job["image_review"] = music_auto_image.prepare_for_render(
                     job_id, job.get("image_action") or (theme.get("tag_combo") or {}).get("action"), img_dir,
                     channel=job.get("channel"), genre=None if job.get("tag_combo") else job.get("mood"),
+                    style=job.get("image_style"),
                 )
                 # where 자동 회차는 검은 배경 발행 금지 — 폴백까지 못 구하면 렌더 전에 멈춘다.
                 if not bg_path and music_auto_image.is_where_auto(job.get("channel")):

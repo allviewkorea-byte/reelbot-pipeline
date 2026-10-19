@@ -518,10 +518,15 @@ def _resume_safe(job_id: str, rec: dict) -> None:
             if rec.get("auto_image"):  # 운동 채널 — 배경을 다시 만든다(실패면 검은 배경, 합격본 재사용 포함)
                 from services import music_auto_image
                 img_dir = tempfile.mkdtemp(prefix="recimg_")
+                # 자동 회차가 고른 운동 배경 축(image_action)·where 스타일(bg_style)을 그대로 쓴다.
                 bg_path, review = music_auto_image.prepare_for_render(
-                    job_id, ((rec.get("theme") or {}).get("tag_combo") or {}).get("action"), img_dir,
-                    channel=rec.get("channel"), genre=rec.get("genre_id"),
+                    job_id, rec.get("image_action") or ((rec.get("theme") or {}).get("tag_combo") or {}).get("action"),
+                    img_dir, channel=rec.get("channel"), genre=rec.get("genre_id"), style=rec.get("bg_style"),
                 )
+                # where 자동 회차는 검은 배경 발행 금지(#343) — 재개 경로도 렌더 전에 멈춘다.
+                if not bg_path and music_auto_image.is_where_auto(rec.get("channel")):
+                    shutil.rmtree(img_dir, ignore_errors=True)
+                    raise music_auto_image.NoBackground("where 배경을 구하지 못함(재시작 재개) — 렌더·업로드 안 함")
             try:
                 video, chk = recover_video(rec, job_id=job_id, first_error=RuntimeError("서버 재시작으로 중단"),
                                            bg_path=bg_path, attempts=RETRY_ATTEMPTS, wait=0)

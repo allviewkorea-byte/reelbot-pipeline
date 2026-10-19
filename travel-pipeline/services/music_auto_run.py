@@ -404,10 +404,15 @@ def _produce(r: dict, st: dict, *, sleep) -> str:
     # 운동: 기존 그대로(mood None → 운동 기본 조합).
     r["phase"] = "pre_produce"
     genre = pick_where_genre(r["channel"]) if r["channel"] == WHERE_CHANNEL else None
+    bg_style = None
     if genre:
+        # 배경 스타일 — 허용 장르면 MUSIC_WHERE_STREET_RATE(기본 0.4)로 거리 스냅, 아니면 건축 공간.
         from services import music_jobs as _mj
-        _mj.merge_metadata(r["key"], {"genre": genre})
+        from services import music_where_image as _mwi
+        bg_style = _mwi.pick_style(genre)
+        _mj.merge_metadata(r["key"], {"genre": genre, "bg_style": bg_style})
         logger.warning("[auto-run] where 장르 선택 %s genre=%s", _fmt(r), genre)
+        logger.warning("[auto-image] style=%s genre=%s %s", bg_style, genre, _fmt(r))
     image_action = _pick_image_action(r)
     # 다른 생성(다른 채널 회차·수동)이 돌고 있으면 기다린다 — 상한은 그 회차 공개 시각 T까지
     # (T 가 이미 지났거나 가까우면 최소 BUSY_MAX_WAIT_SEC). 동시 1개 락은 그대로.
@@ -428,6 +433,8 @@ def _produce(r: dict, st: dict, *, sleep) -> str:
     r["phase"] = "producing"
     if image_action and job_id in music_manual._JOBS:
         music_manual._JOBS[job_id]["image_action"] = image_action  # run() 전에 — 배경 축만 바꾼다
+    if bg_style and job_id in music_manual._JOBS:
+        music_manual._JOBS[job_id]["image_style"] = bg_style  # where 배경 스타일(거리 스냅/건축 공간)
     logger.warning("[auto-run] 제작 시작 %s job=%s 곡수=%d", _fmt(r), job_id, st["track_count"])
     from services import music_jobs
     music_jobs.merge_metadata(r["key"], {"state": "producing", "job_id": job_id})
