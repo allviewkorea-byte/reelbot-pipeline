@@ -178,16 +178,30 @@ def _extract_json(text: str):
     raise RuntimeError(f"가사 응답 JSON 파싱 실패: {raw[:300]}")
 
 
-def _call(system: str, user: str, *, max_tokens: int = 2000, model: str | None = None) -> str:
-    """Claude messages.create 1회 호출 → 텍스트 반환."""
-    client = _client()
-    msg = client.messages.create(
-        model=model or _model(),
-        max_tokens=max_tokens,
-        system=system,
-        messages=[{"role": "user", "content": user}],
-    )
-    return msg.content[0].text
+def _call(
+    system: str, user: str, *, max_tokens: int = 2000, model: str | None = None,
+    task: str = "", strong: bool = False,
+) -> str:
+    """Claude messages.create 1회 호출 → 텍스트 반환.
+
+    Claude API 오류(잔액 부족 400·401/402·429·5xx·529·타임아웃·연결)면 OpenAI 로 1회 대체한다
+    (music_llm_fallback, env MUSIC_LLM_FALLBACK=off 로 끔). 응답 내용 문제(JSON 파싱 등)는
+    호출부의 기존 처리 그대로. strong=True: 가사 작성·검토(대체 모델 gpt-4o).
+    """
+    from services import music_llm_fallback as fb
+    try:
+        client = _client()
+        msg = client.messages.create(
+            model=model or _model(),
+            max_tokens=max_tokens,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+        )
+        return msg.content[0].text
+    except Exception as e:  # noqa: BLE001 - API 오류만 대체, 나머지는 그대로 올린다
+        if not (fb.enabled() and fb.is_anthropic_api_error(e)):
+            raise
+        return fb.text(system, user, max_tokens=max_tokens, strong=strong, task=task or "llm", cause=e)
 
 
 # ── 스테이지 1: 다양성 플랜 ───────────────────────────────────────────────
@@ -246,7 +260,7 @@ def _plan_songs_batch(
         "\"situation\":\"상황/장면\",\"emotion\":\"감정의 결\",\"title\":\"곡 제목\","
         "\"style\":\"음악 변주 스타일(영문, sunoapi style 용)\",\"vocalGender\":\"male|female\"}"
     )
-    data = _extract_json(_call(system, user, max_tokens=4400, model=model))
+    data = _extract_json(_call(system, user, max_tokens=4400, model=model, task="lyrics_plan"))
     if not isinstance(data, list):
         raise RuntimeError("플랜 응답이 배열이 아닙니다.")
     return data[:take]
@@ -361,7 +375,7 @@ def write_lyrics(
         "원칙 3: 끝에 잔상/전환을 남겨라.\n"
         "가사 본문만 출력(설명·해설 금지)."
     )
-    return _call(system, user, max_tokens=2400, model=model).strip()
+    return _call(system, user, max_tokens=2400, model=model, task="lyrics_write", strong=True).strip()
 
 
 # ── 스테이지 3: 자기검토 ─────────────────────────────────────────────────
@@ -385,7 +399,7 @@ def review_lyrics(
         "{\"scores\":{\"depth\":int,\"resonance\":int,\"monotony\":int,\"cliche\":int},"
         "\"revised\":true|false,\"issues\":\"미달 사유(있으면)\",\"lyrics\":\"최종 가사(섹션 태그 포함)\"}"
     )
-    data = _extract_json(_call(system, user, max_tokens=3000, model=model))
+    data = _extract_json(_call(system, user, max_tokens=3000, model=model, task="lyrics_review", strong=True))
     scores = data.get("scores") or {}
     passed = all(int(scores.get(k, 0)) >= _REVIEW_BAR for k in ("depth", "resonance", "monotony", "cliche")) if scores else False
     final_lyrics = (data.get("lyrics") or lyrics).strip()

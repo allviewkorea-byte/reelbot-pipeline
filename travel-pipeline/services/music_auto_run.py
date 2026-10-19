@@ -23,6 +23,14 @@
      포함. mode=auto 면 private + publishAt=T(예약 공개), T 가 이미 지났으면 즉시 public.
      mode=semi 면 비공개 업로드. AI 표시는 그 채널 행의 synthetic_media.
 
+장애 대비(2026-10-19 대표 승인)
+  - 재시도: 곡 생성(Suno) 전에 실패한 회차는 10분 뒤 같은 회차 키로 다시(최대 3회). "다음 시도 +
+    10분 < T" 일 때만 예약하고, 다시 띄울 때는 실패 행을 조건부 PATCH 로 재선점(중복 실행 0).
+    Suno 호출 뒤 실패는 기존 복구 A~G 에 맡긴다.
+  - 실패 사유 코드: claim 행 metadata.fail_reason — llm_unavailable / image_failed / upload_gate /
+    upload / suno / render / busy / unknown.
+  - 운동 배경 축: 회차마다 근력/유산소/워밍업 50/30/20 가중 랜덤(3연속 금지). 배경만 바꾼다.
+
 모든 로그 접두사 [auto-run] — 채널·회차·T 포함.
 """
 
@@ -48,6 +56,17 @@ DEFAULT_PUBLISH_HOURS = [6, 18]
 BUSY_RETRY_SEC = 120      # 수동 생성이 돌고 있으면 2분 뒤 다시
 BUSY_MAX_WAIT_SEC = 3600  # 최대 1시간 대기 후 실패
 JOB_TYPE = "auto_run"
+RETRY_GAP_MIN = 10        # 이른 실패(곡 생성 전) 재시도 간격
+MAX_RETRIES = 3
+
+
+class RoundFailed(RuntimeError):
+    """회차 실패 + 사유 코드(reason) + 곡 생성(Suno) 전 실패인지(early → 재시도 대상)."""
+
+    def __init__(self, msg: str, reason: str = "unknown", *, early: bool = False):
+        super().__init__(msg)
+        self.reason = reason
+        self.early = early
 
 _STARTED_AT = datetime.now(timezone.utc)   # 이 프로세스 시작 시각 — 끊긴 회차 판별 기준
 _LOCK = threading.Lock()
@@ -217,20 +236,60 @@ def _try_launch(r: dict, st: dict, now: datetime) -> bool:
         row = _claimed_row(r["key"])
         if not row:
             return False  # 조회 불가 → 이번 tick 은 건너뜀
-        if row.get("status") not in ("queued", "running"):
-            _SETTLED.add(r["key"])  # 이미 끝남(완료·실패) → 다시 돌리지 않는다
+        old_meta = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+        if row.get("status") == "failed":
+            due = _retry_due(old_meta, r, now)
+            if due is None:
+                _SETTLED.add(r["key"])  # 재시도 예약 없음·T 지남 → 다시 돌리지 않는다
+                return False
+            if not due:
+                return False  # 재시도 시각 전
+            new_meta = {**old_meta, "state": "retrying", "retry_at": None}
+            if not music_jobs.reclaim_failed_job(r["key"], row.get("updated_at"), new_meta):
+                return False  # 다른 인스턴스가 먼저 가져감
+            logger.warning("[auto-run] 이른 실패 재시도 %d/%d %s (직전 사유=%s)", int(old_meta.get("retries") or 0),
+                           MAX_RETRIES, _fmt(r), old_meta.get("fail_reason") or "-")
+        elif row.get("status") not in ("queued", "running"):
+            _SETTLED.add(r["key"])  # 이미 끝남(완료) → 다시 돌리지 않는다
             return False
-        if not _stale(row):
+        elif not _stale(row):
             return False  # 다른 프로세스가 지금 돌리는 중
-        if not music_jobs.reclaim_job(r["key"], row.get("updated_at")):
+        elif not music_jobs.reclaim_job(r["key"], row.get("updated_at")):
             return False
-        resume = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
-        logger.warning("[auto-run] 재시작 전 끊긴 회차 이어서 실행 %s (state=%s)", _fmt(r), resume.get("state"))
+        else:
+            resume = old_meta
+            logger.warning("[auto-run] 재시작 전 끊긴 회차 이어서 실행 %s (state=%s)", _fmt(r), resume.get("state"))
     with _LOCK:
         _RUNNING.add(r["key"])
     threading.Thread(target=_run_round_safe, args=(r, st, resume), name=f"auto-run-{r['key']}",
                      daemon=True).start()
     return True
+
+
+def _parse_dt(v) -> datetime | None:
+    try:
+        dt = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=KST)
+
+
+def _retry_due(meta: dict, r: dict, now: datetime) -> bool | None:
+    """실패 회차의 재시도 판단. None=재시도 없음(예약 없음·T 지남), False=아직, True=지금."""
+    at = _parse_dt(meta.get("retry_at")) if meta.get("retry_at") else None
+    if at is None or now >= r["publish_at"]:
+        return None
+    return now >= at
+
+
+def next_retry_at(r: dict, retries: int, early: bool, now: datetime) -> datetime | None:
+    """이른 실패면 10분 뒤 재시도 시각. 최대 3회, 그리고 "다음 시도 + 10분 < T" 일 때만."""
+    if not early or retries >= MAX_RETRIES:
+        return None
+    at = now + timedelta(minutes=RETRY_GAP_MIN)
+    if at + timedelta(minutes=RETRY_GAP_MIN) >= r["publish_at"]:
+        return None
+    return at
 
 
 def _stale(row: dict) -> bool:
@@ -253,9 +312,23 @@ def _run_round_safe(r: dict, st: dict, resume: dict | None) -> None:
         with music_recovery.Heartbeat(r["key"]):
             run_round(r, st, resume=resume)
     except Exception as e:  # noqa: BLE001
-        logger.warning("[auto-run] 회차 실패 %s: %s", _fmt(r), e)
-        music_jobs.merge_metadata(r["key"], {"state": "failed", "error": str(e)[:300]})
-        music_jobs.show_failed(r["key"], f"[자동 회차 {r['slot']} · T {r['publish_at'].strftime('%m-%d %H:%M')}] {e}")
+        reason = getattr(e, "reason", None) or "unknown"
+        # RoundFailed 가 아니면 제작 시작 전(phase=pre_produce)에 난 예외만 이른 실패로 본다.
+        early = bool(getattr(e, "early", r.get("phase") == "pre_produce"))
+        meta = (music_jobs.get_job(r["key"]) or {}).get("metadata") or {}
+        retries = int(meta.get("retries") or 0) if isinstance(meta, dict) else 0
+        nxt = next_retry_at(r, retries, early, datetime.now(KST))
+        patch = {"state": "failed", "error": str(e)[:300], "fail_reason": reason,
+                 "retry_at": nxt.isoformat() if nxt else None}
+        if nxt:
+            patch["retries"] = retries + 1
+        logger.warning("[auto-run] 회차 실패 %s reason=%s early=%s 재시도=%s: %s", _fmt(r), reason, early,
+                       nxt.strftime("%H:%M") if nxt else "없음", e)
+        music_jobs.merge_metadata(r["key"], patch)
+        tail = f" — {nxt.strftime('%H:%M')} 재시도 {retries + 1}/{MAX_RETRIES}" if nxt else ""
+        music_jobs.show_failed(
+            r["key"], f"[자동 회차 {r['slot']} · T {r['publish_at'].strftime('%m-%d %H:%M')} · {reason}] {e}{tail}",
+        )
     finally:
         with _LOCK:
             _RUNNING.discard(r["key"])
@@ -316,10 +389,11 @@ def _await_recovered(r: dict, job_id: str, *, sleep) -> str:
             logger.warning("[auto-run] 끊긴 제작이 복구로 완료 → 업로드 %s mix_id=%s", _fmt(r), row["mix_id"])
             return row["mix_id"]
         if row.get("status") == "failed":
-            raise RuntimeError(f"끊긴 제작 복구 실패: {row.get('error_message') or '-'}")
+            reason = ((row.get("metadata") or {}) if isinstance(row.get("metadata"), dict) else {}).get("fail_reason")
+            raise RoundFailed(f"끊긴 제작 복구 실패: {row.get('error_message') or '-'}", reason or "unknown")
         sleep(60)
         waited += 60
-    raise RuntimeError("끊긴 제작 복구 대기 시간 초과")
+    raise RoundFailed("끊긴 제작 복구 대기 시간 초과", "render")
 
 
 def _produce(r: dict, st: dict, *, sleep) -> str:
@@ -328,11 +402,13 @@ def _produce(r: dict, st: dict, *, sleep) -> str:
 
     # where: 14장르 프리셋 경로(장르 id 를 mood 로) — 장르는 균등 랜덤·같은 장르 연속 3회 금지.
     # 운동: 기존 그대로(mood None → 운동 기본 조합).
+    r["phase"] = "pre_produce"
     genre = pick_where_genre(r["channel"]) if r["channel"] == WHERE_CHANNEL else None
     if genre:
         from services import music_jobs as _mj
         _mj.merge_metadata(r["key"], {"genre": genre})
         logger.warning("[auto-run] where 장르 선택 %s genre=%s", _fmt(r), genre)
+    image_action = _pick_image_action(r)
     # 다른 생성(다른 채널 회차·수동)이 돌고 있으면 기다린다 — 상한은 그 회차 공개 시각 T까지
     # (T 가 이미 지났거나 가까우면 최소 BUSY_MAX_WAIT_SEC). 동시 1개 락은 그대로.
     limit = max((r["publish_at"] - datetime.now(KST)).total_seconds(), BUSY_MAX_WAIT_SEC)
@@ -344,27 +420,53 @@ def _produce(r: dict, st: dict, *, sleep) -> str:
         if started.get("ok"):
             break
         if waited >= limit:
-            raise RuntimeError(f"다른 생성이 계속 진행 중이라 시작 못 함({waited // 60}분 대기)")
+            raise RoundFailed(f"다른 생성이 계속 진행 중이라 시작 못 함({waited // 60}분 대기)", "busy", early=True)
         logger.warning("[auto-run] 다른 생성 진행 중 → %d초 뒤 재시도 %s", BUSY_RETRY_SEC, _fmt(r))
         sleep(BUSY_RETRY_SEC)
         waited += BUSY_RETRY_SEC
     job_id = started["job_id"]
+    r["phase"] = "producing"
+    if image_action and job_id in music_manual._JOBS:
+        music_manual._JOBS[job_id]["image_action"] = image_action  # run() 전에 — 배경 축만 바꾼다
     logger.warning("[auto-run] 제작 시작 %s job=%s 곡수=%d", _fmt(r), job_id, st["track_count"])
     from services import music_jobs
     music_jobs.merge_metadata(r["key"], {"state": "producing", "job_id": job_id})
     music_manual.run(job_id)
     job = music_manual._JOBS.get(job_id) or {}
     if job.get("status") != "done" or not job.get("mix_id"):
-        raise RuntimeError(f"제작 실패: {job.get('error') or job.get('status')}")
+        raise RoundFailed(f"제작 실패: {job.get('error') or job.get('status')}",
+                          job.get("fail_reason") or "unknown", early=bool(job.get("early_fail")))
+    if isinstance(job.get("image_review"), dict):
+        r["image_ok"] = bool(job["image_review"].get("ok"))
     video_url = str(job.get("video_url") or "")
     if not video_url.startswith("http"):
-        raise RuntimeError(f"영상 URL 이 http 가 아님({video_url[:80]}) — 업로드 안 함(검토대기에 남김)")
+        raise RoundFailed(f"영상 URL 이 http 가 아님({video_url[:80]}) — 업로드 안 함(검토대기에 남김)", "render")
     if not job.get("frame_thumb_key"):
-        raise RuntimeError("Remotion 렌더 실패(ffmpeg 폴백, 로고 없음) — 업로드 안 함(검토대기에 남김)")
+        raise RoundFailed("Remotion 렌더 실패(ffmpeg 폴백, 로고 없음) — 업로드 안 함(검토대기에 남김)", "render")
     logger.warning("[auto-run] 제작 완료 %s mix_id=%s 배경=%s", _fmt(r), job["mix_id"],
                    "재사용" if (job.get("image_review") or {}).get("reused") else
                    ("생성" if (job.get("image_review") or {}).get("ok") else "없음"))
     return job["mix_id"]
+
+
+def _pick_image_action(r: dict) -> str | None:
+    """운동 회차 배경 축(근력/유산소/워밍업 50/30/20, 3연속 금지) → 대표 action. where·실패 → None.
+
+    직전 축은 R2 music-auto-bg/_recent_workout.json 에서 읽는다(재시작해도 이어진다).
+    """
+    from services.music_workout_style import is_workout_channel
+    if not is_workout_channel(r["channel"]):
+        return None
+    try:
+        from services import music_auto_image as mai
+        from services import music_jobs
+        axis = mai.pick_workout_axis(mai.read_recent().get("axes"))
+        music_jobs.merge_metadata(r["key"], {"bg_axis": axis})
+        logger.warning("[auto-run] 운동 배경 축 선택 %s axis=%s", _fmt(r), axis)
+        return mai.AXIS_ACTION[axis]
+    except Exception as e:  # noqa: BLE001 - 축 선택 실패 → 기존 그대로(근력)
+        logger.warning("[auto-run] 운동 배경 축 선택 실패(기존 그대로) %s: %s", _fmt(r), e)
+        return None
 
 
 def _upload(r: dict, st: dict, mix_id: str, now: datetime | None = None) -> dict:
@@ -390,6 +492,8 @@ def _upload(r: dict, st: dict, mix_id: str, now: datetime | None = None) -> dict
     try:
         res = md.publish(mix_id, body)
     except HTTPException as e:
-        raise RuntimeError(f"업로드 실패({e.status_code}): {e.detail}") from e
+        # 400 = 공개 게이트(썸네일·렌더 실패 표식 등). 배경 이미지가 실패한 영상이면 image_failed.
+        reason = "upload" if e.status_code != 400 else ("image_failed" if r.get("image_ok") is False else "upload_gate")
+        raise RoundFailed(f"업로드 실패({e.status_code}): {e.detail}", reason) from e
     return {"youtube_video_id": res.get("youtube_video_id"), "youtube_url": res.get("youtube_url"),
             "privacy": privacy, "publish_at": pub_at}
