@@ -581,12 +581,14 @@ def generate_track_quotes(tracks: list[dict], theme: dict) -> list[str]:
 
 
 def generate_instrumental_variations(
-    n: int, style: str, theme: dict,
+    n: int, style: str, theme: dict, *, en_rate: float | None = None,
 ) -> list[dict]:
     """연주곡 N곡의 다양한 한국어 제목 + 곡별 스타일 변주 생성(Claude Sonnet 4.6).
 
     반환: [{"title": "한국어 제목", "style": "영문 suno style 변주"}, ...]
     실패 시 빈 리스트 → 폴백(공통 style, Suno 자동 제목).
+    en_rate: 영어 제목 비율. None → 기존 20%(연주 영상). 보컬 영상에 섞인 연주곡은 곡 언어
+      비율(MUSIC_LYRICS_EN_RATE)을 넘긴다. 금지 패턴 제목(A면·Track N 등)은 빈 제목(Suno 자동).
     """
     if n <= 0:
         return []
@@ -602,7 +604,8 @@ def generate_instrumental_variations(
     mood = theme.get("mood") or ""
     slug = theme.get("slug") or theme.get("theme_slug") or ""
 
-    en_count = max(1, round(n * 0.2))
+    from services.music_song_lang import TITLE_RULE, is_bad_title
+    en_count = max(1, round(n * 0.2)) if en_rate is None else round(n * en_rate)
     system = (
         "너는 음악 플레이리스트 디렉터다. 연주곡(가사 없는 음악)의 제목과 "
         "곡별 스타일 변주를 기획한다.\n"
@@ -614,6 +617,7 @@ def generate_instrumental_variations(
         "- ⚠️ 장르 이탈 금지: 기본 장르/악기 정체성을 유지한 채 변주할 것.\n"
         "- N곡 전부 서로 다른 장면·분위기·소재여야 한다(제목 중복 금지).\n"
         "- 각 줄: 제목 | 스타일변주 (파이프로 구분, 번호·따옴표 없이).\n"
+        f"- {TITLE_RULE}\n"
     )
     user = (
         f"곡 수: {n}\n기본 스타일: {style}\n"
@@ -635,13 +639,16 @@ def generate_instrumental_variations(
             parts = ln.split("|", 1)
             title = parts[0].strip()
             var_style = parts[1].strip() if len(parts) > 1 else ""
-            if title:
+            if title and is_bad_title(title):
+                logger.warning("[music-meta] 연주곡 금지 제목 제거: %r → Suno 자동 제목", title)
+                title = ""
+            if title or var_style:
                 results.append({"title": title, "style": var_style})
         seen: set[str] = set()
         deduped: list[dict] = []
         for r in results:
             key = r["title"].strip().lower()
-            if key not in seen:
+            if not key or key not in seen:
                 seen.add(key)
                 deduped.append(r)
         if len(deduped) < len(results):

@@ -179,7 +179,7 @@ def _build_localizations(
     # 채널 설정(슬로건·소셜·AI 명시)도 채널별로 — where 설정이 남의 채널 본문에
     # 새지 않게. theme 에 channel 이 없으면 where(기존 동작).
     config = music_channel.get_channel_config(channel=theme.get("channel"))
-    src = music_translate.detect_source_lang(lyrics or theme.get("title_kr", ""))
+    src = music_translate.detect_meta_lang(theme)  # 제목 기준(곡이 전부 영어여도 메타 원본은 ko)
     prev = existing if isinstance(existing, dict) else {}
     # 원본 언어가 달라진 캐시는 재사용하지 않는다. detect_source_lang 의 "ko-" 센티넬
     # 버그 시절 캐시는 한국어 본문이 source_lang="en" 으로 박혀 있어, 그대로 merge 하면
@@ -471,9 +471,7 @@ def publish(mix_id: str, body: PublishBody | None = None):
         mix_id,
         music_uploads.get_localizations(mix_id),
         lambda: (theme, row.get("viz_spec"), mix),
-        expected_src=_mtranslate.detect_source_lang(
-            (mix.get("lyrics") or "") or theme.get("title_kr", "")
-        ),
+        expected_src=_mtranslate.detect_meta_lang(theme),
     )
     if _repaired:
         logger.warning(

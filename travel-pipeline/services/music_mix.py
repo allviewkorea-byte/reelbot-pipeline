@@ -202,6 +202,8 @@ def build_mix(
             )
             files.append(dst)
             entry = {"audio_id": audio_id, "title": t.get("title") or ""}
+            if t.get("language"):  # ko|en|inst — 곡별 언어(쌍둥이 번갈아 쓰기 등 후속용)
+                entry["language"] = t["language"]
             # 가사: 인자(lyrics_by_id) 우선, 없으면 트랙 행에 실린 lyrics 사용.
             lyric = lyrics_by_id.get(audio_id) or t.get("lyrics")
             if lyric:

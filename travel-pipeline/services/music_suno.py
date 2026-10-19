@@ -225,9 +225,12 @@ def _download_mp3(url: str, dest: str) -> str:
 
 def store_tracks(
     theme_slug: str, task_id: str, tracks: list[dict], *,
-    genre: str = "", action: str = "", channel: str | None = None,
+    genre: str = "", action: str = "", channel: str | None = None, language: str = "",
 ) -> list[dict]:
     """완료된 곡들을 R2 영구 저장 + DB 기록(멱등). 저장된 record 리스트 반환.
+
+    language: 곡 언어 ko|en|inst(music_tracks.language). 1회 호출 2클립은 같은 body 라 둘 다
+    같은 값이다(쌍둥이). 비면 키를 생략해 콜백(보조 경로)이 기존 값을 덮지 않는다.
 
     genre(#46): 재활용 매칭용 장르 id. 신규 트랙은 used=false 로 저장되어, 1회 호출당
     2클립 중 미사용 클립이 자동으로 재활용 풀에 쌓인다(다음 같은 장르 제작 때 Suno 절약).
@@ -288,6 +291,8 @@ def store_tracks(
             record["used"] = False
         if action:
             record["action"] = action
+        if language:
+            record["language"] = language
         music_store.upsert_track(record)
         records.append(record)
     return records
@@ -308,7 +313,7 @@ class StoreFailed(RuntimeError):
 
 def store_with_retry(
     theme_slug: str, task_id: str, tracks: list[dict], *, genre: str = "", action: str = "",
-    channel: str | None = None, sleep=time.sleep,
+    channel: str | None = None, language: str = "", sleep=time.sleep,
 ) -> list[dict]:
     """store_tracks 를 백오프로 최대 1+len(STORE_RETRY_DELAYS)회. 멱등(R2 존재·DB upsert)이라 재시도 안전."""
     last: Exception | None = None
@@ -317,7 +322,8 @@ def store_with_retry(
             logger.warning("[suno] R2 저장 재시도 %d/%d (%ds 후) taskId=%s", i, len(STORE_RETRY_DELAYS), delay, task_id)
             sleep(delay)
         try:
-            return store_tracks(theme_slug, task_id, tracks, genre=genre, action=action, channel=channel)
+            return store_tracks(theme_slug, task_id, tracks, genre=genre, action=action, channel=channel,
+                                language=language)
         except Exception as e:  # noqa: BLE001
             last = e
             logger.warning("[suno] R2 저장 실패 taskId=%s: %s", task_id, e)
@@ -353,5 +359,6 @@ def generate_and_store(
         action=theme.get("action") or "",
         # theme dict 로도 실어 보낼 수 있게(호출부가 인자 대신 theme 에 넣는 경우).
         channel=channel or theme.get("channel"),
+        language=theme.get("language") or "",
     )
     return {"task_id": task_id, "tracks": records}

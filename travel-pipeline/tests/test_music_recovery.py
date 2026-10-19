@@ -165,6 +165,7 @@ def test_rebuild_mix_when_mix_missing(monkeypatch):
 # ── D 부분 실패 보충 ───────────────────────────────────────────────────
 def _produce_env(monkeypatch, fail_first: int):
     from services import music_lyrics, music_produce, music_store
+    monkeypatch.setenv("MUSIC_INSTRUMENTAL_RATE", "0")  # 보충(D) 수 검증 — 연주 혼합은 test_song_language 에서
     lyr_calls = []
 
     def _lyrics(theme, n, **k):

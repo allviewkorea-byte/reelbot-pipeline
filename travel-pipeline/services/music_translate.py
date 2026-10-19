@@ -37,6 +37,16 @@ def detect_source_lang(text: str, default: str = "ko") -> str:
     return "ko" if _KOREAN.search(text) else "en"
 
 
+def detect_meta_lang(theme: dict | None) -> str:
+    """제목·설명란(메타) 원본 언어 — 가사가 아니라 제목(title_kr) 기준(2026-10-19 대표 승인).
+
+    곡마다 한국어 30 / 영어 70 으로 섞이면서 한국어 곡이 0개인 영상이 생긴다. 가사 기준이면
+    그 영상만 원본이 en 으로 잡혀 다국어 키·기본 설명란이 영어 쪽으로 간다. 우리 메타는 늘
+    "한국어 | 영어" 제목·한국어 설명란이라 제목으로 판정한다(제목이 비면 ko).
+    """
+    return detect_source_lang(str((theme or {}).get("title_kr") or ""))  # 빈 제목 → 기본 ko
+
+
 def missing_langs(meta: dict | None) -> list[str]:
     """meta({lang:{title,description}}) 에서 빠졌거나 값이 빈 언어 목록. 완전하면 [].
 
@@ -153,7 +163,7 @@ def generate_localizations(
     skip_langs: 이미 확보된 언어(캐시 repair 시) — 재번역하지 않으며 결과에도 담지 않는다
     (호출부가 캐시본을 merge 한다).
     """
-    src = detect_source_lang(lyrics or theme.get("title_kr", ""))
+    src = detect_meta_lang(theme)
     if parts:
         return _localize_from_parts(parts, base_title or "", src, skip_langs=skip_langs)
     if base_title is not None and base_description is not None:
