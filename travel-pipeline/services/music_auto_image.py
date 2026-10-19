@@ -361,14 +361,21 @@ def review_image(path: str, system: str | None = None) -> dict:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
-def _profile(action: str | None, channel: str | None, genre: str | None, recent_scenes: list[str] | None = None):
+def _profile(
+    action: str | None, channel: str | None, genre: str | None, recent_scenes: list[str] | None = None,
+    style: str | None = None,
+):
     """채널별 (프롬프트 함수(avoid)->str, 검수 기준, 보관함 축). 기본은 운동(기존 그대로).
 
     운동 프롬프트 함수는 마지막에 만든 장면을 .scene 에 남긴다(합격 시 최근 기록용).
+    where style="street": 유럽 거리 필름 스냅 — 전용 프롬프트·검수, 보관함 where-street/{장르}.
+      그 외(None·"space")는 건축 공간(#341) 그대로.
     """
     if is_where_auto(channel):
         from services import music_where_image as mwi
         g = (genre or "").strip() or "citypop"
+        if style == mwi.STYLE_STREET:
+            return (lambda avoid: mwi.build_street_prompt(g, avoid)), mwi.STREET_REVIEW_SYSTEM, f"{_STREET_PREFIX}/{g}"
         return (lambda avoid: mwi.build_prompt(g, avoid)), mwi.REVIEW_SYSTEM, f"where/{g}"
     from services.music_workout_style import axis_for_action
 
@@ -382,6 +389,7 @@ def _profile(action: str | None, channel: str | None, genre: str | None, recent_
 def generate_reviewed(
     action: str | None, out_path: str, *, deadline: float | None = None,
     channel: str | None = None, genre: str | None = None, recent_scenes: list[str] | None = None,
+    style: str | None = None,
 ) -> dict:
     """생성 → 검수. 불합격이면 재생성 최대 1회. {ok, path, attempts, summary(, scene)}.
 
@@ -392,7 +400,7 @@ def generate_reviewed(
     out = Path(out_path)
     attempts: list[dict] = []
     avoid: list[str] = []  # 앞 시도들의 검수 불합격 사유(중복 제거) → 다음 프롬프트에 붙인다
-    make_prompt, review_system, _ = _profile(action, channel, genre, recent_scenes)
+    make_prompt, review_system, _ = _profile(action, channel, genre, recent_scenes, style)
     for i in range(1, _MAX_ATTEMPTS + 1):
         rec: dict = {"attempt": i}
         cand = out.with_name(f"{out.stem}_try{i}.png")
@@ -659,6 +667,23 @@ def pick_where_legacy(dest: str, *, tries: int = 5) -> dict | None:
     return None
 
 
+# 거리 스냅 보관함 — where/ 와 접두사를 분리해 건축 공간 재사용·전 장르 폴백(#343)에 섞이지 않게 한다.
+_STREET_PREFIX = "where-street"
+
+
+def _street_fallback(genre: str | None, dest: str) -> dict | None:
+    """거리 스냅 장르 보관함이 비었을 때 — 거리 스냅 전 장르(기간 무제한) → 건축 장르 보관함 →
+    기존 #343 체인(건축 전 장르 → 기존 where 배경)."""
+    picked = pick_reuse(_STREET_PREFIX, dest, max_age_sec=None)
+    if picked:
+        return {**picked, "source": "where_street_all"}
+    g = (genre or "").strip() or "citypop"
+    picked = pick_reuse(f"where/{g}", dest)
+    if picked:
+        return {**picked, "source": "where_genre"}
+    return _where_fallback(f"where/{g}", dest)
+
+
 def _where_fallback(axis: str, dest: str) -> dict | None:
     """where 장르 보관함이 비었을 때 — 전 장르 보관함(기간 무제한) → 기존 where 배경."""
     picked = pick_reuse("where", dest, max_age_sec=None)
@@ -794,9 +819,11 @@ def matching_render(row: dict, *, bg_path: str, char_path: str | None, show_play
 
 def prepare_for_render(
     job_id: str, action: str | None, workdir: str, *, reuse: bool = True,
-    channel: str | None = None, genre: str | None = None,
+    channel: str | None = None, genre: str | None = None, style: str | None = None,
 ) -> tuple[str | None, dict]:
     """렌더 직전 — 생성·검수 후 (배경 경로 또는 None, 요약). 요약은 music_jobs.metadata 에 남긴다.
+
+    style: where 배경 스타일("street" 거리 스냅 / None·"space" 건축 공간). 운동은 무시된다.
 
     합격 → 축별 보관함에 보관. 전부 불합격·시간 초과 → reuse 면 같은 축 합격본 재사용
     (요약에 reused). 그것도 없으면 None → 호출부는 지금까지처럼 블랙 배경으로 렌더한다.
@@ -812,14 +839,15 @@ def prepare_for_render(
     # 개별 timeout 이 있어 오래 남지 않는다.
     box: dict = {}
     where = is_where_auto(channel)
-    axis = _profile(action, channel, genre)[2]  # 운동: strength/cardio/warmup, where: where/{장르}
+    street = where and style == "street"
+    axis = _profile(action, channel, genre, style=style)[2]  # 운동: 축, where: where/{장르} · where-street/{장르}
     recent = {} if where else read_recent()      # 운동만 — 최근 장면·키 10개 피하기
 
     def _work() -> None:
         try:
             box["res"] = generate_reviewed(
                 action, str(Path(workdir) / "auto_bg.png"), deadline=t0 + limit, channel=channel, genre=genre,
-                recent_scenes=None if where else recent_for(recent, "scenes", axis),
+                recent_scenes=None if where else recent_for(recent, "scenes", axis), style=style,
             )
         except Exception as e:  # noqa: BLE001
             box["err"] = e
@@ -844,7 +872,7 @@ def prepare_for_render(
         dest = str(Path(workdir) / "reuse_bg.png")
         picked = pick_reuse(axis, dest, exclude=None if where else recent_for(recent, "keys", axis))
         if not picked and where:
-            picked = _where_fallback(axis, dest)
+            picked = _street_fallback(genre, dest) if street else _where_fallback(axis, dest)
             if picked:
                 logger.warning("[auto-image] where 장르 보관함 비어 있음 → 폴백 배경(%s) job=%s key=%s",
                                picked["source"], job_id, picked["key"])
@@ -863,6 +891,8 @@ def prepare_for_render(
         job_id, bool(res.get("ok")), bool(res.get("reused")), time.monotonic() - t0,
     )
     summary = job_summary(res)
+    if where:
+        summary["bg_style"] = "street" if street else "space"
     try:
         from services import music_jobs
         music_jobs.merge_metadata(job_id, {"auto_image": summary})
