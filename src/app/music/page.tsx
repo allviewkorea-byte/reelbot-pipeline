@@ -14,6 +14,7 @@ import { MusicPipeline } from "@/components/music/MusicPipeline"
 import { MusicMarquee } from "@/components/music/MusicMarquee"
 import { MusicTrendPanel } from "@/components/music/MusicTrendPanel"
 import { MusicQueuePreview } from "@/components/music/MusicQueuePreview"
+import { MusicStatusBoard, MusicStatusLight, useMusicSummary } from "@/components/music/MusicStatusBoard"
 import type { MusicJob } from "@/lib/music-jobs"
 
 interface ChannelStatus {
@@ -101,6 +102,8 @@ function MusicDashboardPageInner() {
   )
 
   const { isActive, mode, syntheticMedia, dailyCap, trackCount } = status
+  // 메인 상태판 요약(1분 갱신) — 상태등·알림은 휴대폰에선 제목 바로 아래, PC 에선 헤더 아래에 그린다.
+  const summary = useMusicSummary(channel)
   const isPublic = mode === "auto"
 
   const cards = [
@@ -111,7 +114,7 @@ function MusicDashboardPageInner() {
   ]
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 overflow-auto p-4 md:overflow-hidden">
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-auto p-4">
       {/* 헤더 — 채널명+뱃지 / 토글들. 백곰 레이아웃 1:1 */}
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div className="min-w-0 pl-10 md:pl-0">
@@ -145,6 +148,9 @@ function MusicDashboardPageInner() {
           </div>
           <p className="mt-0.5 text-sm text-muted-foreground">운영 채널 관제 대시보드</p>
         </div>
+
+        {/* 휴대폰: 상태등·알림을 설정 버튼보다 위에(3초 안에 보이게). PC 는 헤더 아래 같은 컴포넌트. */}
+        <MusicStatusLight data={summary.data} failed={summary.failed} className="flex md:hidden" />
 
         {/* #51-fix 모바일: 토글행 / 곡수+시작행 / 네비행으로 세로 스택. PC(md:contents): 기존 우측 정렬 wrap 그대로. */}
         <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center md:justify-end md:gap-2">
@@ -275,33 +281,32 @@ function MusicDashboardPageInner() {
         </div>
       </div>
 
-      {/* KPI 줄 — 백곰 1:1 (아이콘 + 라벨 / mono 큰 숫자) */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        {cards.map((s) => (
-          <div key={s.label} className="rounded-xl border border-border bg-card p-2.5">
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <s.icon className="h-4 w-4" />
-              <span className="text-xs">{s.label}</span>
-            </div>
-            <p className="mt-1 text-base font-bold text-foreground" style={{ fontFamily: "var(--font-geist-mono)" }}>
-              {s.value}
-            </p>
+      {/* 상태판 — (PC 상태등·알림) 오늘 회차·숫자 4개·최근 7회차. 기존 KPI 는 숫자 카드 아래 한 줄로. */}
+      <MusicStatusLight data={summary.data} failed={summary.failed} className="hidden md:flex" />
+      <MusicStatusBoard
+        key={`s-${channel}`}
+        data={summary.data}
+        afterNumbers={
+          <div className="grid grid-cols-4 gap-2">
+            {cards.map((s) => (
+              <div key={s.label} className="flex min-w-0 items-center gap-1.5 rounded-lg border border-border bg-card px-2 py-1.5">
+                <s.icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <span className="hidden truncate text-xs text-muted-foreground sm:inline">{s.label}</span>
+                <span className="ml-auto truncate text-xs font-semibold text-foreground" style={{ fontFamily: "var(--font-geist-mono)" }} title={s.label}>
+                  {s.value}
+                </span>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        }
+      />
 
-      {/* 좌 트렌드 / 우 오늘콘텐츠 — 5:5 */}
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <div className="[&>div]:h-full">
-          <MusicTrendPanel channel={channel} />
-        </div>
-        <div className="[&>div]:h-full">
-          <MusicQueuePreview key={channel} channel={channel} />
-        </div>
-      </div>
-
-      {/* 파이프라인 — 진행 중 작업 실시간 반영(#36) */}
+      {/* 기존 요소(아래로) — 진행 중 파이프라인 → 검토 대기 미리보기 → 트렌드 → 최근 업로드 마퀴 */}
       <MusicPipeline activeJobs={activeJobs} />
+
+      <MusicQueuePreview key={`q-${channel}`} channel={channel} />
+
+      <MusicTrendPanel channel={channel} />
 
       {/* 최근 업로드 마퀴 */}
       <MusicMarquee key={channel} channel={channel} />
