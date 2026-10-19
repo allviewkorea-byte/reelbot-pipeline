@@ -379,3 +379,54 @@ def test_unknown_channel_state_is_not_off():
     alerts, light = ds.alerts_and_light([], [], {**ACTIVE, "is_active": False, "known": False}, OK_CREDITS, {}, 0, NOW)
     assert light == "yellow" and "확인 불가" in alerts[0]["text"] and "가동 꺼짐" not in alerts[0]["text"]
     assert ds.next_round_line(WORKOUT, {"known": False}, NOW) == "채널 상태 확인 불가"
+
+
+# ── "다음 공개"는 지금 이후·아직 살아 있는 회차만 ─────────────────────────
+def _key(day: date, slot: int) -> str:
+    from services import music_auto_run as ar
+    return ar.round_key(WORKOUT, day, slot)
+
+
+def test_next_round_skips_past_and_failed_rounds():
+    from services import music_auto_run as ar
+    today = NOW.date()
+    rs = ar.rounds_for_day(WORKOUT, today, [6, 18], 2)
+    tmr = ar.rounds_for_day(WORKOUT, today + timedelta(days=1), [6, 18], 2)
+    hm = lambda d: d.strftime("%H:%M")  # noqa: E731
+    # 17:00 — 오전 회차는 지남 → 오늘 저녁 회차
+    assert ds.next_round_line(WORKOUT, ACTIVE, NOW) == f"다음 공개 {hm(rs[1]['publish_at'])} (제작 {hm(rs[1]['start_at'])} 시작)"
+    # 저녁 회차가 T 전에 최종 실패 → 그 회차는 빼고 내일 첫 회차
+    dead = {_key(today, 2): {"status": "failed"}}
+    assert ds.next_round_line(WORKOUT, ACTIVE, NOW, dead) == f"다음 공개 내일 {hm(tmr[0]['publish_at'])} (제작 {hm(tmr[0]['start_at'])} 시작)"
+    assert ds.next_round(WORKOUT, ACTIVE, NOW, dead)["day_offset"] == 1
+    # 재시도 예정은 아직 살아 있다 → 그대로 오늘 저녁
+    assert ds.next_round(WORKOUT, ACTIVE, NOW, {_key(today, 2): {"status": "retry"}})["day_offset"] == 0
+    # 저녁 T 가 지난 뒤(실패든 성공이든) → 내일 첫 회차
+    late = rs[1]["publish_at"] + timedelta(minutes=1)
+    assert ds.next_round_line(WORKOUT, ACTIVE, late).startswith(f"다음 공개 내일 {hm(tmr[0]['publish_at'])}")
+    # 내일 첫 회차까지 실패로 막혀도 모레가 아니라 내일 둘째 회차
+    dead2 = {**dead, _key(today + timedelta(days=1), 1): {"status": "skipped"}}
+    assert ds.next_round_line(WORKOUT, ACTIVE, NOW, dead2).startswith(f"다음 공개 내일 {hm(tmr[1]['publish_at'])}")
+
+
+def test_build_light_next_field(monkeypatch):
+    from services import music_auto_run as ar
+    from services import music_jobs, music_uploads
+    monkeypatch.setattr(ar, "get_channel_state", lambda ch: dict(ACTIVE))
+    rs = ar.rounds_for_day(WORKOUT, NOW.date(), [6, 18], 2)
+    rows = [_row(rs[1]["publish_at"], "failed", fail_reason="llm_unavailable", slot=2)]
+    monkeypatch.setattr(music_jobs, "list_by_type_since", lambda *a, **k: rows if a[0] == "auto_run" else [])
+    monkeypatch.setattr(music_uploads, "list_pending", lambda channel=None: [])
+    monkeypatch.setattr(music_uploads, "count_uploaded_since", lambda ch, since: 0)
+    monkeypatch.setattr(ds, "fetch_suno_balance", lambda: None)
+    monkeypatch.setattr(ops, "read_credit_snapshots", lambda: {})
+    monkeypatch.setattr(ops, "read_fallback", lambda: {})
+    monkeypatch.setattr(ops, "read_usage", lambda month=None: {})
+    monkeypatch.setattr(ds, "_cost_cache", {})
+    out = ds.build(WORKOUT, now=NOW)
+    assert out["light"]["line"].startswith("다음 공개 내일 ")                     # 실패한 오늘 저녁 회차는 안 보임
+    assert out["light"]["next"]["day_offset"] == 1 and _dt_ok(out["light"]["next"]["publish_at"])
+
+
+def _dt_ok(v: str) -> bool:
+    return datetime.fromisoformat(v) > NOW

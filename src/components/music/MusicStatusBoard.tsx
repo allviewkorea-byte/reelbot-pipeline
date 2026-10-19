@@ -7,7 +7,7 @@
 // (기존 KPI 한 줄) → 최근 7회차. 데이터는 페이지가 useMusicSummary 로 한 번만 읽어 둘에 나눠 준다.
 // 색은 기존 토큰 + 상태색(emerald/amber/red 400·500) 클래스만 — 화이트 모드는 theme-light.css 가 대비를 맞춘다.
 // 데이터가 없으면 숫자를 만들지 않는다("—" / "확인 불가").
-import { type ReactNode, useEffect, useState } from "react"
+import { type ReactNode, useEffect, useRef, useState } from "react"
 import { ExternalLink, Flame, Upload, Coins, Wallet } from "lucide-react"
 import { channelParam } from "@/lib/music"
 
@@ -29,7 +29,8 @@ interface Round {
 }
 
 export interface Summary {
-  light: { color: Light; text: string; line: string }
+  // next: "다음 공개" 회차(공개·제작 시각). 그 시각이 지나면 화면이 줄을 지우고 바로 다시 읽는다.
+  light: { color: Light; text: string; line: string; next?: { publish_at: string; start_at: string } | null }
   today: Round[]
   numbers: {
     streak_days: number
@@ -42,6 +43,8 @@ export interface Summary {
 }
 
 const POLL_MS = 60_000
+const TICK_MS = 15_000          // 화면 시계 — "다음 공개" 시각 지남·업데이트 지연 판단
+const STALE_MS = 3 * 60_000     // 마지막 성공이 이보다 오래되면 "업데이트 지연" 표시
 
 const LIGHT_STYLE: Record<Light, { box: string; dot: string; text: string }> = {
   green: { box: "border-emerald-500/40 bg-emerald-500/10", dot: "bg-emerald-500", text: "text-emerald-400" },
@@ -68,39 +71,87 @@ function fmtNum(n: number | null | undefined): string {
   return n === null || n === undefined ? "—" : n.toLocaleString("ko-KR")
 }
 
-/** 요약 1분 폴링. 채널이 바뀌면 이전 채널 값은 버린다(다른 채널 숫자가 잠깐 보이지 않게). */
-export function useMusicSummary(channel: string): { data: Summary | null; failed: boolean } {
-  const [state, setState] = useState<{ channel: string; data: Summary | null; failed: boolean }>({
-    channel, data: null, failed: false,
+export interface SummaryState {
+  data: Summary | null
+  failed: boolean
+  okAt: number | null   // 마지막으로 성공한 시각(ms)
+  now: number           // 화면 시계(ms, TICK_MS 마다)
+}
+
+/** 요약 1분 폴링 + 앱으로 돌아오면(가시성·포커스) 바로 다시 읽기 + "다음 공개" 시각이 지나면 바로 다시 읽기.
+ * 채널이 바뀌면 이전 채널 값은 버린다(다른 채널 숫자가 잠깐 보이지 않게). */
+export function useMusicSummary(channel: string): SummaryState {
+  const [state, setState] = useState<{ channel: string; data: Summary | null; failed: boolean; okAt: number | null }>({
+    channel, data: null, failed: false, okAt: null,
   })
+  const [now, setNow] = useState(() => Date.now())
+  const nextAt = useRef<number | null>(null)
 
   useEffect(() => {
     let alive = true // 채널이 바뀌면 부모가 key 로 새로 마운트한다(초기화 불필요)
+    let kickedAt = 0
     const qp = channelParam(channel)
     const load = () => {
-      fetch(`/api/music/dashboard/summary${qp ? `?${qp}` : ""}`)
+      fetch(`/api/music/dashboard/summary${qp ? `?${qp}` : ""}`, { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
         .then((d: Summary) => {
           if (!alive) return
-          setState((s) => (d?.light ? { channel, data: d, failed: false } : { ...s, channel, failed: true }))
+          if (d?.light) {
+            const t = d.light.next?.publish_at ? new Date(d.light.next.publish_at).getTime() : NaN
+            nextAt.current = Number.isNaN(t) ? null : t
+            setState({ channel, data: d, failed: false, okAt: Date.now() })
+          } else setState((s) => ({ ...s, channel, failed: true }))
         })
         .catch(() => alive && setState((s) => ({ ...s, channel, failed: true })))
     }
+    const tick = () => {
+      const n = Date.now()
+      setNow(n)
+      // 보여 준 "다음 공개" 시각이 지났으면 1분 기다리지 않고 바로 다시 읽는다(분당 최대 1번).
+      if (nextAt.current !== null && n >= nextAt.current && n - kickedAt > POLL_MS) {
+        kickedAt = n
+        load()
+      }
+    }
+    // 휴대폰 홈 화면 앱은 백그라운드에서 타이머가 멈춘다 — 다시 열면 바로 새로 읽는다.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        setNow(Date.now())
+        load()
+      }
+    }
     load()
-    const id = setInterval(load, POLL_MS)
+    const poll = setInterval(load, POLL_MS)
+    const clock = setInterval(tick, TICK_MS)
+    document.addEventListener("visibilitychange", onVisible)
+    window.addEventListener("focus", onVisible)
     return () => {
       alive = false
-      clearInterval(id)
+      clearInterval(poll)
+      clearInterval(clock)
+      document.removeEventListener("visibilitychange", onVisible)
+      window.removeEventListener("focus", onVisible)
     }
   }, [channel])
 
   // 채널 전환 직후(새 응답 전)에는 이전 채널 데이터를 쓰지 않는다.
-  return state.channel === channel ? { data: state.data, failed: state.failed } : { data: null, failed: false }
+  return state.channel === channel
+    ? { data: state.data, failed: state.failed, okAt: state.okAt, now }
+    : { data: null, failed: false, okAt: null, now }
+}
+
+/** 화면에 보일 "다음 공개" 줄 — 그 시각이 이미 지났으면(새 응답 전) 옛 시각 대신 "확인 중". */
+export function lightLine(data: Summary, now: number): string {
+  const nx = data.light.next?.publish_at ? new Date(data.light.next.publish_at).getTime() : NaN
+  if (!Number.isNaN(nx) && now >= nx) return "다음 회차 확인 중…"
+  return data.light.line
 }
 
 /** 상태등 + 알림(문제 있을 때만). */
 /** className 은 표시 방식(display)까지 정한다 — 예: "flex md:hidden" / "hidden md:flex". */
-export function MusicStatusLight({ data, failed, className = "flex" }: { data: Summary | null; failed: boolean; className?: string }) {
+export function MusicStatusLight({
+  data, failed, okAt, now, className = "flex",
+}: SummaryState & { className?: string }) {
   if (!data) {
     return (
       <div className={`flex-col rounded-xl border border-border bg-card p-3 text-sm text-muted-foreground ${className}`}>
@@ -116,7 +167,12 @@ export function MusicStatusLight({ data, failed, className = "flex" }: { data: S
           <span className={`h-3 w-3 shrink-0 rounded-full ${ls.dot} ${data.light.color === "green" ? "animate-pulse" : ""}`} />
           <span className={`text-lg font-bold ${ls.text}`}>{data.light.text}</span>
         </div>
-        <p className="mt-1 text-sm text-foreground">{data.light.line}</p>
+        <p className="mt-1 text-sm text-foreground">{lightLine(data, now)}</p>
+        {okAt !== null && now - okAt > STALE_MS && (
+          <p className="mt-0.5 text-xs text-amber-400">
+            업데이트 지연 — 마지막 확인 {hm(new Date(okAt).toISOString())}{failed ? " (연결 재시도 중)" : ""}
+          </p>
+        )}
       </div>
       {data.alerts.length > 0 && (
         <div className="flex flex-col gap-1.5 rounded-xl border border-border bg-card p-3">
