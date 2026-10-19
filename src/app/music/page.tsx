@@ -207,6 +207,15 @@ function MusicDashboardPageInner() {
           </div>
           {/* 공개 시각(PR-2a) — 자동 회차 채널(운동)만. where 화면엔 없다. */}
           {AUTO_RUN_CHANNELS.includes(channel) && <PublishHoursInput key={channel} channel={channel} dailyCap={dailyCap} />}
+          {/* 검토 대기 — 공개 시각 옆 빈자리(대표 요청 2026-10-19). 네비 그룹에서 옮김 */}
+          <Link
+            href={withChannel("/music/queue", channel)}
+            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+          >
+            <ClipboardList className="h-4 w-4" />
+            검토 대기
+            {queueCount > 0 && <span className="rounded-full bg-white/20 px-1.5 text-[10px] font-semibold">{queueCount}</span>}
+          </Link>
           </div>{/* /토글 그룹 */}
 
           {/* 곡수 + 시작(모바일) — 같은 행(곡수 좌 / 시작 우). 예상시간은 곡수 아래. PC contents. */}
@@ -255,15 +264,6 @@ function MusicDashboardPageInner() {
           >
             <Music2 className="h-4 w-4" />
             음원 라이브러리
-          </Link>
-          {/* 검토 대기 (백곰 캐릭터 시트 자리 — 보라 강조) */}
-          <Link
-            href={withChannel("/music/queue", channel)}
-            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
-          >
-            <ClipboardList className="h-4 w-4" />
-            검토 대기
-            {queueCount > 0 && <span className="rounded-full bg-white/20 px-1.5 text-[10px] font-semibold">{queueCount}</span>}
           </Link>
           </div>{/* /네비 그룹 */}
           {/* 가동 토글 — PC 전용(모바일은 곡수 옆에 있음) */}
