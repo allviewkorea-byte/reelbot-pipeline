@@ -295,7 +295,7 @@ def s3(monkeypatch):
     monkeypatch.setattr(r2_storage, "_get_client", lambda: fake)
     monkeypatch.setattr(ops, "_usage_pending", {})
     monkeypatch.setattr(ops, "_fallback_pending", None)
-    monkeypatch.setattr(ops, "_last_flush", 0.0)
+    monkeypatch.setattr(ops, "_last_flush", -ops.FLUSH_SEC)  # 부팅 직후(monotonic < 5분)에도 첫 쓰기가 바로 되게
     return fake
 
 
@@ -330,7 +330,7 @@ def test_credit_snapshot_daily(s3):
 def test_r2_failure_never_raises(monkeypatch):
     from adapters import r2_storage
     monkeypatch.setattr(r2_storage, "_get_client", lambda: (_ for _ in ()).throw(RuntimeError("r2 down")))
-    monkeypatch.setattr(ops, "_last_flush", 0.0)
+    monkeypatch.setattr(ops, "_last_flush", -ops.FLUSH_SEC)  # 부팅 직후(monotonic < 5분)에도 첫 쓰기가 바로 되게
     ops.add_usage("m", 1, 1)
     ops.note_fallback("t", "m", "r")
     assert ops.read_fallback()["last_task"] == "t" and ops.note_credits(1) == {"%s" % datetime.now(KST).date(): 1}
