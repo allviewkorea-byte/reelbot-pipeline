@@ -68,6 +68,17 @@ def reason_of(e: BaseException) -> str:
     return f"{name}{f'({status})' if status else ''}: {str(e)[:120]}"
 
 
+def _note(task: str, model: str, cause: BaseException) -> None:
+    """대시보드 알림용 기록(R2 music-status/llm_fallback.json) — 실패해도 대체는 계속."""
+    from services import music_ops_log
+    music_ops_log.note_fallback(task or "-", model, reason_of(cause))
+
+
+def _usage(resp, model: str) -> None:
+    from services import music_ops_log
+    music_ops_log.add_usage_from(resp, model)
+
+
 def _client():
     from openai import OpenAI
     return OpenAI(api_key=(os.getenv("OPENAI_API_KEY") or "").strip(), timeout=_TIMEOUT_SEC, max_retries=1)
@@ -84,11 +95,13 @@ def text(system: str, user: str, *, max_tokens: int, strong: bool = False, task:
     """system+user → OpenAI 텍스트 1회. 실패하면 원래 Claude 오류와 함께 예외."""
     model = text_model(strong)
     logger.warning("[llm-fallback] task=%s claude 실패 → openai %s 대체 (사유: %s)", task or "-", model, reason_of(cause))
+    _note(task, model, cause)
     try:
         resp = _client().chat.completions.create(
             model=model, max_tokens=max_tokens,
             messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
         )
+        _usage(resp, model)
         return _text_of(resp)
     except Exception as e:  # noqa: BLE001
         raise FallbackFailed(f"LLM 대체도 실패(task={task}): claude={reason_of(cause)} / openai={str(e)[:160]}") from e
@@ -98,6 +111,7 @@ def vision(system: str, image_b64_jpeg: str, prompt: str, *, max_tokens: int, ta
     """이미지(base64 JPEG)+지시 → OpenAI 비전 1회. (텍스트, 모델) 반환."""
     model = vision_model()
     logger.warning("[llm-fallback] task=%s claude 실패 → openai %s 대체 (사유: %s)", task or "-", model, reason_of(cause))
+    _note(task, model, cause)
     try:
         resp = _client().chat.completions.create(
             model=model, max_tokens=max_tokens,
@@ -109,6 +123,7 @@ def vision(system: str, image_b64_jpeg: str, prompt: str, *, max_tokens: int, ta
                 ]},
             ],
         )
+        _usage(resp, model)
         return _text_of(resp), model
     except Exception as e:  # noqa: BLE001
         raise FallbackFailed(f"LLM 대체도 실패(task={task}): claude={reason_of(cause)} / openai={str(e)[:160]}") from e

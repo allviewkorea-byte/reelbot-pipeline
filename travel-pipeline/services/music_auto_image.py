@@ -345,6 +345,8 @@ def review_image(path: str, system: str | None = None) -> dict:
                 }],
             )
             text = "".join(getattr(b, "text", "") for b in (msg.content or []))
+            from services import music_ops_log
+            music_ops_log.add_usage_from(msg, model)  # 대시보드 비용 실측(기록만)
         except Exception as e:  # noqa: BLE001 - Claude API 오류면 같은 기준(system)으로 OpenAI 비전 1회 대체
             from services import music_llm_fallback as fb
             if not (fb.enabled() and fb.is_anthropic_api_error(e)):

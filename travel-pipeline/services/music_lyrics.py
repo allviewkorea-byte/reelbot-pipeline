@@ -197,6 +197,8 @@ def _call(
             system=system,
             messages=[{"role": "user", "content": user}],
         )
+        from services import music_ops_log
+        music_ops_log.add_usage_from(msg, model or _model())  # 대시보드 비용 실측(기록만)
         return msg.content[0].text
     except Exception as e:  # noqa: BLE001 - API 오류만 대체, 나머지는 그대로 올린다
         if not (fb.enabled() and fb.is_anthropic_api_error(e)):
