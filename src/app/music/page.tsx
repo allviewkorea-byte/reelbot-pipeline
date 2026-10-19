@@ -150,7 +150,7 @@ function MusicDashboardPageInner() {
         </div>
 
         {/* 휴대폰: 상태등·알림을 설정 버튼보다 위에(3초 안에 보이게). PC 는 헤더 아래 같은 컴포넌트. */}
-        <MusicStatusLight data={summary.data} failed={summary.failed} className="flex md:hidden" />
+        <MusicStatusLight {...summary} className="flex md:hidden" />
 
         {/* #51-fix 모바일: 토글행 / 곡수+시작행 / 네비행으로 세로 스택. PC(md:contents): 기존 우측 정렬 wrap 그대로. */}
         <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center md:justify-end md:gap-2">
@@ -282,7 +282,7 @@ function MusicDashboardPageInner() {
       </div>
 
       {/* 상태판 — (PC 상태등·알림) 오늘 회차·숫자 4개·최근 7회차. 기존 KPI 는 숫자 카드 아래 한 줄로. */}
-      <MusicStatusLight data={summary.data} failed={summary.failed} className="hidden md:flex" />
+      <MusicStatusLight {...summary} className="hidden md:flex" />
       <MusicStatusBoard
         key={`s-${channel}`}
         data={summary.data}

@@ -189,19 +189,36 @@ def today_rounds(channel: str, st: dict, views_by_key: dict, now: datetime) -> l
     return sorted(out, key=lambda v: v.get("publish_at") or "")
 
 
-def next_round_line(channel: str, st: dict, now: datetime) -> str:
+DEAD = ("failed", "skipped")   # 이미 끝나 공개되지 않을 회차 — "다음 공개"에서 뺀다
+
+
+def next_round(channel: str, st: dict, now: datetime, views_by_key: dict | None = None) -> dict | None:
+    """지금 이후 공개될 첫 회차 {publish_at, start_at, tomorrow}. T 가 지났거나, T 전에 이미 최종 실패·
+    건너뜀으로 끝난 회차는 건너뛴다(재시도 예정은 아직 살아 있어 포함). 오늘 남은 게 없으면 내일 첫 회차."""
     from services import music_auto_run as ar
+    today = now.astimezone(KST).date()
+    views_by_key = views_by_key or {}
+    for day in (today, today + timedelta(days=1), today + timedelta(days=2)):
+        for r in ar.rounds_for_day(channel, day, st.get("publish_hours") or [6, 18], st.get("daily_cap") or 1):
+            if r["publish_at"] <= now:
+                continue
+            if (views_by_key.get(r["key"]) or {}).get("status") in DEAD:
+                continue
+            return {"publish_at": r["publish_at"].isoformat(), "start_at": r["start_at"].isoformat(),
+                    "day_offset": (day - today).days}
+    return None
+
+
+def next_round_line(channel: str, st: dict, now: datetime, views_by_key: dict | None = None) -> str:
     if st.get("known") is False:
         return "채널 상태 확인 불가"
     if not st.get("is_active"):
         return "가동 꺼짐 — 자동 회차가 돌지 않습니다"
-    today = now.astimezone(KST).date()
-    for day in (today, today + timedelta(days=1)):
-        for r in ar.rounds_for_day(channel, day, st.get("publish_hours") or [6, 18], st.get("daily_cap") or 1):
-            if r["publish_at"] > now:
-                when = "" if day == today else "내일 "
-                return f"다음 공개 {when}{_hm(r['publish_at'])} (제작 {_hm(r['start_at'])} 시작)"
-    return "다음 회차 없음"
+    nxt = next_round(channel, st, now, views_by_key)
+    if not nxt:
+        return "다음 회차 없음"
+    when = {0: "", 1: "내일 "}.get(nxt["day_offset"], "모레 ")
+    return f"다음 공개 {when}{_hm(_dt(nxt['publish_at']))} (제작 {_hm(_dt(nxt['start_at']))} 시작)"
 
 
 # ── 연속 일수 · 최근 7회차 ────────────────────────────────────────────
@@ -453,7 +470,9 @@ def build(channel: str, *, now: datetime | None = None) -> dict:
     return {
         "channel": channel,
         "generated_at": now.isoformat(),
-        "light": {"color": light, "text": LIGHT_TEXT[light], "line": next_round_line(channel, st, now)},
+        # next: 화면이 공개 시각을 지나면 그 줄을 지우고 바로 다시 읽게(오래된 "다음 공개" 방지).
+        "light": {"color": light, "text": LIGHT_TEXT[light], "line": next_round_line(channel, st, now, by_key),
+                  "next": next_round(channel, st, now, by_key) if st.get("is_active") and st.get("known") is not False else None},
         "channel_state": {k: st.get(k) for k in ("is_active", "mode", "daily_cap", "track_count", "publish_hours")},
         "today": today,
         "numbers": {
