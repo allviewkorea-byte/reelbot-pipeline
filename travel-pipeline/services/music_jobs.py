@@ -202,6 +202,52 @@ def claim_job(job_id: str, job_type: str, *, channel: str | None = None, metadat
         return False
 
 
+def record_skipped(job_id: str, job_type: str, *, channel: str | None, metadata: dict, error: str) -> bool:
+    """건너뛴 자동 회차 기록 — status=failed 행 insert(job_id unique 라 중복이면 409 → False). 기록만."""
+    url, key = _supabase_cfg()
+    if not (url and key):
+        return False
+    record = {
+        "job_id": job_id, "type": job_type, "channel": _resolve_channel(channel),
+        "status": "failed", "step": None, "step_progress": 0, "steps_completed": [],
+        "error_message": (error or "")[:500], "metadata": metadata or {},
+        "completed_at": _now(), "updated_at": _now(),
+    }
+    try:
+        with httpx.Client(timeout=15.0) as c:
+            r = c.post(
+                f"{url}/rest/v1/{_TABLE}",
+                headers={**_headers(key, write=True), "Prefer": "return=minimal"},
+                json=[record],
+            )
+        if r.status_code == 409:
+            return False
+        r.raise_for_status()
+        return True
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[music-jobs] 건너뜀 기록 실패(job=%s): %s", job_id, _http_err(e))
+        return False
+
+
+def list_by_type_since(job_type: str, channel: str | None, since_iso: str, limit: int = 200) -> list[dict]:
+    """채널·유형별 작업(created_at ≥ since, 최신순, 전체 필드) — 대시보드 요약용. 오류 → 빈 리스트."""
+    url, key = _supabase_cfg()
+    if not (url and key):
+        return []
+    try:
+        params = {"select": _SELECT, "type": f"eq.{job_type}", "channel": f"eq.{_resolve_channel(channel)}",
+                  "created_at": f"gte.{since_iso}", "order": "created_at.desc",
+                  "limit": str(max(1, min(500, limit)))}
+        with httpx.Client(timeout=15.0) as c:
+            r = c.get(f"{url}/rest/v1/{_TABLE}", headers=_headers(key), params=params)
+            r.raise_for_status()
+            rows = r.json()
+        return rows if isinstance(rows, list) else []
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[music-jobs] 유형별 조회 실패: %s", _http_err(e))
+        return []
+
+
 def reclaim_job(job_id: str, old_updated_at: str | None) -> bool:
     """끊긴 회차 재선점 — updated_at 이 그대로일 때만 갱신(조건부 PATCH). 성공하면 True."""
     url, key = _supabase_cfg()

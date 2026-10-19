@@ -101,6 +101,7 @@ def get_channel_state(channel: str) -> dict:
     """
     st = {"is_active": False, "mode": "semi", "synthetic_media": False, "daily_cap": 1,
           "track_count": 1, "publish_hours": list(CHANNEL_DEFAULT_HOURS.get(channel) or DEFAULT_PUBLISH_HOURS)}
+    st["known"] = False
     url, key = _supabase_cfg()
     if not (url and key):
         return st
@@ -116,9 +117,11 @@ def get_channel_state(channel: str) -> dict:
     except Exception as e:  # noqa: BLE001
         logger.warning("[auto-run] channel_status 조회 실패 channel=%s: %s", channel, _http_err(e))
         return st
+    st["known"] = True  # 대시보드: 조회 성공(False = 확인 불가 — "가동 꺼짐"과 구별). 행 없음 = 꺼짐
     if not rows:
         return st
     row = rows[0]
+    st["updated_at"] = row.get("updated_at")  # 건너뜀 기록 판단용(가동을 T 이후에 켰으면 기록 안 함)
     st["is_active"] = bool(row.get("is_active"))
     st["mode"] = "auto" if row.get("mode") == "auto" else "semi"
     st["synthetic_media"] = bool(row.get("synthetic_media"))
@@ -206,10 +209,32 @@ def tick(now: datetime | None = None) -> list[str]:
                     if r["key"] not in _LOGGED_SKIP and not _claimed_row(r["key"]):
                         _LOGGED_SKIP.add(r["key"])
                         logger.warning("[auto-run] 회차 건너뜀(T+3시간 초과, 미실행) %s", _fmt(r))
+                        _record_skip(r, st)
                     continue
                 if _try_launch(r, st, now):
                     launched.append(r["key"])
     return launched
+
+
+def _record_skip(r: dict, st: dict) -> None:
+    """건너뛴 회차를 claim 행(failed·state=skipped)으로 남긴다 — 대시보드 상태등·연속 일수용(기록만).
+
+    실행 여부는 위에서 이미 "안 함"으로 정해졌다. 가동 상태(channel_status.updated_at)가 그 회차 T 이후에
+    바뀌었으면 T 시점엔 꺼져 있었을 수 있어 기록하지 않는다(로그만 — 꺼 둔 날을 사고로 세지 않게).
+    """
+    from services import music_jobs
+    changed = _parse_dt(st.get("updated_at")) if st.get("updated_at") else None
+    if changed is not None and changed > r["publish_at"]:
+        logger.warning("[auto-run] 가동 상태가 T 이후 바뀜 → 건너뜀 기록 생략 %s", _fmt(r))
+        return
+    meta = {
+        "channel": r["channel"], "slot": r["slot"], "day": r["day"].isoformat(),
+        "publish_at": r["publish_at"].isoformat(), "start_at": r["start_at"].isoformat(),
+        "state": "skipped", "fail_reason": "skipped",
+    }
+    music_jobs.record_skipped(r["key"], JOB_TYPE, channel=r["channel"], metadata=meta,
+                              error=f"[자동 회차 {r['slot']} · T {r['publish_at'].strftime('%m-%d %H:%M')}] "
+                                    "T+3시간까지 시작하지 못해 건너뜀")
 
 
 def _claimed_row(key: str) -> dict | None:

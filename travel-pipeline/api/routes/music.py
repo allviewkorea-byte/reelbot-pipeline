@@ -368,6 +368,17 @@ def jobs_history(limit: int = 20, channel: str | None = None):
     return {"jobs": music_jobs.list_history(limit, channel=channel)}
 
 
+@router.get("/dashboard/summary")
+def dashboard_summary(channel: str | None = None):
+    """메인 대시보드 요약(읽기 전용) — 상태등·오늘 회차·숫자 4개·최근 7회차·알림. channel 미지정→where.
+
+    외부 호출(Suno 잔액)은 5초 타임아웃·5분 캐시, 실패해도 나머지는 그대로 돌려준다("확인 불가").
+    """
+    from services import music_dashboard_summary
+    from services.music_channel import resolve_channel
+    return music_dashboard_summary.build(resolve_channel(channel))
+
+
 @router.get("/jobs/{job_id}")
 def jobs_detail(job_id: str):
     """특정 작업 상세(#36). 없으면 404."""

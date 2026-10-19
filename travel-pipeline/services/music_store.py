@@ -278,6 +278,27 @@ def find_unused_track(
         return None
 
 
+def track_language(theme_slug: str) -> str | None:
+    """그 영상(theme_slug) 곡들의 언어 ko|en|inst(#345 영상 단위라 1곡만 본다). 없음·오류 → None."""
+    url, key = _supabase_cfg()
+    if not (url and key and theme_slug):
+        return None
+    try:
+        with httpx.Client(timeout=10.0) as c:
+            r = c.get(
+                f"{url}/rest/v1/{_TABLE}",
+                headers={"apikey": key, "Authorization": f"Bearer {key}"},
+                params={"theme_slug": f"eq.{theme_slug}", "language": "not.is.null",
+                        "select": "language", "limit": "1"},
+            )
+            r.raise_for_status()
+            rows = r.json()
+        return (rows[0] or {}).get("language") if isinstance(rows, list) and rows else None
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[music-db] 곡 언어 조회 실패(slug=%s): %s", theme_slug, _http_err(e))
+        return None
+
+
 def mark_track_used(audio_id: str) -> bool:
     """트랙을 used=true 로 마킹. 성공 여부 반환(실패해도 호출부는 진행 — 로그만)."""
     url, key = _supabase_cfg()

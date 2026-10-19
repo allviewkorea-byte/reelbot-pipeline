@@ -226,6 +226,8 @@ def vision_logo_check(sheet_path: str, logo_text: str, cells: int) -> dict:
         ]}],
     )
     text = "".join(getattr(b, "text", "") for b in (msg.content or []))
+    from services import music_ops_log
+    music_ops_log.add_usage_from(msg, model)  # 대시보드 비용 실측(기록만)
     m = re.search(r"\{.*\}", text, re.DOTALL)
     if not m:
         raise ValueError(f"비전 응답에 JSON 없음: {text[:120]}")

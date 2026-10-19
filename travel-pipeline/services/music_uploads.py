@@ -165,6 +165,27 @@ def list_pending(*, channel: str | None = None) -> list[dict]:
         return []
 
 
+def count_uploaded_since(channel: str | None, since_iso: str) -> int | None:
+    """그 채널의 업로드 완료(status=uploaded) 수 — uploaded_at(행 생성 = 렌더 직후) ≥ since. 오류 → None."""
+    url, key = _supabase_cfg()
+    if not (url and key):
+        return None
+    try:
+        with httpx.Client(timeout=15.0) as c:
+            r = c.get(
+                f"{url}/rest/v1/{_TABLE}",
+                headers=_headers(key),
+                params={"status": "eq.uploaded", "channel": f"eq.{_resolve_channel(channel)}",
+                        "uploaded_at": f"gte.{since_iso}", "select": "mix_id", "limit": "2000"},
+            )
+            r.raise_for_status()
+            rows = r.json()
+        return len(rows) if isinstance(rows, list) else None
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[music-uploads] 업로드 수 조회 실패: %s", _http_err(e))
+        return None
+
+
 def get_upload(mix_id: str) -> dict | None:
     """mix_id 로 업로드 행 1개 조회. 없으면 None."""
     url, key = _supabase_cfg()
