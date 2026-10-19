@@ -39,7 +39,7 @@ export interface Summary {
     month_cost: { usd: number; krw: number; excluded: string[]; estimate: boolean } | null
   }
   recent7: { key: string; ok: boolean | null; text: string }[]
-  alerts: { level: "yellow" | "red"; text: string }[]
+  alerts: { level: "yellow" | "red" | "resolved"; text: string }[]
 }
 
 const POLL_MS = 60_000
@@ -177,8 +177,8 @@ export function MusicStatusLight({
       {data.alerts.length > 0 && (
         <div className="flex flex-col gap-1.5 rounded-xl border border-border bg-card p-3">
           {data.alerts.map((a, i) => (
-            <p key={i} className={`text-sm ${a.level === "red" ? "text-red-400" : "text-amber-400"}`}>
-              {a.level === "red" ? "●" : "▲"} {a.text}
+            <p key={i} className={`text-sm ${a.level === "red" ? "text-red-400" : a.level === "resolved" ? "text-muted-foreground" : "text-amber-400"}`}>
+              {a.level === "red" ? "●" : a.level === "resolved" ? "○" : "▲"} {a.text}
             </p>
           ))}
         </div>
