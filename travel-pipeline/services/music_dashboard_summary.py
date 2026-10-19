@@ -407,6 +407,10 @@ def alerts_and_light(views: list[dict], today: list[dict], st: dict, credits: di
     alerts: list[dict] = []
     seen: set[str] = set()
     window = now - timedelta(hours=ALERT_WINDOW_H)
+    # 그 뒤에 성공한 회차가 있으면 지난 실패는 "해결됨"(회색, 🔴 판단에서 제외) — 이미 지나간 사고로
+    # 빨간불이 하루 넘게 켜져 새 문제가 묻히지 않게(대표 요청 2026-10-20).
+    ok_ts = [_dt(v.get("publish_at")) for v in views + today if v.get("status") in SUCCESS]
+    last_ok = max((t for t in ok_ts if t), default=None)
     for v in sorted(views + today, key=lambda x: x.get("publish_at") or ""):
         T = _dt(v.get("publish_at"))
         if not T or v["key"] in seen:
@@ -414,7 +418,11 @@ def alerts_and_light(views: list[dict], today: list[dict], st: dict, credits: di
         seen.add(v["key"])
         when = T.astimezone(KST).strftime("%m/%d %H시대")
         if v["status"] in ("failed", "skipped") and T >= window:
-            alerts.append({"level": "red", "text": f"{when} 회차 {v['label']} — {v.get('reason') or '원인 미상'}"})
+            if last_ok is not None and last_ok > T:
+                alerts.append({"level": "resolved",
+                               "text": f"지난 실패(해결됨) · {when} 회차 {v['label']} — {v.get('reason') or '원인 미상'}"})
+            else:
+                alerts.append({"level": "red", "text": f"{when} 회차 {v['label']} — {v.get('reason') or '원인 미상'}"})
         elif v["status"] == "stalled":
             alerts.append({"level": "red", "text": f"{when} 회차 멈춤 — {v.get('reason')}"})
         elif v["status"] == "retry":

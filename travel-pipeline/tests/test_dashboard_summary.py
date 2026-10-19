@@ -74,11 +74,18 @@ def _light(views, st=ACTIVE, credits=OK_CREDITS, fallback=None, queue=0):
 
 
 def test_light_cases():
-    ok = ds.classify(_row(NOW - timedelta(hours=3), "completed", privacy="public"), NOW)
+    ok = ds.classify(_row(NOW - timedelta(hours=3), "completed", privacy="public", slot=3), NOW)
     assert _light([ok]) == ([], "green")
     fail = ds.classify(_row(NOW - timedelta(hours=10), "failed", fail_reason="render"), NOW)
-    alerts, light = _light([ok, fail])
+    alerts, light = _light([fail])
     assert light == "red" and "렌더 검증 불합격" in alerts[0]["text"] and "10/19 07시대" in alerts[0]["text"]
+    # 그 뒤에 성공한 회차가 있으면 지난 실패는 "해결됨"(회색) — 🔴 아님
+    alerts, light = _light([ok, fail])
+    assert light == "green" and alerts[0]["level"] == "resolved" and "지난 실패(해결됨)" in alerts[0]["text"]
+    # 성공 뒤에 다시 실패하면 🔴
+    later_fail = ds.classify(_row(NOW - timedelta(hours=1), "failed", fail_reason="render", slot=2), NOW)
+    alerts, light = _light([ok, fail, later_fail])
+    assert light == "red" and [a["level"] for a in alerts] == ["resolved", "red"]
     old_fail = ds.classify(_row(NOW - timedelta(days=3), "failed", fail_reason="render"), NOW)
     assert _light([old_fail])[1] == "green"                                       # 48시간 지난 실패는 알림 없음
     skip = ds.classify(_row(NOW - timedelta(hours=4), "failed", state="skipped", fail_reason="skipped"), NOW)
