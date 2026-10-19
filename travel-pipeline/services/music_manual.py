@@ -258,6 +258,7 @@ def run(job_id: str) -> None:
 
     img_dir: str | None = None
     hb = None
+    cp = None
     try:
         from services import music_produce, music_recovery, music_video, music_viz_analyzer, music_workout_style
 
@@ -313,10 +314,16 @@ def run(job_id: str) -> None:
                 _step("이미지")
                 from services import music_auto_image
                 img_dir = tempfile.mkdtemp(prefix="autoimg_")
+                # image_action: 자동 회차가 고른 운동 배경 축의 대표 action(배경만 — 음악·제목은 그대로).
                 bg_path, job["image_review"] = music_auto_image.prepare_for_render(
-                    job_id, (theme.get("tag_combo") or {}).get("action"), img_dir,
+                    job_id, job.get("image_action") or (theme.get("tag_combo") or {}).get("action"), img_dir,
                     channel=job.get("channel"), genre=None if job.get("tag_combo") else job.get("mood"),
                 )
+                # where 자동 회차는 검은 배경 발행 금지 — 폴백까지 못 구하면 렌더 전에 멈춘다.
+                if not bg_path and music_auto_image.is_where_auto(job.get("channel")):
+                    raise music_auto_image.NoBackground(
+                        "where 배경을 구하지 못함(장르·전 장르 보관함·기존 배경 모두 없음) — 렌더·업로드 안 함",
+                    )
                 if job.get("cancelled"):
                     logger.info("[music-manual] 취소됨 → 렌더 생략 job=%s", job_id)
                     return
@@ -347,7 +354,9 @@ def run(job_id: str) -> None:
             music_jobs.merge_metadata(job_id, {"render_check": chk})
         except Exception as e:  # noqa: BLE001
             # 복구 C — 곡을 하나라도 확보했으면 영상 단계만 다시(같은 곡·주제·가사, Suno 0회).
-            if job.get("cancelled") or not cp.tracks:
+            # 배경 없음(where)은 렌더를 다시 해도 같은 결과라 복구하지 않는다.
+            from services.music_auto_image import NoBackground
+            if job.get("cancelled") or not cp.tracks or isinstance(e, NoBackground):
                 raise
             logger.warning("[music-manual] 영상 단계 실패 → 복구 시도 job=%s: %s", job_id, e)
             video, chk = music_recovery.recover_video(
@@ -386,11 +395,15 @@ def run(job_id: str) -> None:
     except Exception as e:  # noqa: BLE001 - 실패 원인 폴링으로 전달
         job["status"] = "error"
         job["error"] = str(e)[:300]
+        # 실패 가시화(F) — 사유 코드 + Suno 호출 전 실패인지(자동 회차 재시도 판단).
+        job["early_fail"] = cp is None or not (cp.tracks or cp.task_ids)
+        job["fail_reason"] = fail_reason_of(e, suno_called=not job["early_fail"])
         try:
             music_jobs.fail_job(job_id, str(e))
+            music_jobs.merge_metadata(job_id, {"fail_reason": job["fail_reason"]})
         except Exception:  # noqa: BLE001
             pass
-        logger.warning("[music-manual] 실패 job=%s: %s", job_id, e)
+        logger.warning("[music-manual] 실패 job=%s reason=%s: %s", job_id, job["fail_reason"], e)
     finally:
         if hb is not None:
             hb.__exit__(None, None, None)
@@ -399,3 +412,16 @@ def run(job_id: str) -> None:
         with _LOCK:
             if _active_job == job_id:
                 _active_job = None
+
+
+def fail_reason_of(e: BaseException, *, suno_called: bool) -> str:
+    """실패 사유 코드: upload_gate(배경 없음) / render / llm_unavailable / suno / unknown."""
+    from services import music_llm_fallback, music_recovery
+    from services.music_auto_image import NoBackground
+    if isinstance(e, NoBackground):
+        return "upload_gate"
+    if isinstance(e, music_recovery.RenderFailed) or "렌더 실패" in str(e):
+        return "render"
+    if music_llm_fallback.is_llm_unavailable(e):
+        return "llm_unavailable"
+    return "suno" if suno_called else "unknown"

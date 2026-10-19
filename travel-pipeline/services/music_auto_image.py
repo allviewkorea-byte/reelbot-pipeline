@@ -146,21 +146,26 @@ def api_prefix() -> str:
     )
 
 
-def build_prompt(action: str | None, avoid: list[str] | None = None) -> str:
-    """5단계 운동 풀(get_workout_image_prompt) + API 전용 프리픽스. [WORKOUT] 태그는 뗀다.
+def build_prompt(
+    action: str | None, avoid: list[str] | None = None, *, recent_scenes: list[str] | None = None,
+) -> str:
+    """5단계 운동 풀(workout_core) + API 전용 프리픽스. [WORKOUT] 태그(폰 지침용 표식)는 없다.
 
-    [WORKOUT] 은 폰 ChatGPT 지침의 조건 분기용 표식이라 API 에는 의미가 없다.
     avoid: 앞 시도의 검수 불합격 사유 — "이번엔 반드시 피할 것"으로 맨 끝에 붙인다.
+    recent_scenes: 같은 축 최근 영상 장면 — 장면을 쓰는 LLM 에 "겹치지 않게"로 넘긴다.
     """
+    return _workout_prompt(action, avoid, recent_scenes)[0]
+
+
+def _workout_prompt(action: str | None, avoid: list[str] | None, recent_scenes: list[str] | None) -> tuple[str, str]:
+    """(최종 프롬프트, 장면). 장면은 최근 기록(_recent_workout.json)에 남긴다."""
     from services import music_image_prompts as mip
 
-    raw = mip.get_workout_image_prompt(action, include_prefix=False).strip()
-    if raw.startswith(mip.WORKOUT_TAG):
-        raw = raw[len(mip.WORKOUT_TAG):].strip()
-    prompt = f"{api_prefix()} {raw}".strip()
+    raw, scene = mip.workout_core(action, avoid_recent=recent_scenes)
+    prompt = f"{api_prefix()} {raw.strip()}".strip()
     if avoid:
         prompt += " 이번엔 반드시 피할 것(직전 시도 검수 불합격 사유): " + "; ".join(avoid) + "."
-    return prompt
+    return prompt, scene
 
 
 # ── 이미지 생성 ────────────────────────────────────────────────────────
@@ -325,19 +330,26 @@ def review_image(path: str, system: str | None = None) -> dict:
         small = _review_copy(path, str(tmpdir / "review.jpg"))
         b64 = base64.b64encode(Path(small).read_bytes()).decode("ascii")
         model = review_model()
-        msg = client.messages.create(
-            model=model,
-            max_tokens=400,
-            system=system or _REVIEW_SYSTEM,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}},
-                    {"type": "text", "text": "이 배경 이미지를 기준대로 검수하고 JSON 만 출력해."},
-                ],
-            }],
-        )
-        text = "".join(getattr(b, "text", "") for b in (msg.content or []))
+        ask = "이 배경 이미지를 기준대로 검수하고 JSON 만 출력해."
+        try:
+            msg = client.messages.create(
+                model=model,
+                max_tokens=400,
+                system=system or _REVIEW_SYSTEM,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}},
+                        {"type": "text", "text": ask},
+                    ],
+                }],
+            )
+            text = "".join(getattr(b, "text", "") for b in (msg.content or []))
+        except Exception as e:  # noqa: BLE001 - Claude API 오류면 같은 기준(system)으로 OpenAI 비전 1회 대체
+            from services import music_llm_fallback as fb
+            if not (fb.enabled() and fb.is_anthropic_api_error(e)):
+                raise
+            text, model = fb.vision(system or _REVIEW_SYSTEM, b64, ask, max_tokens=400, task="image_review", cause=e)
         out = _parse_review(text)
         out["model"] = model
         logger.warning("[auto-image] Claude 검수 끝 %.1fs (timeout=%.0fs)", time.monotonic() - t0, timeout)
@@ -349,21 +361,29 @@ def review_image(path: str, system: str | None = None) -> dict:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
-def _profile(action: str | None, channel: str | None, genre: str | None):
-    """채널별 (프롬프트 함수(avoid)->str, 검수 기준, 보관함 축). 기본은 운동(기존 그대로)."""
+def _profile(action: str | None, channel: str | None, genre: str | None, recent_scenes: list[str] | None = None):
+    """채널별 (프롬프트 함수(avoid)->str, 검수 기준, 보관함 축). 기본은 운동(기존 그대로).
+
+    운동 프롬프트 함수는 마지막에 만든 장면을 .scene 에 남긴다(합격 시 최근 기록용).
+    """
     if is_where_auto(channel):
         from services import music_where_image as mwi
         g = (genre or "").strip() or "citypop"
         return (lambda avoid: mwi.build_prompt(g, avoid)), mwi.REVIEW_SYSTEM, f"where/{g}"
     from services.music_workout_style import axis_for_action
-    return (lambda avoid: build_prompt(action, avoid)), None, axis_for_action(action)
+
+    def make(avoid):
+        prompt, make.scene = _workout_prompt(action, avoid, recent_scenes)
+        return prompt
+    make.scene = None
+    return make, None, axis_for_action(action)
 
 
 def generate_reviewed(
     action: str | None, out_path: str, *, deadline: float | None = None,
-    channel: str | None = None, genre: str | None = None,
+    channel: str | None = None, genre: str | None = None, recent_scenes: list[str] | None = None,
 ) -> dict:
-    """생성 → 검수. 불합격이면 재생성 최대 1회. {ok, path, attempts, summary}.
+    """생성 → 검수. 불합격이면 재생성 최대 1회. {ok, path, attempts, summary(, scene)}.
 
     API 오류·검수 실패(응답 파싱 불가 포함)도 그 시도의 불합격으로 친다 — 검수를 못 했으면
     쓰지 않는다. 어떤 경우에도 예외를 던지지 않는다(호출부는 ok 만 보면 된다).
@@ -372,7 +392,7 @@ def generate_reviewed(
     out = Path(out_path)
     attempts: list[dict] = []
     avoid: list[str] = []  # 앞 시도들의 검수 불합격 사유(중복 제거) → 다음 프롬프트에 붙인다
-    make_prompt, review_system, _ = _profile(action, channel, genre)
+    make_prompt, review_system, _ = _profile(action, channel, genre, recent_scenes)
     for i in range(1, _MAX_ATTEMPTS + 1):
         rec: dict = {"attempt": i}
         cand = out.with_name(f"{out.stem}_try{i}.png")
@@ -404,7 +424,10 @@ def generate_reviewed(
             if review["pass"]:
                 shutil.move(str(cand), str(out))
                 attempts.append(rec)
-                return {"ok": True, "path": str(out), "attempts": attempts, "summary": "합격"}
+                done = {"ok": True, "path": str(out), "attempts": attempts, "summary": "합격"}
+                if getattr(make_prompt, "scene", None):
+                    done["scene"] = make_prompt.scene
+                return done
             for r in review["reasons"]:
                 if r and r not in avoid:
                     avoid.append(r)
@@ -500,10 +523,15 @@ def archive_passed(path: str, axis: str) -> str | None:
         return None
 
 
-def pick_reuse(axis: str, dest: str) -> dict | None:
+def pick_reuse(
+    axis: str, dest: str, *, exclude: list[str] | None = None, max_age_sec: float | None = _REUSE_MAX_AGE_SEC,
+) -> dict | None:
     """같은 축 합격본(최근 30일) 중 직전 영상 배경을 뺀 무작위 1장 → dest. 없으면 None.
 
     후보가 직전 배경 1장뿐이면 그것이라도 쓴다(검은 배경보다 낫다).
+    exclude: 최근 사용 키(오래된 것 → 최근 순). 이 키들도 뺀다 — 후보가 전부 최근 사용분이면
+      그중 가장 오래전에 쓴 것을 고른다(운동 최근 10장 제외).
+    max_age_sec=None: 기간 제한 없음(where 전 장르 폴백).
     """
     import random
     try:
@@ -511,7 +539,7 @@ def pick_reuse(axis: str, dest: str) -> dict | None:
         if not r2_storage.is_available():
             return None
         client, bucket = r2_storage._get_client(), r2_storage._music_bucket()
-        cutoff = time.time() - _REUSE_MAX_AGE_SEC
+        cutoff = time.time() - max_age_sec if max_age_sec else 0.0
         cands: list[tuple[str, float]] = []
         for page in client.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=_archive_dir(axis)):
             for obj in page.get("Contents", []):
@@ -523,15 +551,120 @@ def pick_reuse(axis: str, dest: str) -> dict | None:
             logger.warning("[auto-image] 재사용할 합격본 없음 axis=%s(최근 30일)", axis)
             return None
         last = _read_last(axis)
-        pool = [c for c in cands if c[0] != last] or cands
-        key, ts = random.choice(pool)
+        recent = list(exclude or [])
+        skip = set(recent) | ({last} if last else set())
+        pool = [c for c in cands if c[0] not in skip]
+        if pool:
+            key, ts = random.choice(pool)
+        elif recent:  # 전부 최근 사용분 → 가장 오래전에 쓴 것(최근 목록에 없는 직전 배경은 맨 뒤)
+            key, ts = min(cands, key=lambda c: recent.index(c[0]) if c[0] in recent else len(recent))
+        else:
+            key, ts = random.choice(cands)
         client.download_file(bucket, key, dest)
         _write_last(axis, key)
         return {"key": key, "archived_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts)),
-                "candidates": len(cands), "avoided_last": bool(last and len(pool) < len(cands))}
+                "candidates": len(cands), "avoided_last": bool(last and last != key),
+                **({"avoided_recent": len(skip & {c[0] for c in cands})} if recent else {})}
     except Exception as e:  # noqa: BLE001 - 재사용 실패 → 블랙 배경(기존 동작)
         logger.warning("[auto-image] 합격본 재사용 실패 axis=%s: %s", axis, str(e)[:160])
         return None
+
+
+# ── 운동 배경 최근 기록 · 축 로테이션(2026-10-19 대표 승인) ─────────────────
+# R2 music-auto-bg/_recent_workout.json = {"axes": [...], "scenes": {축: [...]}, "keys": {축: [...]}}
+# (오래된 것 → 최근, 각 최대 10). SQL 없이 R2 JSON 한 개. 동시 제작 1개라 읽고-쓰기 경합이 없다.
+RECENT_N = 10
+_RECENT_KEY = f"{_ARCHIVE_PREFIX}/_recent_workout.json"
+WORKOUT_AXIS_WEIGHTS: dict[str, int] = {"strength": 50, "cardio": 30, "warmup": 20}
+# 축 → 대표 action(배경 프롬프트·보관함 축만 바꾼다 — 음악·제목·설명은 기존 그대로).
+AXIS_ACTION: dict[str, str] = {"strength": "workout", "cardio": "running", "warmup": "stretching"}
+
+
+def read_recent() -> dict:
+    try:
+        from adapters import r2_storage
+        obj = r2_storage._get_client().get_object(Bucket=r2_storage._music_bucket(), Key=_RECENT_KEY)
+        data = json.loads(obj["Body"].read().decode("utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:  # noqa: BLE001 - 없음·읽기 실패 → 빈 기록(제외할 것 없음)
+        return {}
+
+
+def _write_recent(data: dict) -> None:
+    try:
+        from adapters import r2_storage
+        r2_storage._get_client().put_object(
+            Bucket=r2_storage._music_bucket(), Key=_RECENT_KEY,
+            Body=json.dumps(data, ensure_ascii=False).encode("utf-8"), ContentType="application/json",
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[auto-image] 최근 배경 기록 실패(무시): %s", str(e)[:160])
+
+
+def _push(lst, value, n: int = RECENT_N) -> list:
+    out = [v for v in (lst if isinstance(lst, list) else []) if v != value] + [value]
+    return out[-n:]
+
+
+def recent_for(data: dict, field: str, axis: str) -> list[str]:
+    v = (data.get(field) or {}).get(axis) if isinstance(data.get(field), dict) else None
+    return [x for x in v if isinstance(x, str)] if isinstance(v, list) else []
+
+
+def note_recent(axis: str, *, scene: str | None = None, key: str | None = None) -> None:
+    """운동 배경 1장 사용 기록 — 축 순서·같은 축 장면·보관함 키(각 최근 10)."""
+    data = read_recent()
+    data["axes"] = (data.get("axes") if isinstance(data.get("axes"), list) else [])[-(RECENT_N - 1):] + [axis]
+    for field, value in (("scenes", scene), ("keys", key)):
+        if value:
+            box = data.get(field) if isinstance(data.get(field), dict) else {}
+            box[axis] = _push(box.get(axis), value)
+            data[field] = box
+    _write_recent(data)
+
+
+def pick_workout_axis(recent_axes: list[str] | None = None, *, rng=None) -> str:
+    """가중 랜덤 50/30/20(근력/유산소/워밍업). 직전 2회가 같은 축이면 그 축은 뺀다(3연속 금지)."""
+    import random as _r
+    r = rng or _r
+    axes = [a for a in (recent_axes or []) if a in WORKOUT_AXIS_WEIGHTS]
+    pool = dict(WORKOUT_AXIS_WEIGHTS)
+    if len(axes) >= 2 and axes[-1] == axes[-2]:
+        pool.pop(axes[-1], None)
+    names = list(pool)
+    return r.choices(names, weights=[pool[n] for n in names], k=1)[0]
+
+
+# ── where 배경 폴백(장르 보관함 → where 전 장르 보관함 → 기존 where 배경) ──────────
+class NoBackground(RuntimeError):
+    """where 자동 회차 배경을 끝내 못 구함 — 검은 배경 발행 금지라 렌더 전에 멈춘다(fail_reason=upload_gate)."""
+
+
+def pick_where_legacy(dest: str, *, tries: int = 5) -> dict | None:
+    """기존 where 영상의 배경(music_uploads.thumbnail_r2_key, channel=rooftop_music) 무작위 1장 → dest.
+
+    옛 대표 업로드 이미지라 일부는 R2 수명 정책으로 지워졌을 수 있어 몇 장까지 차례로 시도한다.
+    """
+    import random
+    from adapters import r2_storage
+    from services import music_uploads
+    keys = music_uploads.list_thumbnail_keys(WHERE_CHANNEL)
+    random.shuffle(keys)
+    for key in keys[:tries]:
+        try:
+            r2_storage.download_music_object(key, dest)
+            return {"key": key, "candidates": len(keys), "source": "where_legacy"}
+        except Exception as e:  # noqa: BLE001 - 지워진 키 → 다음 후보
+            logger.warning("[auto-image] 기존 where 배경 내려받기 실패 key=%s: %s", key, str(e)[:120])
+    return None
+
+
+def _where_fallback(axis: str, dest: str) -> dict | None:
+    """where 장르 보관함이 비었을 때 — 전 장르 보관함(기간 무제한) → 기존 where 배경."""
+    picked = pick_reuse("where", dest, max_age_sec=None)
+    if picked:
+        return {**picked, "source": "where_all"}
+    return pick_where_legacy(dest)
 
 
 # ── 렌더 정합 표식(publish 재렌더 건너뛰기 판정) ───────────────────────
@@ -678,11 +811,15 @@ def prepare_for_render(
     # 시 join 에서 막힌다. 끊긴 스레드는 강제 종료할 수 없지만(파이썬 제약) 결과는 버리고, 각 호출에
     # 개별 timeout 이 있어 오래 남지 않는다.
     box: dict = {}
+    where = is_where_auto(channel)
+    axis = _profile(action, channel, genre)[2]  # 운동: strength/cardio/warmup, where: where/{장르}
+    recent = {} if where else read_recent()      # 운동만 — 최근 장면·키 10개 피하기
 
     def _work() -> None:
         try:
             box["res"] = generate_reviewed(
                 action, str(Path(workdir) / "auto_bg.png"), deadline=t0 + limit, channel=channel, genre=genre,
+                recent_scenes=None if where else recent_for(recent, "scenes", axis),
             )
         except Exception as e:  # noqa: BLE001
             box["err"] = e
@@ -699,12 +836,20 @@ def prepare_for_render(
         logger.warning("[auto-image] 이미지 단계 오류 → 이미지 없이 렌더 진행 job=%s: %s", job_id, box["err"])
     else:
         res = box.get("res") or {"ok": False, "path": None, "attempts": [], "summary": "결과 없음"}
-    axis = _profile(action, channel, genre)[2]  # 운동: strength/cardio/warmup, where: where/{장르}
     if res.get("ok"):
-        archive_passed(res["path"], axis)
+        key = archive_passed(res["path"], axis)
+        if not where:
+            note_recent(axis, scene=res.get("scene"), key=key)
     elif reuse:
         dest = str(Path(workdir) / "reuse_bg.png")
-        picked = pick_reuse(axis, dest)
+        picked = pick_reuse(axis, dest, exclude=None if where else recent_for(recent, "keys", axis))
+        if not picked and where:
+            picked = _where_fallback(axis, dest)
+            if picked:
+                logger.warning("[auto-image] where 장르 보관함 비어 있음 → 폴백 배경(%s) job=%s key=%s",
+                               picked["source"], job_id, picked["key"])
+        if picked and not where:
+            note_recent(axis, key=picked["key"])
         if picked:
             fail = res.get("summary") or ""
             res = {**res, "ok": True, "path": dest, "reused": picked,

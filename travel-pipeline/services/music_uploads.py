@@ -261,6 +261,34 @@ def list_uploaded(limit: int = 12, *, channel: str | None = None) -> list[dict]:
         return []
 
 
+def list_thumbnail_keys(channel: str, limit: int = 30) -> list[str]:
+    """그 채널 영상들의 배경(thumbnail_r2_key) 최신순 — where 자동 배경 마지막 폴백용. 실패 → []."""
+    url, key = _supabase_cfg()
+    if not (url and key):
+        return []
+    try:
+        with httpx.Client(timeout=15.0) as c:
+            r = c.get(
+                f"{url}/rest/v1/{_TABLE}",
+                headers=_headers(key),
+                params={
+                    "select": "thumbnail_r2_key", "channel": f"eq.{_resolve_channel(channel)}",
+                    "thumbnail_r2_key": "not.is.null", "order": "created_at.desc", "limit": str(limit),
+                },
+            )
+            r.raise_for_status()
+            rows = r.json()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[music-uploads] 배경 키 조회 실패: %s", _http_err(e))
+        return []
+    out: list[str] = []
+    for row in rows if isinstance(rows, list) else []:
+        k = str((row or {}).get("thumbnail_r2_key") or "").strip()
+        if k and k not in out:
+            out.append(k)
+    return out
+
+
 def set_channel(mix_id: str, channel: str | None) -> dict:
     """채널 축 보정(PATCH). {stored, error}.
 

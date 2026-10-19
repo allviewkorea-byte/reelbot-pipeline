@@ -397,8 +397,37 @@ def _generate_title_copy_tag(theme: dict) -> tuple[str, str]:
             return got
     except Exception as e:  # noqa: BLE001
         logger.warning("[music-meta] 태그 제목 카피 LLM 실패(폴백): %s", e)
-    ko = summary[:30] if _has_hangul(summary) else ""
-    return ko or "감성 플레이리스트", style_en[:50] or "mood playlist"
+    return _fallback_title_tag(theme)
+
+
+# LLM 이 전부 실패했을 때의 태그 경로 제목(결정적). 태그 요약을 자르면 "운동 · 힙합 ·" 처럼
+# 구분자로 끝나거나 태그 나열만 남아(2026-10 사고) 깨끗한 문장 풀에서만 고른다 — 자르기 금지.
+_TAG_FALLBACK_KO: dict[str, list[str]] = {
+    "sleep": ["잠들기 전 듣는 잔잔한 음악", "깊은 잠을 부르는 플레이리스트", "하루를 내려놓는 밤의 음악"],
+    "baby_sleep": ["아기와 함께 듣는 자장가 플레이리스트", "포근하게 잠드는 자장가 음악"],
+    "focus": ["집중이 필요할 때 듣는 플레이리스트", "공부할 때 흐름을 지켜주는 음악", "몰입하기 좋은 작업용 음악"],
+    "": ["오늘 하루와 어울리는 플레이리스트", "마음이 편안해지는 음악 모음", "조용히 틀어두기 좋은 플레이리스트"],
+}
+_TAG_FALLBACK_EN: dict[str, str] = {
+    "strength": "Workout Music Playlist", "cardio": "Running Music Playlist",
+    "warmup": "Stretching Music Playlist", "sleep": "Sleep Music Playlist",
+    "baby_sleep": "Lullaby Playlist", "focus": "Focus Music Playlist", "": "Mood Playlist",
+}
+
+
+def _fallback_title_tag(theme: dict) -> tuple[str, str]:
+    """(ko, en) 폴백 — 운동 채널은 _WORKOUT_INFO_COPY(축별), 그 외는 action 별 문장 풀.
+
+    같은 영상(slug)은 항상 같은 제목. 설명란 정보줄(_pick(pool, slug))과 겹치지 않게 seed 를 다르게 쓴다.
+    """
+    from services.music_workout_style import axis_for_action, is_workout_channel
+    action = str((theme.get("tag_combo") or {}).get("action") or "").strip()
+    seed = f"title|{theme.get('slug') or theme.get('title_kr') or ''}"
+    if is_workout_channel(theme.get("channel")):
+        axis = axis_for_action(action)
+        return _pick(_WORKOUT_INFO_COPY[axis], seed), _TAG_FALLBACK_EN[axis]
+    key = action if action in _TAG_FALLBACK_KO else ""
+    return _pick(_TAG_FALLBACK_KO[key], seed), _TAG_FALLBACK_EN.get(key, _TAG_FALLBACK_EN[""])
 
 
 def _title_genre_en(theme: dict, vs: dict) -> str:

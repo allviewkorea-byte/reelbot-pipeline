@@ -531,22 +531,47 @@ _WORKOUT_GEN_SYSTEM = (
     "한 줄, 한국어, 따옴표·번호·접두어 없이 프롬프트 문장만 출력한다."
 )
 
-def _generate_workout_prompt(examples: list[str]) -> str:
+def _generate_workout_prompt(examples: list[str], avoid_recent: list[str] | None = None) -> str:
     """운동 축 예시 → 같은 결의 새 프롬프트 1개. 실패 시 예외(호출부 폴백).
 
     where 의 _generate_new_prompt 와 구조는 같으나 system 프롬프트가 정반대라
     공유하지 않고 분리한다(where 함수 무수정 보장).
+    avoid_recent: 같은 축 최근 영상에 쓴 장면(최대 10개) — 장소·동작이 겹치지 않게 지시한다.
     """
     from services import music_lyrics
     if not music_lyrics.is_available():
         raise RuntimeError("LLM 미설정")
     sample = examples if len(examples) <= 5 else random.sample(examples, 5)
-    user = "예시:\n" + "\n".join(f"- {e}" for e in sample) + "\n\n새 프롬프트 1개:"
+    user = "예시:\n" + "\n".join(f"- {e}" for e in sample)
+    if avoid_recent:
+        user += (
+            "\n\n최근 영상에 이미 쓴 장면(장소·운동 동작·구도가 겹치지 않게 전혀 다른 장면으로):\n"
+            + "\n".join(f"- {e[:160]}" for e in avoid_recent[-10:])
+        )
+    user += "\n\n새 프롬프트 1개:"
     raw = music_lyrics._call(_WORKOUT_GEN_SYSTEM, user, max_tokens=200)
     out = (raw or "").strip().splitlines()[0].strip().strip('"').strip("'").lstrip("-").strip()
     if not out or len(out) < 12:
         raise RuntimeError("빈 생성")
     return out
+
+
+def workout_core(action: str | None, *, avoid_recent: list[str] | None = None) -> tuple[str, str]:
+    """(장면 + 축 꼬리말, 장면) — 장면은 최근 기록(_recent_workout.json)에 남기는 단위.
+
+    LLM 실패로 고정 풀에서 고를 때도 최근 장면은 뺀다(다 썼으면 전체에서).
+    """
+    from services.music_workout_style import axis_for_action
+
+    axis = axis_for_action(action)
+    pool = WORKOUT_IMAGE_PROMPTS[axis]
+    try:
+        scene = _generate_workout_prompt(pool, avoid_recent) if avoid_recent else _generate_workout_prompt(pool)
+    except Exception as e:  # noqa: BLE001 - LLM 실패는 고정 풀 폴백
+        logger.debug("[image-prompt] 운동 LLM 생성 실패(풀 폴백): %s", e)
+        recent = set(avoid_recent or [])
+        scene = random.choice([p for p in pool if p not in recent] or pool)
+    return f"{scene} {WORKOUT_SUFFIX[axis]}".rstrip(), scene
 
 
 def get_workout_image_prompt(action: str | None, *, include_prefix: bool = True) -> str:
@@ -555,15 +580,6 @@ def get_workout_image_prompt(action: str | None, *, include_prefix: bool = True)
     미매핑·빈 action 은 strength 로 떨어진다(None 을 돌려주면 호출부가 where 프롬프트로
     폴백해 버린다 — 이번 버그의 재발 경로다). 반환값은 항상 "[WORKOUT] " 로 시작한다.
     """
-    from services.music_workout_style import axis_for_action
-
-    axis = axis_for_action(action)
-    pool = WORKOUT_IMAGE_PROMPTS[axis]
-    try:
-        prompt = _generate_workout_prompt(pool)
-    except Exception as e:  # noqa: BLE001 - LLM 실패는 고정 풀 폴백
-        logger.debug("[image-prompt] 운동 LLM 생성 실패(풀 폴백): %s", e)
-        prompt = random.choice(pool)
-    core = f"{prompt} {WORKOUT_SUFFIX[axis]}".rstrip()
+    core, _ = workout_core(action)
     body = f"{_WORKOUT_PREFIX} {core}".rstrip() if include_prefix else core
     return f"{WORKOUT_TAG} {body}"
