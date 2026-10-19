@@ -16,7 +16,7 @@ import random
 import re
 
 from adapters import r2_storage
-from services import music_genres, music_lyrics, music_master, music_mix, music_store, music_suno
+from services import music_genres, music_lyrics, music_master, music_mix, music_song_lang, music_store, music_suno
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ def _emit(checkpoint, event: dict) -> None:
 
 def _track_brief(rec: dict) -> dict:
     """체크포인트에 남길 곡 요약(복구 시 마스터·믹스 입력으로 충분한 최소 필드)."""
-    return {k: rec.get(k) for k in ("audio_id", "r2_key", "duration", "title", "tags") if rec.get(k) is not None}
+    return {k: rec.get(k) for k in ("audio_id", "r2_key", "duration", "title", "tags", "language") if rec.get(k) is not None}
 
 
 def _generate_with_retry(theme: dict, log, *, max_retries: int | None = None, checkpoint=None) -> dict:
@@ -85,6 +85,7 @@ def _generate_with_retry(theme: dict, log, *, max_retries: int | None = None, ch
             "type": "store_failed", "task_id": e.task_id,
             "slug": theme.get("theme_slug"), "genre": theme.get("genre_id") or "",
             "action": theme.get("action") or "", "channel": theme.get("channel"),
+            "language": theme.get("language") or "",
             "audio_urls": [t.get("audio_url") or t.get("audioUrl") for t in (e.tracks or [])][:4],
         })
         raise
@@ -209,6 +210,7 @@ def _gen_vocal(
             "title": s.get("title") or "",  # #52-A 빈값 → Suno 가 곡 제목 자동 생성(장르명+번호 표시 방지)
             "lyrics": lyric,
             "vocalGender": gender,
+            "language": s.get("language") or "ko",  # 곡 언어 ko|en → music_tracks.language(쌍둥이 2클립 공통)
             "genre_id": genre_id,  # #46: 트랙에 장르 기록(used=false로 적립)
             "action": action,
             "channel": channel,  # 채널 축 — 적립될 재활용 풀을 가른다
@@ -238,6 +240,7 @@ def _gen_vocal(
                 logger.warning("[produce] 가사 원문 R2 저장 실패(audio_id=%s): %s", audio_id, e)
             produced.append({
                 **rec,
+                "language": theme["language"],
                 "sub_theme": s.get("sub_theme", ""),
                 "core_message": s.get("core_message", ""),
                 "lyrics": lyric,
@@ -252,8 +255,14 @@ def _gen_instrumental(
     is_tag_path: bool = False, action: str = "", channel: str | None = None,
     theme_dict: dict | None = None,
     checkpoint=None,
+    recycle: bool = True,
+    en_rate: float | None = None,
 ) -> tuple[list[dict], dict[str, str]]:
     """연주 경로: 가사 없이 style 만으로 연주곡 N회 생성(instrumental=True, 부분 실패 허용).
+
+    recycle=False: 보컬 영상에 섞는 연주곡 — 재활용 풀을 쓰지 않고 항상 새로 만든다(풀에 같은
+      장르 보컬 적립 클립이 섞여 있어 연주 자리에 보컬이 들어올 수 있다).
+    en_rate: 제목 영어 비율(None → 기존 20%).
 
     가사 없음 → lyrics_by_id 는 빈 dict(믹스 JSON 에 가사 미포함).
     #46: 곡마다 먼저 장르 재활용 풀을 확인 — 미사용 트랙이 있으면 Suno 호출 없이 재활용.
@@ -272,7 +281,7 @@ def _gen_instrumental(
         from services import music_meta
         td = dict(theme_dict or {})
         td.setdefault("genre_theme", genre_theme)
-        variations = music_meta.generate_instrumental_variations(n, effective_style, td)
+        variations = music_meta.generate_instrumental_variations(n, effective_style, td, en_rate=en_rate)
         if variations:
             log(f"연주곡 제목+변주 {len(variations)}개 생성")
     except Exception as e:  # noqa: BLE001
@@ -289,7 +298,7 @@ def _gen_instrumental(
             track_style = music_lyrics._with_length_hint(track_style)
 
         # ① 재활용 우선 — 같은 장르 미사용 트랙이 있으면 Suno 건너뜀(크레딧 0).
-        recycled = _recycle_track(genre_id, seen, log, channel=channel)
+        recycled = _recycle_track(genre_id, seen, log, channel=channel) if recycle else None
         if recycled is not None:
             if title:
                 recycled["title"] = title
@@ -303,6 +312,7 @@ def _gen_instrumental(
             "instrumental": True,
             "style": _ws.boost_style(track_style, action, channel=channel),
             "title": title,
+            "language": "inst",
             "genre_id": genre_id,  # #46: 둘째 클립이 used=false 로 적립 → 다음에 재활용
             "action": action,
             "channel": channel,  # 채널 축 — 적립될 재활용 풀을 가른다
@@ -319,10 +329,62 @@ def _gen_instrumental(
             if rec.get("audio_id"):
                 if title and not (rec.get("title") or "").strip():
                     rec["title"] = title
-                produced.append({**rec})
+                produced.append({**rec, "language": "inst"})
                 _emit(checkpoint, {"type": "track", "record": _track_brief(rec)})
     return produced, {}
 
+
+
+def _gen_mixed(
+    langs: list[str], *, theme_slug: str, genre_theme: str, base_style: str, inst_style: str,
+    cfg: dict | None, log, seen: set[str], sub_theme_pool, model, tone, genre_id, action, channel,
+    checkpoint,
+) -> tuple[list[dict], list[dict], dict[str, str]]:
+    """보컬 영상의 곡별 언어 목록(ko|en|inst) → (가사 songs, produced, lyrics_by_id).
+
+    가사(Claude) → 보컬 Suno → 연주 Suno 순서(가사 실패면 Suno 를 부르지 않는다 — 자동 회차
+    이른 실패 재시도 기준). 연주곡은 가사 호출 없이 instrumental=True, 보컬 단어를 뺀 style,
+    무드형 제목, 재활용 풀 미사용. produced 는 langs 의 곡 순서로 되돌린다(실패분은 건너뜀).
+    """
+    from services import music_song_lang as sl
+    for i, lang in enumerate(langs, 1):
+        logger.warning("[lyrics] 곡 %d/%d language=%s slug=%s", i, len(langs), lang, theme_slug)
+    vocal_langs = [x for x in langs if x != sl.INST]
+    inst_n = len(langs) - len(vocal_langs)
+    songs: list[dict] = []
+    vocal: list[dict] = []
+    lyrics_by_id: dict[str, str] = {}
+    if vocal_langs:
+        songs = music_lyrics.generate_lyrics(
+            genre_theme, len(vocal_langs), sub_theme_pool=sub_theme_pool, languages=vocal_langs,
+            model=model, tone=tone, genre_id=genre_id,
+        )
+        if cfg:
+            for s in songs:
+                s["style"] = cfg["style"]
+        log(f"가사 {len(songs)}곡 확보")
+        vocal, lyrics_by_id = _gen_vocal(
+            theme_slug, songs, base_style, genre_theme, log,
+            genre_id=genre_id, seen=seen, is_tag_path=not cfg, action=action, channel=channel,
+            checkpoint=checkpoint,
+        )
+    inst: list[dict] = []
+    if inst_n:
+        log(f"보컬 영상에 연주곡 {inst_n}곡 섞기(가사 생략, 새로 생성)")
+        inst, _ = _gen_instrumental(
+            theme_slug, inst_n, sl.instrumental_style(inst_style), genre_theme, log,
+            genre_id=genre_id, seen=seen, is_tag_path=not cfg, action=action, channel=channel,
+            theme_dict={"slug": theme_slug, "genre": genre_theme, "genre_theme": genre_theme, "action": action},
+            checkpoint=checkpoint, recycle=False, en_rate=sl.en_rate(),
+        )
+    queues = {"v": list(vocal), "i": list(inst)}
+    ordered: list[dict] = []
+    for lang in langs:
+        q = queues["i" if lang == sl.INST else "v"]
+        if q:
+            ordered.append(q.pop(0))
+    ordered += queues["v"] + queues["i"]
+    return songs, ordered, lyrics_by_id
 
 def produce(
     theme_slug: str,
@@ -383,6 +445,13 @@ def produce(
         is_instrumental = (track_type or "vocal").strip().lower() == "instrumental"
 
     seen: set[str] = set()  # #46: 이번 런에서 사용/적립한 audio_id(같은 런 중복 재활용 방지)
+    mixed = False  # 보컬 영상의 곡별 언어 혼합(ko|en|inst) 경로인가 — 보충(D)도 같은 규칙
+    mixed_kw = dict(
+        theme_slug=theme_slug, genre_theme=genre_theme, base_style=base_style,
+        inst_style=style_prompt or base_style, cfg=cfg, log=_log, seen=seen,
+        sub_theme_pool=sub_theme_pool, model=model, tone=lyric_tone, genre_id=genre_id,
+        action=action, channel=channel, checkpoint=checkpoint,
+    )
 
     if is_instrumental:
         # ① 가사 스킵. style_prompt 우선(주제/고정태그), 없으면 base_style.
@@ -397,23 +466,24 @@ def produce(
             checkpoint=checkpoint,
         )
     else:
-        # ① 가사(헌법 3-스테이지) — 주어지면 재사용(검수본), lyric_tone 반영.
-        songs = lyrics if lyrics is not None else music_lyrics.generate_lyrics(
-            genre_theme, n, sub_theme_pool=sub_theme_pool, language=language,
-            model=model, tone=lyric_tone, genre_id=genre_id,
-        )
-        # 고정 태그 보컬 장르: 곡별 style 을 고정 태그로 통일(일관성). 없으면 기존대로.
-        if cfg:
-            for s in songs:
-                s["style"] = cfg["style"]
-        _log(f"가사 {len(songs)}곡 확보")
-        # ② 곡별 보컬 생성.
-        produced, lyrics_by_id = _gen_vocal(
-            theme_slug, songs, base_style, genre_theme, _log,
-            genre_id=genre_id, seen=seen,
-            is_tag_path=not cfg, action=action, channel=channel,
-            checkpoint=checkpoint,
-        )
+        # 곡별 언어(ko|en|inst) — 가사를 넘겨받은 경우(검수본 재사용)는 기존 그대로 전 곡 보컬.
+        mixed = lyrics is None
+        if lyrics is not None:
+            songs = lyrics
+            if cfg:
+                for s in songs:
+                    s["style"] = cfg["style"]
+            _log(f"가사 {len(songs)}곡 확보")
+            produced, lyrics_by_id = _gen_vocal(
+                theme_slug, songs, base_style, genre_theme, _log,
+                genre_id=genre_id, seen=seen,
+                is_tag_path=not cfg, action=action, channel=channel,
+                checkpoint=checkpoint,
+            )
+        else:
+            songs, produced, lyrics_by_id = _gen_mixed(
+                music_song_lang.assign(n), **mixed_kw,
+            )
 
     # ②-보충(복구 D) — 일부만 성공했으면 모자란 곡만 1회 추가. 같은 장르 고정·소재 풀·채널 규칙.
     missing = n - len(produced)
@@ -428,6 +498,10 @@ def produce(
                                 "genre_theme": genre_theme, "action": action},
                     checkpoint=checkpoint,
                 )
+            elif mixed:
+                # 보충도 같은 규칙(곡별 언어·연주 결정)으로 모자란 곡 수만큼.
+                extra_songs, extra, extra_lyrics = _gen_mixed(music_song_lang.assign(missing), **mixed_kw)
+                songs = list(songs) + list(extra_songs)
             else:
                 extra_songs = music_lyrics.generate_lyrics(
                     genre_theme, missing, sub_theme_pool=sub_theme_pool, language=language,
@@ -452,6 +526,9 @@ def produce(
     if not produced:
         raise RuntimeError("생성 결과가 없습니다(전 곡 실패).")
     _log(f"트랙 {len(produced)}개 생성")
+    c = music_song_lang.counts(t.get("language") or ("inst" if is_instrumental else "ko") for t in produced)
+    logger.warning("[lyrics] 언어 구성 ko=%d en=%d inst=%d (요청 %d곡, 생성 %d곡) slug=%s",
+                   c["ko"], c["en"], c["inst"], n, len(produced), theme_slug)
 
     # ③ 마스터링(이번 배치만, 멱등) — 연주/보컬 공통.
     mastered = []

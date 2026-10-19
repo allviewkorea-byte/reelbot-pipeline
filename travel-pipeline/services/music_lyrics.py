@@ -208,6 +208,18 @@ def _call(
 _PLAN_BATCH = int(os.getenv("MUSIC_PLAN_BATCH", "5"))
 
 
+def _is_en(language: str | None) -> bool:
+    """곡 언어 en(영어 가사 곡)인가. ko·기타는 기존 한국어 규칙 그대로."""
+    return str(language or "").strip().lower() == "en"
+
+
+# 영어 곡 공통 지시 — 같은 가사 헌법을 쓰되 "한국어를 번역한 영어"가 되지 않게.
+_EN_RULE = (
+    "이 곡은 영어 곡이다. 가사 전체를 영어권 네이티브 작사가가 처음부터 영어로 쓴 것처럼 자연스럽게 — "
+    "한국어 문장을 옮긴 듯한 번역투·어색한 직역·한국어 단어 섞기 금지. 장르 톤과 분위기는 그대로 유지."
+)
+
+
 def _plan_songs_batch(
     theme: str,
     take: int,
@@ -218,10 +230,13 @@ def _plan_songs_batch(
     moods: list[str] | None,
     used_themes: list[str],
 ) -> list[dict]:
-    """take곡 분량의 플랜을 1회 LLM 호출로 생성(내부 배치 단위)."""
+    """take곡 분량의 플랜을 1회 LLM 호출로 생성(내부 배치 단위). language=en 이면 영어 곡 플랜."""
+    from services.music_song_lang import TITLE_RULE
     guidelines = load_guidelines()
+    en = _is_en(language)
     system = (
-        "너는 한국어 작사 디렉터다. 아래 '가사 헌법'을 절대 기준으로 삼아, 서로 확실히 "
+        ("너는 영어 곡을 기획하는 작사 디렉터다(영어권 네이티브 감각). " if en else "너는 한국어 작사 디렉터다. ")
+        + "아래 '가사 헌법'을 절대 기준으로 삼아, 서로 확실히 "
         "구별되는 곡들을 기획한다. 클리셰·범용 기획을 금지한다.\n\n"
         f"=== 가사 헌법 ===\n{guidelines}"
     )
@@ -232,7 +247,8 @@ def _plan_songs_batch(
         "영어 제목과 한국어 제목이 골고루 섞이게 배치할 것. "
         "⚠️ 같은 영상 내 제목은 전부 서로 달라야 한다(중복 금지).\n"
         if str(language).lower().startswith("ko")
-        else ""
+        else ("곡 제목(title)은 전부 자연스러운 영어 제목(시적인 영문). 같은 영상 내 제목은 전부 서로 달라야 한다.\n"
+              if en else "")
     )
     moods_str = ", ".join(moods) if moods else ""
     mood_line = (
@@ -246,15 +262,16 @@ def _plan_songs_batch(
             + "\n\n"
         )
     user = (
-        f"{mood_line}곡 수: {take}\n언어: {language} (한국어 기반 + 영어 훅 살짝)\n"
-        f"참고 sub-주제 풀(그대로 베끼지 말고 변형/확장): {', '.join(sub_theme_pool)}\n\n"
+        f"{mood_line}곡 수: {take}\n"
+        + (f"언어: en — {_EN_RULE}\n" if en else f"언어: {language} (한국어 기반 + 영어 훅 살짝)\n")
+        + f"참고 sub-주제 풀(그대로 베끼지 말고 변형/확장): {', '.join(sub_theme_pool)}\n\n"
         f"{avoid_line}"
         f"원칙 5(다양성)에 따라 {take}곡이 서로 다른 sub-주제·화자·상황·감정이 되도록 기획하라"
         + (f"(단, 위 분위기 정서는 모든 곡에서 일관 유지). " if moods_str else ". ")
         + "각 곡마다 원칙 1의 '핵심 메시지'(주제 라벨이 아니라 듣는 사람에게 전하고 싶은 말 한 줄)를 정하라.\n"
         "⚠️ 장르 연상 소재 금지: 장르 이름이나 그 장르를 떠올리게 하는 소재(예: 카페→커피·라떼, "
         "재즈→색소폰)를 가사 소재로 쓰지 말 것. 소재는 분위기에 맞게 자유롭게 고른다.\n"
-        f"{title_rule}\n"
+        f"{title_rule}{TITLE_RULE}\n"
         "JSON 배열로만 응답. 각 원소:\n"
         "{\"sub_theme\":\"...\",\"core_message\":\"한 줄\",\"speaker\":\"화자 설정\","
         "\"situation\":\"상황/장면\",\"emotion\":\"감정의 결\",\"title\":\"곡 제목\","
@@ -266,6 +283,30 @@ def _plan_songs_batch(
     return data[:take]
 
 
+def _fix_bad_titles(plans: list[dict], *, language: str, model: str | None) -> None:
+    """금지 패턴(A면·Side A·Track N·Intro·1번 등) 제목만 1회 다시 짓는다. 또 걸리거나 실패하면
+    빈 제목(→ Suno 자동 제목, #52-A)."""
+    from services.music_song_lang import TITLE_RULE, is_bad_title
+    for p in plans:
+        if not is_bad_title(p.get("title")):
+            continue
+        old = p.get("title")
+        new = ""
+        try:
+            lang_line = "영어 제목 1개(자연스러운 영문)" if _is_en(language) else "제목 1개(한국어 또는 자연스러운 영문)"
+            raw = _call(
+                "너는 곡 제목 작가다. " + TITLE_RULE + " 제목 한 줄만 출력(따옴표·설명 없이).",
+                f"곡 설계: 소재={p.get('sub_theme')} / 감정={p.get('emotion')} / 장면={p.get('situation')}\n"
+                f"금지 제목이 나와 다시 짓는다(원래: {old}). {lang_line}:",
+                max_tokens=60, model=model, task="lyrics_title",
+            )
+            new = (raw or "").strip().splitlines()[0].strip().strip('"').strip("'").strip() if (raw or "").strip() else ""
+        except Exception as e:  # noqa: BLE001 - 제목 재생성 실패 → 빈 제목
+            logger.warning("[lyrics] 금지 제목 재생성 실패(%s): %s", old, e)
+        p["title"] = "" if (not new or is_bad_title(new)) else new
+        logger.warning("[lyrics] 금지 제목 교체: %r → %r", old, p["title"] or "(Suno 자동 제목)")
+
+
 def plan_songs(
     theme: str,
     n: int,
@@ -274,8 +315,12 @@ def plan_songs(
     language: str = "ko",
     model: str | None = None,
     moods: list[str] | None = None,
+    avoid: list[str] | None = None,
 ) -> list[dict]:
     """주제 → N개의 서로 다른 곡 설계(sub_theme/core_message/화자/상황/감정/title/style).
+
+    avoid: 이미 기획된 주제(다른 언어 플랜 등) — 겹치지 않게 "피하라"로 넘긴다.
+    금지 패턴 제목(A면·Track N 등)은 그 곡만 다시 짓는다.
 
     N ≤ 배치크기(기본 5)면 1회 호출(기존과 동일). N이 크면 배치 분할하여 JSON 잘림 방지.
     배치 간 다양성: 이전 배치의 sub_theme·title을 다음 배치에 "피하라"로 전달.
@@ -284,13 +329,15 @@ def plan_songs(
     batch_size = _PLAN_BATCH
 
     if n <= batch_size:
-        return _plan_songs_batch(
+        plans = _plan_songs_batch(
             theme, n, sub_theme_pool=pool, language=language,
-            model=model, moods=moods, used_themes=[],
+            model=model, moods=moods, used_themes=list(avoid or []),
         )
+        _fix_bad_titles(plans, language=language, model=model)
+        return plans
 
     plans: list[dict] = []
-    used_themes: list[str] = []
+    used_themes: list[str] = list(avoid or [])
     remaining = n
     batch_idx = 0
     while remaining > 0:
@@ -318,6 +365,7 @@ def plan_songs(
         if title in seen_titles:
             p["title"] = p["title"] + " " + (p.get("emotion") or p.get("situation") or "II")
         seen_titles.add((p.get("title") or "").strip().lower())
+    _fix_bad_titles(plans, language=language, model=model)
     return plans[:n]
 
 
@@ -337,8 +385,10 @@ def write_lyrics(
     genre_style(선택): 장르의 음악 스타일(악기·BPM·사운드만, 소재 아님).
     """
     guidelines = load_guidelines()
+    en = _is_en(language)
     system = (
-        "너는 한국어 작사가다. 아래 '가사 헌법'의 모든 원칙을 지켜 한 곡을 쓴다. "
+        ("너는 영어권 네이티브 작사가다(가사는 영어로 쓴다). " if en else "너는 한국어 작사가다. ")
+        + "아래 '가사 헌법'의 모든 원칙을 지켜 한 곡을 쓴다. "
         "telling 금지, 장면으로 showing. 클리셰 한 줄도 금지.\n\n"
         f"=== 가사 헌법 ===\n{guidelines}"
     )
@@ -361,8 +411,8 @@ def write_lyrics(
         f"- 감정의 결: {plan.get('emotion')}\n"
         f"- 제목: {plan.get('title')}\n"
         f"{mood_line}{style_line}{tone_line}"
-        f"- 언어: {language} (한국어 기반 + 영어 훅 살짝)\n\n"
-        "규칙:\n"
+        + (f"- 언어: en — {_EN_RULE}\n\n" if en else f"- 언어: {language} (한국어 기반 + 영어 훅 살짝)\n\n")
+        + "규칙:\n"
         "1. 첫 소절 첫 라인부터 강렬하거나 인상적인 훅으로 시작 — 진부한 도입부 금지"
         "('그날을 기억해', '눈을 감으면' 등). 듣는 사람이 첫 줄에 바로 빠져들게.\n"
         "2. 가사 소재는 장르와 무관하게 자유롭게 — 카페 장르라도 커피·라떼 같은 장르 연상 소재 금지. "
@@ -390,7 +440,9 @@ def review_lyrics(
         f"=== 가사 헌법 ===\n{guidelines}"
     )
     user = (
-        f"핵심 메시지: {plan.get('core_message')}\n언어: {language}\n\n"
+        f"핵심 메시지: {plan.get('core_message')}\n언어: {language}\n"
+        + (f"{_EN_RULE} 다시 쓸 때도 영어로 유지하고, 번역투면 클리셰 항목에서 감점하라.\n" if _is_en(language) else "")
+        + "\n"
         f"=== 검토할 가사 ===\n{lyrics}\n\n"
         "원칙 6의 4기준(깊이/여운/단조로움/클리셰)을 0~10으로 채점하라. "
         "(단조로움·클리셰는 '문제 없음=높은 점수') 어느 항목이든 7 미만이면 가사를 "
@@ -423,8 +475,13 @@ def generate_lyrics(
     tone: str | None = None,
     genre_id: str | None = None,
     progress=None,
+    languages: list[str] | None = None,
 ) -> list[dict]:
     """주제 → N곡 가사(헌법 기반 3-스테이지). 곡별 dict 리스트 반환.
+
+    languages(선택): 곡별 언어 목록(ko|en, 곡 순서 그대로) — 주면 n 대신 이 길이만큼 만들고,
+      언어별로 플랜한 뒤(영어 플랜은 한국어 플랜 주제를 피한다) 원래 순서로 되돌린다.
+      없으면 기존 그대로(전 곡 language).
 
     tone(선택): 주제의 lyric_tone. 작성 단계에 전달(없으면 현행과 완전 동일).
     genre_id(선택): 19장르 id. 있으면 분위기 조합을 **1회만** 뽑아 N곡 전체에 공유(일관성) +
@@ -443,23 +500,41 @@ def generate_lyrics(
     batches = (n + _PLAN_BATCH - 1) // _PLAN_BATCH
     if progress:
         progress(f"① 다양성 플랜 생성({n}곡, {batches}배치)...")
-    plans = plan_songs(
-        theme, n, sub_theme_pool=sub_theme_pool, language=language, model=model, moods=moods,
-    )
+    if languages:
+        langs = [("en" if _is_en(x) else "ko") for x in languages]
+        by_lang: dict[str, list[dict]] = {}
+        avoid: list[str] = []
+        for lang in ("ko", "en"):
+            k = langs.count(lang)
+            if not k:
+                continue
+            got = plan_songs(theme, k, sub_theme_pool=sub_theme_pool, language=lang, model=model,
+                             moods=moods, avoid=avoid)
+            for p in got:
+                p["language"] = lang
+            avoid += [f"{p.get('sub_theme', '')} / {p.get('title', '')}" for p in got]
+            by_lang[lang] = got
+        plans = [by_lang[lang].pop(0) for lang in langs if by_lang.get(lang)]
+    else:
+        plans = plan_songs(
+            theme, n, sub_theme_pool=sub_theme_pool, language=language, model=model, moods=moods,
+        )
 
     songs: list[dict] = []
     for i, plan in enumerate(plans, 1):
         try:
             if progress:
                 progress(f"② 작성 {i}/{len(plans)}: {plan.get('sub_theme')}")
+            lang = plan.get("language") or language
             draft = write_lyrics(
-                plan, language=language, model=model, tone=tone,
+                plan, language=lang, model=model, tone=tone,
                 moods=moods, genre_style=genre_style,
             )
             if progress:
                 progress(f"③ 자기검토 {i}/{len(plans)}...")
-            review = review_lyrics(plan, draft, language=language, model=model)
+            review = review_lyrics(plan, draft, language=lang, model=model)
             songs.append({
+                "language": "en" if _is_en(lang) else "ko",
                 "sub_theme": plan.get("sub_theme", ""),
                 "core_message": plan.get("core_message", ""),
                 "title": plan.get("title", ""),  # #52-A 빈값 허용 → 다운스트림이 Suno 자동 제목 사용(장르명+번호 방지)

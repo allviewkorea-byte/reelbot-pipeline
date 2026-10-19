@@ -89,7 +89,7 @@ class Checkpoint:
                 if ev["record"]["audio_id"] not in {x.get("audio_id") for x in self.tracks}:
                     self.tracks.append(ev["record"])
             elif t == "store_failed":
-                self.pending.append({k: ev.get(k) for k in ("task_id", "slug", "genre", "action", "channel", "audio_urls")})
+                self.pending.append({k: ev.get(k) for k in ("task_id", "slug", "genre", "action", "channel", "language", "audio_urls")})
             else:
                 return
         self.save()
@@ -417,6 +417,7 @@ def reacquire(item: dict, *, timeout: int = 60, interval: int = 5) -> list[dict]
     return music_suno.store_with_retry(
         item.get("slug") or "untitled", item["task_id"], tracks,
         genre=item.get("genre") or "", action=item.get("action") or "", channel=item.get("channel"),
+        language=item.get("language") or "",
     )
 
 
