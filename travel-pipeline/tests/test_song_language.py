@@ -25,28 +25,27 @@ def _rates(monkeypatch):
     monkeypatch.delenv("MUSIC_LYRICS_EN_RATE", raising=False)
 
 
-# ── A 곡별 결정 분포 ───────────────────────────────────────────────────
-def _simulate(videos=100, n=10, seed=1):
+# ── A 영상별 결정 분포(영상 하나는 한 가지로 통일) ─────────────────────────
+def _videos(count=2000, n=10, seed=1):
     rng = random.Random(seed)
-    per_video = [sl.assign(n, rng=rng) for _ in range(videos)]
-    return per_video, Counter(x for v in per_video for x in v)
+    return [sl.assign(n, rng=rng) for _ in range(count)]
 
 
-def test_1000_songs_default_rates():
-    per_video, c = _simulate()
-    assert sum(c.values()) == 1000
-    assert abs(c["inst"] / 1000 - 0.25) < 0.02
-    assert abs(c["en"] / (c["en"] + c["ko"]) - 0.70) < 0.04
-    assert all(v.count("inst") in (2, 3) for v in per_video)            # 10곡이면 2~3곡
-    assert len({tuple(i for i, x in enumerate(v) if x == "inst") for v in per_video}) > 30  # 위치 랜덤
+def test_video_level_default_rates():
+    vids = _videos()
+    assert all(len(set(v)) == 1 and len(v) == 10 for v in vids)          # 영상 안에서는 섞지 않음
+    c = Counter(v[0] for v in vids)
+    assert abs(c["en"] / 2000 - 0.50) < 0.03                             # 영어 50
+    assert abs(c["ko"] / 2000 - 0.25) < 0.03                             # 한국어 25
+    assert abs(c["inst"] / 2000 - 0.25) < 0.03                           # 연주 25
 
 
 def test_rates_follow_env(monkeypatch):
     monkeypatch.setenv("MUSIC_INSTRUMENTAL_RATE", "0.5")
     monkeypatch.setenv("MUSIC_LYRICS_EN_RATE", "0.2")
-    per_video, c = _simulate()
-    assert all(v.count("inst") == 5 for v in per_video)
-    assert abs(c["en"] / (c["en"] + c["ko"]) - 0.20) < 0.05
+    c = Counter(v[0] for v in _videos())
+    assert abs(c["inst"] / 2000 - 0.5) < 0.04
+    assert abs(c["en"] / (c["en"] + c["ko"]) - 0.20) < 0.04
     monkeypatch.setenv("MUSIC_INSTRUMENTAL_RATE", "0")
     monkeypatch.setenv("MUSIC_LYRICS_EN_RATE", "1")
     assert set(sl.assign(10)) == {"en"}
@@ -54,10 +53,10 @@ def test_rates_follow_env(monkeypatch):
     assert sl.instrumental_rate() == 0.25
 
 
-def test_small_n_expected_rate():
-    rng = random.Random(5)
-    c = Counter(sl.assign(1, rng=rng)[0] for _ in range(4000))
-    assert abs(c["inst"] / 4000 - 0.25) < 0.03                          # 1곡도 기대 비율 그대로
+def test_assign_fixed_lang_for_top_up():
+    assert sl.assign(3, lang="ko") == ["ko", "ko", "ko"]
+    assert sl.assign(2, lang="inst") == ["inst", "inst"]
+    assert sl.assign(0) == []
 
 
 # ── 제목 금지 패턴 ───────────────────────────────────────────────────
@@ -122,7 +121,7 @@ def test_mixed_video_instrumental_path(monkeypatch, env):
     assert all("vocal" not in t["style"] for t in inst) and inst[0]["title"] == "Mood 0"   # 무드형 제목
     body = music_suno._build_body(inst[0])
     assert body["instrumental"] is True and "prompt" not in body and body["title"] == "Mood 0"
-    assert st["inst_var"][0]["en_rate"] == 0.7                              # 제목도 영 70%
+    assert st["inst_var"][0]["en_rate"] is None                            # 연주 제목은 기존 연주 영상 규칙
     vocal = [t for t in st["suno"] if not t["instrumental"]]
     assert [t["language"] for t in vocal] == ["en", "ko", "en"]
     assert all(e["record"].get("language") is None for e in events if e["type"] == "track")  # stub 레코드엔 없음
@@ -137,18 +136,18 @@ def test_all_instrumental_assignment_skips_lyrics(monkeypatch, env):
 
 
 def test_top_up_uses_same_rule(monkeypatch, env):
-    """복구 D — 모자란 곡 수만큼 같은 규칙(곡별 언어·연주)으로 다시 결정."""
+    """복구 D — 모자란 곡 수만큼, 처음 정한 영상 언어 그대로 보충."""
     mp, st = env
     asked = []
     real = sl.assign
 
-    def _spy(n, rng=None):
-        asked.append(n)
-        return real(n, rng=random.Random(n))
+    def _spy(n, rng=None, lang=None):
+        asked.append((n, lang))
+        return real(n, rng=random.Random(n), lang=lang) if lang else ["en"] * n
     monkeypatch.setattr(sl, "assign", _spy)
     st["fail"] = {1, 2, 3}
     out = mp.produce("s", n=10, do_master=False, do_mix=False)
-    assert asked == [10, 3] and len(out["produced"]) == 10
+    assert asked == [(10, None), (3, "en")] and len(out["produced"]) == 10
     assert len(st["suno"]) == 13
 
 

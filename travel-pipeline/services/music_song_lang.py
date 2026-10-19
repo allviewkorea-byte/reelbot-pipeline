@@ -1,9 +1,9 @@
-"""곡별 가사 언어·연주곡 결정(대표 결정 2026-10-19) — 운동·where 공통.
+"""영상별 가사 언어·연주 결정(대표 결정 2026-10-19 정정) — 운동·where 공통.
 
-보컬 영상 1개(N곡)에서
-  1) 연주곡 수 = N × MUSIC_INSTRUMENTAL_RATE(기본 0.25) 근처(소수부는 확률로 올림 — 10곡이면 2~3곡),
-     위치는 랜덤.
-  2) 나머지 곡은 곡마다 독립으로 영어 MUSIC_LYRICS_EN_RATE(기본 0.7) / 한국어 나머지.
+영상 1개는 한 가지로 통일한다(곡마다 섞지 않는다). 한 달 전체에서 비율이 맞도록 영상마다 랜덤:
+  1) 연주 영상 = MUSIC_INSTRUMENTAL_RATE(기본 0.25)
+  2) 나머지(보컬 영상) 중 영어 = MUSIC_LYRICS_EN_RATE(기본 2/3), 한국어 = 나머지
+  → 기본값이면 영어 50 · 한국어 25 · 연주 25.
 원래 연주인 영상(장소 BGM 장르·연주 format)은 이 모듈을 쓰지 않는다(전부 연주 그대로).
 결정값 ko|en|inst 는 곡 메타 language(music_tracks.language·체크포인트·믹스 JSON)에 남는다.
 """
@@ -31,20 +31,22 @@ def instrumental_rate() -> float:
 
 
 def en_rate() -> float:
-    return _rate("MUSIC_LYRICS_EN_RATE", 0.7)
+    return _rate("MUSIC_LYRICS_EN_RATE", 2 / 3)
 
 
-def assign(n: int, *, rng: random.Random | None = None) -> list[str]:
-    """N곡의 language 목록(곡 순서 그대로). 연주곡 수는 N×비율 근처, 언어는 곡마다 독립."""
+def pick_video_language(*, rng: random.Random | None = None) -> str:
+    """영상 1개의 언어 ko|en|inst — 연주 rate, 나머지 중 영어 en_rate."""
     r = rng or random
+    if r.random() < instrumental_rate():
+        return INST
+    return EN if r.random() < en_rate() else KO
+
+
+def assign(n: int, *, rng: random.Random | None = None, lang: str | None = None) -> list[str]:
+    """N곡의 language 목록 — 영상 단위로 통일(전 곡 같은 값). lang 을 주면 그 값(보충 D 용)."""
     n = max(0, int(n))
-    exact = n * instrumental_rate()
-    k = int(math.floor(exact))
-    if r.random() < exact - k:
-        k += 1
-    inst_pos = set(r.sample(range(n), min(n, k)))
-    p_en = en_rate()
-    return [INST if i in inst_pos else (EN if r.random() < p_en else KO) for i in range(n)]
+    v = lang if lang in (KO, EN, INST) else pick_video_language(rng=rng)
+    return [v] * n
 
 
 def counts(langs) -> dict[str, int]:

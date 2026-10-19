@@ -340,7 +340,7 @@ def _gen_mixed(
     cfg: dict | None, log, seen: set[str], sub_theme_pool, model, tone, genre_id, action, channel,
     checkpoint,
 ) -> tuple[list[dict], list[dict], dict[str, str]]:
-    """보컬 영상의 곡별 언어 목록(ko|en|inst) → (가사 songs, produced, lyrics_by_id).
+    """보컬 영상의 언어 목록(ko|en|inst — 지금은 영상 단위로 전 곡 같은 값) → (가사 songs, produced, lyrics_by_id).
 
     가사(Claude) → 보컬 Suno → 연주 Suno 순서(가사 실패면 Suno 를 부르지 않는다 — 자동 회차
     이른 실패 재시도 기준). 연주곡은 가사 호출 없이 instrumental=True, 보컬 단어를 뺀 style,
@@ -375,7 +375,7 @@ def _gen_mixed(
             theme_slug, inst_n, sl.instrumental_style(inst_style), genre_theme, log,
             genre_id=genre_id, seen=seen, is_tag_path=not cfg, action=action, channel=channel,
             theme_dict={"slug": theme_slug, "genre": genre_theme, "genre_theme": genre_theme, "action": action},
-            checkpoint=checkpoint, recycle=False, en_rate=sl.en_rate(),
+            checkpoint=checkpoint, recycle=False, en_rate=None,
         )
     queues = {"v": list(vocal), "i": list(inst)}
     ordered: list[dict] = []
@@ -445,7 +445,8 @@ def produce(
         is_instrumental = (track_type or "vocal").strip().lower() == "instrumental"
 
     seen: set[str] = set()  # #46: 이번 런에서 사용/적립한 audio_id(같은 런 중복 재활용 방지)
-    mixed = False  # 보컬 영상의 곡별 언어 혼합(ko|en|inst) 경로인가 — 보충(D)도 같은 규칙
+    mixed = False  # 보컬 영상의 영상별 언어(ko|en|inst) 경로인가 — 보충(D)도 같은 언어
+    video_langs: list[str] = []
     mixed_kw = dict(
         theme_slug=theme_slug, genre_theme=genre_theme, base_style=base_style,
         inst_style=style_prompt or base_style, cfg=cfg, log=_log, seen=seen,
@@ -481,9 +482,9 @@ def produce(
                 checkpoint=checkpoint,
             )
         else:
-            songs, produced, lyrics_by_id = _gen_mixed(
-                music_song_lang.assign(n), **mixed_kw,
-            )
+            video_langs = music_song_lang.assign(n)
+            logger.warning("[lyrics] 영상 언어=%s slug=%s 곡수=%d", video_langs[0] if video_langs else "-", theme_slug, n)
+            songs, produced, lyrics_by_id = _gen_mixed(video_langs, **mixed_kw)
 
     # ②-보충(복구 D) — 일부만 성공했으면 모자란 곡만 1회 추가. 같은 장르 고정·소재 풀·채널 규칙.
     missing = n - len(produced)
@@ -499,8 +500,10 @@ def produce(
                     checkpoint=checkpoint,
                 )
             elif mixed:
-                # 보충도 같은 규칙(곡별 언어·연주 결정)으로 모자란 곡 수만큼.
-                extra_songs, extra, extra_lyrics = _gen_mixed(music_song_lang.assign(missing), **mixed_kw)
+                # 보충도 같은 영상 언어로(영상 하나는 한 가지로 통일) 모자란 곡 수만큼.
+                extra_songs, extra, extra_lyrics = _gen_mixed(
+                    music_song_lang.assign(missing, lang=(video_langs[0] if video_langs else None)), **mixed_kw,
+                )
                 songs = list(songs) + list(extra_songs)
             else:
                 extra_songs = music_lyrics.generate_lyrics(
