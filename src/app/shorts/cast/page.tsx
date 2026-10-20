@@ -34,6 +34,7 @@ function ShortsCastInner() {
   const channel = params.get("channel") || WORKOUT_CHANNEL_ID
   const [cast, setCast] = useState<CastEntry[]>([])
   const [aspects, setAspects] = useState<Aspect[]>([])
+  const [anchor, setAnchor] = useState("glow_front")
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [progress, setProgress] = useState<Progress | null>(null)
@@ -45,11 +46,12 @@ function ShortsCastInner() {
   const role = entry?.role ?? "lead"
   const running = progress?.status === "running"
 
-  const apply = useCallback((p: Promise<{ cast?: CastEntry[]; aspects?: Aspect[] }>) =>
+  const apply = useCallback((p: Promise<{ cast?: CastEntry[]; aspects?: Aspect[]; anchor?: string }>) =>
     p
       .then((data) => {
         setCast(data.cast ?? [])
         setAspects(data.aspects ?? [])
+        if (data.anchor) setAnchor(data.anchor)
         setError(null)
       })
       .catch((e) => setError(e instanceof Error ? e.message : "불러오기 실패"))
@@ -105,7 +107,7 @@ function ShortsCastInner() {
   }, [entry?.role, channel]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function generateAll() {
-    if (entry?.aspects.front && !confirm("8장을 모두 새로 만들어요. 지금 시트는 덮어써지고 확정이 풀립니다. 진행할까요?")) return
+    if (entry?.aspects[anchor] && !confirm("8장을 모두 새로 만들어요. 지금 시트는 덮어써지고 확정이 풀립니다. 진행할까요?")) return
     try {
       await jsonOrThrow(await fetch("/api/shorts/cast/generate", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ channel, role }),
@@ -172,8 +174,8 @@ function ShortsCastInner() {
               disabled={running || !!busyAspect}
               className="flex min-h-[40px] items-center gap-1.5 rounded-lg border border-border bg-background px-3 text-sm font-medium text-foreground hover:border-primary/40 disabled:opacity-50"
             >
-              {running ? <Loader2 className="h-4 w-4 animate-spin" /> : entry.aspects.front ? <RefreshCw className="h-4 w-4 text-muted-foreground" /> : <Sparkles className="h-4 w-4 text-primary" />}
-              {running ? `생성 중 ${progress?.generated.length ?? 0}/${progress?.total ?? 8}` : entry.aspects.front ? "전체 다시 생성" : "8장 생성"}
+              {running ? <Loader2 className="h-4 w-4 animate-spin" /> : entry.aspects[anchor] ? <RefreshCw className="h-4 w-4 text-muted-foreground" /> : <Sparkles className="h-4 w-4 text-primary" />}
+              {running ? `생성 중 ${progress?.generated.length ?? 0}/${progress?.total ?? 8}` : entry.aspects[anchor] ? "전체 다시 생성" : "8장 생성"}
             </button>
             {entry.status === "approved" ? (
               <button
@@ -221,7 +223,7 @@ function ShortsCastInner() {
             )}
             <span className="text-xs text-muted-foreground">{entry.summary}</span>
             <p className="w-full text-[11px] text-muted-foreground">
-              ⚠️ 평소·반전 8장이 모두 같은 얼굴(이목구비)인지 확인해 주세요. 실존 인물(연예인·선수)과 닮아 보이면 확정하지 말고 평소 정면부터 다시 만들어 주세요. 손·관절이 어색한 장은 개별 재생성. 이름은 자막에만 쓰입니다.
+              ⚠️ 평소·반전 8장이 모두 같은 얼굴(이목구비)인지 확인해 주세요. 실존 인물(연예인·선수)과 닮아 보이면 확정하지 말고 기준 얼굴(반전 정면)부터 다시 만들어 주세요. 손·관절이 어색한 장은 개별 재생성. 이름은 자막에만 쓰입니다.
             </p>
           </div>
 
@@ -254,8 +256,8 @@ function ShortsCastInner() {
                     </span>
                     <button
                       onClick={() => regenerate(a.key)}
-                      disabled={running || !!busyAspect || (a.key !== "front" && !entry.aspects.front)}
-                      title={a.key === "front" ? "기준 얼굴만 다시 — 나머지와 얼굴이 어긋날 수 있어요" : "이 장만 다시 생성"}
+                      disabled={running || !!busyAspect || (a.key !== anchor && !entry.aspects[anchor])}
+                      title={a.key === anchor ? "기준 얼굴만 다시 — 나머지와 얼굴이 어긋날 수 있어요" : "이 장만 다시 생성"}
                       className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground hover:border-primary/40 hover:text-foreground disabled:opacity-40"
                     >
                       <RefreshCw className="h-3.5 w-3.5" />
