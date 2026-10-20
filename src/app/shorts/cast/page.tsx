@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { toast } from "sonner"
-import { ArrowLeft, Check, CheckCircle2, ImageIcon, Loader2, RefreshCw, Sparkles, X } from "lucide-react"
+import { ArrowLeft, Check, CheckCircle2, Film, ImageIcon, Loader2, RefreshCw, Sparkles, X } from "lucide-react"
 import { WORKOUT_CHANNEL_ID, withChannel } from "@/lib/music"
 import { FamilyRolePanel, type UploadRole } from "@/components/shorts/FamilyCastPanel"
 
@@ -170,6 +170,13 @@ function ShortsCastInner() {
             <h1 className="text-lg font-semibold text-foreground">쇼츠 캐릭터 시트</h1>
             <p className="text-xs text-muted-foreground">시즌1 돌잔치 D-14 · 확정한 인물만 영상 레퍼런스로 쓰입니다</p>
           </div>
+          <Link
+            href={`/shorts/series?channel=${encodeURIComponent(channel)}`}
+            className="ml-1 flex min-h-[36px] shrink-0 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-medium text-muted-foreground hover:border-primary/40 hover:text-foreground"
+          >
+            <Film className="h-3.5 w-3.5" />
+            시즌 1
+          </Link>
         </div>
         {tab === "lead" && entry && (
           <div className="flex flex-wrap items-center gap-2">

@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from services import shorts_cast, shorts_cast_upload
+from services import shorts_cast, shorts_cast_upload, shorts_produce, shorts_series
 
 router = APIRouter()
 
@@ -129,3 +129,34 @@ def cast_slot(req: CastSlotReq):
                                               cols=req.cols, crop=req.crop, labels=req.labels)
     except shorts_cast_upload.UploadError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+# ── 시즌 1 시리즈·테스트 제작 ────────────────────────────────────────────
+class TestRunReq(BaseModel):
+    channel: str = "workout_music"
+    days: list[int] = [1, 4, 6]
+    compare_seedance: bool = True
+
+
+@router.get("/series")
+def series(channel: str = "workout_music"):
+    """series.json(없으면 초기 계획) + 진행 상태 + 미확정 캐스트."""
+    return {"series": shorts_series.load(channel), "run": shorts_produce.run_state(),
+            "unapproved": shorts_produce.unapproved_roles(channel)}
+
+
+@router.post("/test-run")
+def test_run(req: TestRunReq, background: BackgroundTasks):
+    """비공개 테스트 제작(기본 Day 1·4·6) + Seedance 비교 1회. 5인 캐스트가 모두 확정돼야 시작."""
+    missing = shorts_produce.unapproved_roles(req.channel)
+    if missing:
+        raise HTTPException(status_code=400, detail="확정되지 않은 캐스트가 있어요: " + ", ".join(missing))
+    if not req.days or len(req.days) > 3 or any(d < 1 or d > 15 for d in req.days):
+        raise HTTPException(status_code=400, detail="테스트는 Day 1~15 중 최대 3편까지예요.")
+    if shorts_produce.is_running():
+        raise HTTPException(status_code=409, detail="쇼츠 제작이 이미 진행 중이에요.")
+    if shorts_produce.music_busy():
+        raise HTTPException(status_code=409, detail="음악 제작이 진행 중이에요 — 끝난 뒤 다시 시도해 주세요.")
+    background.add_task(shorts_produce.run_test, req.days, channel=req.channel,
+                        compare_seedance=req.compare_seedance)
+    return {"status": "running", "days": req.days}
