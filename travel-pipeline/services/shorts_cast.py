@@ -142,10 +142,15 @@ def aspect_base(aspect: str) -> str | None:
 # ── 채널별 사람 캐스트 바이블 ────────────────────────────────────────────
 # label·subtitle_name 은 화면·자막 전용 — 프롬프트(core)에는 이름이 들어가지 않는다.
 # story 는 대본 단계(2단계)가 읽을 설정(프롬프트 이미지 생성에는 쓰지 않음).
+# source: "generate"(이 모듈이 t2i·Kontext 로 시트 생성) | "upload"(대표가 외부 이미지를 업로드,
+# 슬롯·자르기는 services/shorts_cast_upload). active=False 는 보관(코드·이미지 유지, 영상에 안 씀).
+# 업로드 role 의 bible 은 영상 프롬프트에 이미지와 함께 넣는 외형 텍스트(영어).
 HUMAN_CAST: dict[str, list[dict]] = {
     "workout_music": [
         {
             "role": "lead",
+            "source": "generate",
+            "active": False,  # 2026-10-20 대표 결정: 가족 3인으로 전환 — 서준호 시트는 보관
             "label": "주인공",
             "subtitle_name": "서준호",
             "summary": "26살 백수 · 원룸 자취 · 할 일이 없어 운동만 해서 몸이 좋음(반전의 이유) · "
@@ -162,6 +167,73 @@ HUMAN_CAST: dict[str, list[dict]] = {
                 "cheekbones and a clean jawline"
             ),
         },
+        {
+            "role": "dad", "source": "upload", "active": True, "label": "아빠",
+            "summary": "30대 초반 · 근육질 헬스 마니아 · 코치 겸 방해꾼",
+            "bible": (
+                "the dad: a Korean man in his early thirties, muscular gym enthusiast; a black "
+                "baseball cap worn backwards (no bangs showing), a black sleeveless tank top, white "
+                "wristbands, gray joggers, black sneakers with white soles; no piercings"
+            ),
+            "slots": [
+                {"key": "face", "label": "기준 얼굴", "kind": "single", "min": "face", "required": True},
+                {"key": "expressions", "label": "표정 2×2", "kind": "grid"},
+                {"key": "turnaround", "label": "전신 4방향", "kind": "strip", "cols": 4, "required": True},
+                {"key": "action", "label": "헬스장 덤벨 컬", "kind": "single"},
+            ],
+        },
+        {
+            "role": "mom", "source": "upload", "active": True, "label": "엄마",
+            "summary": "30대 초반 · 주근깨 · 시즌1 주인공(돌잔치 D-14 챌린지) · 변화 전",
+            "bible": (
+                "the mom: a Korean woman in her early thirties with freckles; a high ponytail with a "
+                "thin black headband and a black scrunchie; a gray cropped sweatshirt hoodie (no "
+                "zipper), light sky-blue leggings, white sneakers"
+            ),
+            "slots": [
+                {"key": "face", "label": "기준 얼굴", "kind": "single", "min": "face", "required": True},
+                {"key": "expressions", "label": "표정 2×2", "kind": "grid"},
+                {"key": "turnaround", "label": "전신 4방향", "kind": "strip", "cols": 4, "required": True},
+                {"key": "action_front", "label": "거실 스쿼트 정면", "kind": "single"},
+                {"key": "action_side", "label": "거실 스쿼트 측면", "kind": "single"},
+            ],
+        },
+        {
+            "role": "mom_after", "source": "upload", "active": True, "label": "엄마 (변화 후)",
+            "summary": "같은 얼굴·같은 옷 · 살짝 슬림·탄탄 · 밝고 자신감 있는 표정",
+            "bible": (
+                "the mom after two weeks of training: the SAME woman with the same face, freckles, "
+                "hairstyle and the same outfit, now slightly slimmer and more toned, with a bright, "
+                "confident expression"
+            ),
+            "slots": [
+                {"key": "face", "label": "변화 후 얼굴", "kind": "single", "min": "face", "required": True},
+                {"key": "fullbody", "label": "변화 후 전신", "kind": "single", "required": True},
+            ],
+        },
+        {
+            "role": "baby", "source": "upload", "active": True, "label": "아기",
+            "summary": "돌 무렵 · 옆에서 따라 하는 귀여운 조연",
+            "bible": (
+                "the baby: a Korean baby about one year old with short black bob hair, wearing a plain "
+                "pale-yellow short-sleeved romper and white socks"
+            ),
+            "slots": [
+                {"key": "face", "label": "기준 얼굴", "kind": "single", "min": "face", "required": True},
+                {"key": "expressions", "label": "표정 2×2", "kind": "grid"},
+                {"key": "turnaround", "label": "전신 방향", "kind": "strip", "cols": 5, "required": True},
+                {"key": "action", "label": "매트 위 스트레칭", "kind": "single"},
+            ],
+        },
+        {
+            "role": "family", "source": "upload", "active": True, "label": "가족 단체",
+            "summary": "3인 단체 전신(키 비율 기준) · finale = 돌잔치 의상(선택)",
+            "bible": "the family of three together: the dad, the mom and the baby",
+            "slots": [
+                {"key": "group", "label": "3인 단체 전신", "kind": "single", "required": True},
+                {"key": "finale", "label": "돌잔치 의상 단체 (선택)", "kind": "single"},
+            ],
+        },
     ],
 }
 
@@ -172,6 +244,11 @@ def channels() -> list[str]:
 
 def get_entry(channel: str, role: str) -> dict | None:
     return next((e for e in HUMAN_CAST.get(channel, []) if e["role"] == role), None)
+
+
+def generated_entries(channel: str) -> list[dict]:
+    """자동 생성(t2i·Kontext) role — 지금은 보관된 lead 뿐."""
+    return [e for e in HUMAN_CAST.get(channel, []) if e.get("source", "generate") == "generate"]
 
 
 # ── 프롬프트 ─────────────────────────────────────────────────────────────
@@ -297,7 +374,7 @@ def list_cast(channel: str) -> list[dict]:
     objects = _list_objects(channel)
     state = read_state(channel)
     out = []
-    for e in HUMAN_CAST.get(channel, []):
+    for e in generated_entries(channel):
         aspects = {}
         for a in ASPECT_KEYS:
             k = aspect_key(channel, e["role"], a)
@@ -306,6 +383,7 @@ def list_cast(channel: str) -> list[dict]:
         out.append({
             "role": e["role"], "label": e["label"], "subtitle_name": e.get("subtitle_name"),
             "summary": e["summary"], "aspects": aspects, "status": _status(state, e["role"]),
+            "active": e.get("active", True),
         })
     return out
 
@@ -322,8 +400,9 @@ def reference_urls(channel: str, role: str, aspects: tuple[str, ...] = ("glow_fr
 
 # ── 생성 ─────────────────────────────────────────────────────────────────
 def _require(entry: dict | None, channel: str, role: str) -> dict:
-    if not entry:
-        raise ValueError(f"알 수 없는 캐스트입니다: {channel}/{role}")
+    """자동 생성 role 만 통과(업로드 role 은 생성 대상이 아님)."""
+    if not entry or entry.get("source", "generate") != "generate":
+        raise ValueError(f"자동 생성 캐스트가 아닙니다: {channel}/{role}")
     return entry
 
 
