@@ -6,7 +6,8 @@
    - 아기가 나오는 장면이 정책으로 거부(RefBlocked)되면 **아기 없는 대본(엄마·아빠만)으로 1회 대체**
 3. ffmpeg: 클립을 1080×1920·30fps 로 맞춰 이어 붙이고, 한국어 자막(ASS, 백곰 자막 스타일 재사용) +
    운동 채널 곡(음악만, 목소리 없음)
-4. 운동 채널에 **비공개** 업로드(containsSyntheticMedia=True), PLAYLIST_WORKOUT_SHORTS 가 있으면 재생목록
+4. 완성본을 R2 미리보기(shorts/{channel}/previews/)에 저장 → 릴봇 시즌 화면에서 재생
+   upload=True 일 때만 운동 채널에 **비공개** 업로드(containsSyntheticMedia=True). 테스트 기본은 업로드 안 함.
 5. series.json 에 대본·비용(영상 초×단가 실측)·video_id·요약 기록
 
 음악 제작과 겹치지 않게 쇼츠 전용 락을 쓰고, 음악 수동/복구 작업이 돌고 있으면 시작하지 않는다.
@@ -220,10 +221,26 @@ def upload_private(mp4: Path, ep: dict, script: dict, channel: str = CHANNEL) ->
     return {"video_id": vid, "video_url": f"https://www.youtube.com/watch?v={vid}", "playlist_added": added}
 
 
+# ── 미리보기 저장 ────────────────────────────────────────────────────────
+def preview_key(channel: str, day: int) -> str:
+    return f"shorts/{channel}/previews/day{day:02d}-{int(time.time())}.mp4"
+
+
+def save_preview(mp4: Path, channel: str, day: int) -> str:
+    """완성본을 R2(캐릭터 버킷 — Lifecycle 없음)에 올리고 공개 URL 반환. 릴봇 화면에서 재생용."""
+    from adapters import r2_storage
+    return r2_storage.upload_image(
+        str(mp4), preview_key(channel, day),
+        bucket=r2_storage._character_bucket(),
+        public_base_url=r2_storage._character_public_base(),
+        content_type="video/mp4",
+    )
+
+
 # ── 1편 제작 ─────────────────────────────────────────────────────────────
 def produce_episode(day: int, *, channel: str = CHANNEL, compare_seedance: bool = False,
-                    upload: bool = True) -> dict:
-    """Day N 1편 제작 → 비공개 업로드 → series.json 기록. 반환: 회차 결과."""
+                    upload: bool = False) -> dict:
+    """Day N 1편 제작 → R2 미리보기 저장 → (upload=True 면) 비공개 업로드 → series.json 기록."""
     from services.sayeon_assemble import _fetch
     series = shorts_series.load(channel)
     ep = shorts_series.episode(series, day)
@@ -246,6 +263,7 @@ def produce_episode(day: int, *, channel: str = CHANNEL, compare_seedance: bool 
                 _fetch(music["url"], mpath)
             out = cwd / "short.mp4"
             dur = assemble(paths, script, mpath, out, cwd)
+            preview_url = save_preview(out, channel, day)
             up = upload_private(out, ep, script, channel) if upload else {}
         video_usd = round(sum(c["cost_usd"] for c in clips), 3)
         cost = {"video_usd": video_usd, "video_seconds": sum(c["seconds"] for c in clips),
@@ -255,10 +273,11 @@ def produce_episode(day: int, *, channel: str = CHANNEL, compare_seedance: bool 
         result = shorts_series.update_episode(
             channel, day, status="uploaded_private" if upload else "rendered",
             script=script, summary=script.get("summary"), cost=cost,
-            video_id=up.get("video_id"), video_url=up.get("video_url"),
+            video_id=up.get("video_id"), video_url=up.get("video_url"), preview_url=preview_url,
             duration_sec=round(dur, 1), music=music, clips=clips, notes=notes, seedance=probe,
             elapsed_sec=round(time.time() - t0))
-        logger.warning("[shorts] Day %s 완료 — 영상 $%.2f, %ss, video=%s", day, video_usd, round(dur), up.get("video_id"))
+        logger.warning("[shorts] Day %s 완료 — 영상 $%.2f, %ss, preview=%s, video=%s", day, video_usd,
+                       round(dur), preview_url, up.get("video_id") or "(업로드 안 함)")
         return result
     except Exception as e:
         shorts_series.update_episode(channel, day, status="failed", error=str(e)[:500])
@@ -275,8 +294,10 @@ def unapproved_roles(channel: str = CHANNEL) -> list[str]:
     return [r for r in FAMILY_ROLES if shorts_cast._status(state, r) != "approved"]
 
 
-def run_test(days: list[int], *, channel: str = CHANNEL, compare_seedance: bool = True) -> None:
-    """테스트 제작(BackgroundTasks) — Day 순서대로, Seedance 비교는 첫 편에서 1회만."""
+def run_test(days: list[int], *, channel: str = CHANNEL, compare_seedance: bool = True,
+             upload: bool = False) -> None:
+    """테스트 제작(BackgroundTasks) — Day 순서대로, Seedance 비교는 첫 편에서 1회만.
+    upload=False(기본)면 유튜브에 올리지 않고 R2 미리보기만 남긴다."""
     if not _LOCK.acquire(blocking=False):
         raise Busy("쇼츠 제작이 이미 진행 중입니다.")
     try:
@@ -287,7 +308,8 @@ def run_test(days: list[int], *, channel: str = CHANNEL, compare_seedance: bool 
                 _RUN["failed"][day] = "음악 제작 중 — 건너뜀"
                 continue
             try:
-                produce_episode(day, channel=channel, compare_seedance=compare_seedance and i == 0)
+                produce_episode(day, channel=channel, compare_seedance=compare_seedance and i == 0,
+                                upload=upload)
                 _RUN["done"].append(day)
             except Exception as e:  # noqa: BLE001 - 한 편 실패가 나머지를 막지 않음
                 logger.warning("[shorts] Day %s 실패: %s", day, e)
