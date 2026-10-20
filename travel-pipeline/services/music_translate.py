@@ -275,6 +275,12 @@ def _where_genre_hashtags(gid: str, theme: dict, viz_spec: dict | None) -> list[
 
 
 def generate_hashtags(theme: dict, viz_spec: dict | None) -> list[str]:
+    """해시태그 — 앞 3개 = 검색 키워드 풀 상위(있을 때, music_meta.with_search_hashtags), 최대 15개."""
+    from services import music_meta
+    return music_meta.with_search_hashtags(theme, _generate_hashtags_base(theme, viz_spec))
+
+
+def _generate_hashtags_base(theme: dict, viz_spec: dict | None) -> list[str]:
     """해시태그 — 영어 5~7 + 한국어 3~5 + 무드/장소 2~3 (총 10~15). 결정적(비용 0).
 
     ★ 채널 분기(운동 채널 4단계). 아래 11개는 채널·장르와 무관하게 **하드코딩**돼 있어
@@ -291,7 +297,7 @@ def generate_hashtags(theme: dict, viz_spec: dict | None) -> list[str]:
     if resolve_channel(theme.get("channel")) != DEFAULT_CHANNEL:
         from services import music_meta
 
-        return music_meta.build_hashtags(theme, viz_spec)
+        return music_meta._build_hashtags_base(theme, viz_spec)
     # where — 장르별(고정 11개 제거, 대표 승인 2026-10-16). 장르를 알 수 없을 때만 아래 옛 규칙.
     from services import music_genres
     gid = theme.get("genre_id") or music_genres.classify_theme(theme)
