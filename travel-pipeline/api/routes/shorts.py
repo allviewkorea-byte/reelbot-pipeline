@@ -37,6 +37,7 @@ def cast(channel: str = "workout_music"):
         "channel": channel,
         "cast": shorts_cast.list_cast(channel),
         "aspects": [{"key": k, "label": shorts_cast.ASPECT_LABELS[k]} for k in shorts_cast.ASPECT_KEYS],
+        "anchor": shorts_cast.ANCHOR,
     }
 
 
