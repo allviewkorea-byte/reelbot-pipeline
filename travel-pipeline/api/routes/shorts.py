@@ -136,6 +136,7 @@ class TestRunReq(BaseModel):
     channel: str = "workout_music"
     days: list[int] = [1, 4, 6]
     compare_seedance: bool = True
+    upload: bool = False  # 테스트 기본: 유튜브에 올리지 않고 릴봇 화면(R2 미리보기)에서만 확인
 
 
 @router.get("/series")
@@ -147,7 +148,8 @@ def series(channel: str = "workout_music"):
 
 @router.post("/test-run")
 def test_run(req: TestRunReq, background: BackgroundTasks):
-    """비공개 테스트 제작(기본 Day 1·4·6) + Seedance 비교 1회. 5인 캐스트가 모두 확정돼야 시작."""
+    """테스트 제작(최대 3편) + Seedance 비교 1회. 5인 캐스트가 모두 확정돼야 시작.
+    upload=False(기본)면 R2 미리보기만 — 유튜브에는 올리지 않는다."""
     missing = shorts_produce.unapproved_roles(req.channel)
     if missing:
         raise HTTPException(status_code=400, detail="확정되지 않은 캐스트가 있어요: " + ", ".join(missing))
@@ -158,5 +160,5 @@ def test_run(req: TestRunReq, background: BackgroundTasks):
     if shorts_produce.music_busy():
         raise HTTPException(status_code=409, detail="음악 제작이 진행 중이에요 — 끝난 뒤 다시 시도해 주세요.")
     background.add_task(shorts_produce.run_test, req.days, channel=req.channel,
-                        compare_seedance=req.compare_seedance)
-    return {"status": "running", "days": req.days}
+                        compare_seedance=req.compare_seedance, upload=req.upload)
+    return {"status": "running", "days": req.days, "upload": req.upload}

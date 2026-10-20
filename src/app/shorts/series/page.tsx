@@ -7,8 +7,8 @@ import { toast } from "sonner"
 import { ArrowLeft, ExternalLink, Loader2, Play, Users } from "lucide-react"
 import { WORKOUT_CHANNEL_ID } from "@/lib/music"
 
-// 쇼츠 시즌 1 "돌잔치 D-14" — 15편 계획·진행·비용, 비공개 테스트 제작(Day 1·4·6) + Seedance 비교 1회.
-// 목소리 없음(자막+운동 채널 음악). 업로드는 항상 비공개.
+// 쇼츠 시즌 1 "돌잔치 D-14" — 15편 계획·진행·비용, 비공개 테스트 제작(1편씩, Day 1·4·6 중 선택) + Seedance 비교 1회.
+// 목소리 없음(자막+운동 채널 음악). 테스트는 유튜브에 올리지 않고 이 화면(R2 미리보기)에서만 재생.
 
 interface Episode {
   day: number
@@ -19,6 +19,7 @@ interface Episode {
   plan: string
   status: string
   video_url?: string | null
+  preview_url?: string | null
   cost?: { video_usd?: number; video_seconds?: number; seedance_usd?: number | null } | null
   notes?: { baby_dropped?: boolean } | null
   seedance?: { accepted?: boolean; blocked?: boolean; error?: string; model?: string } | null
@@ -35,15 +36,17 @@ const FORMAT_KO: Record<string, string> = { A: "셀카", B: "운동", C: "일상
 const ROLE_KO: Record<string, string> = { dad: "아빠", mom: "엄마", baby: "아기", mom_after: "엄마(후)", family: "가족" }
 const STAGE_KO: Record<string, string> = { mom: "변화 전", mom_mid: "중간", mom_after: "변화 후" }
 const STATUS_KO: Record<string, string> = {
-  planned: "예정", producing: "제작 중", uploaded_private: "비공개 업로드", rendered: "렌더 완료", failed: "실패",
+  planned: "예정", producing: "제작 중", uploaded_private: "비공개 업로드", rendered: "완성(미리보기)", failed: "실패",
 }
 const TEST_DAYS = [1, 4, 6]
+const TEST_DAY_KO: Record<number, string> = { 1: "Day 1 · 엄마 단독", 4: "Day 4 · 엄마+아빠", 6: "Day 6 · 엄마+아기" }
 
 function SeriesInner() {
   const channel = useSearchParams().get("channel") || WORKOUT_CHANNEL_ID
   const [data, setData] = useState<SeriesResp | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
+  const [testDay, setTestDay] = useState(1)
 
   const load = useCallback(
     () =>
@@ -67,16 +70,16 @@ function SeriesInner() {
   }, [load, running])
 
   async function startTest() {
-    if (!confirm("Day 1·4·6 비공개 테스트 3편 + Seedance 비교 1회를 만들어요.\n영상 생성 비용: 편당 약 $4~7(Kling O3 $0.24/초, 재시도 제외). 진행할까요?")) return
+    if (!confirm(`Day ${testDay} 테스트 1편 + Seedance 비교 1회를 만들어요.\n유튜브에는 올리지 않고 이 화면에서만 볼 수 있어요.\n영상 생성 비용: 약 $4~7(Kling O3 $0.24/초, 재시도 제외). 진행할까요?`)) return
     setStarting(true)
     try {
       const r = await fetch("/api/shorts/test-run", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channel, days: TEST_DAYS, compare_seedance: true }),
+        body: JSON.stringify({ channel, days: [testDay], compare_seedance: true, upload: false }),
       })
       const d = await r.json().catch(() => ({}))
       if (!r.ok) throw new Error(typeof d?.detail === "string" ? d.detail : `시작 실패(${r.status})`)
-      toast.success("테스트 제작을 시작했어요 — 편당 수 분 걸려요")
+      toast.success("테스트 1편 제작을 시작했어요 — 수 분 걸려요")
       await load()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "시작 실패")
@@ -101,18 +104,29 @@ function SeriesInner() {
           </Link>
           <div>
             <h1 className="text-lg font-semibold text-foreground">{data?.series.title ?? "쇼츠 시즌 1"}</h1>
-            <p className="text-xs text-muted-foreground">D-14는 이야기 속 날짜 · 목소리 없음(자막+음악) · 업로드는 항상 비공개</p>
+            <p className="text-xs text-muted-foreground">D-14는 이야기 속 날짜 · 목소리 없음(자막+음악) · 테스트는 유튜브에 올리지 않고 여기서만 재생</p>
           </div>
         </div>
+        <div className="flex items-center gap-2 self-start md:self-auto">
+        <select
+          value={testDay}
+          onChange={(e) => setTestDay(Number(e.target.value))}
+          disabled={starting || running}
+          className="min-h-[40px] rounded-lg border border-border bg-card px-2 text-sm text-foreground disabled:opacity-40"
+          aria-label="테스트 회차"
+        >
+          {TEST_DAYS.map((d) => <option key={d} value={d}>{TEST_DAY_KO[d]}</option>)}
+        </select>
         <button
           onClick={startTest}
           disabled={starting || running || !data || data.unapproved.length > 0}
-          title={data?.unapproved.length ? "확정되지 않은 캐스트가 있어요" : "Day 1·4·6 비공개 테스트"}
-          className="flex min-h-[40px] items-center gap-1.5 self-start rounded-lg bg-emerald-600 px-3 text-sm font-semibold text-white shadow-sm hover:opacity-90 disabled:opacity-40 md:self-auto"
+          title={data?.unapproved.length ? "확정되지 않은 캐스트가 있어요" : `Day ${testDay} 테스트 1편 (유튜브 업로드 없음)`}
+          className="flex min-h-[40px] items-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-sm font-semibold text-white shadow-sm hover:opacity-90 disabled:opacity-40"
         >
           {starting || running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-          {running ? `제작 중 · Day ${data?.run.current ?? ""}` : "테스트 3편 제작 (Day 1·4·6)"}
+          {running ? `제작 중 · Day ${data?.run.current ?? ""}` : "테스트 1편 제작"}
         </button>
+        </div>
       </div>
 
       {error && <div className="rounded-xl border border-border bg-card p-4 text-sm text-red-400">{error}</div>}
@@ -136,7 +150,7 @@ function SeriesInner() {
             <div className="flex items-center justify-between gap-2">
               <span className="text-sm font-semibold text-foreground">Day {e.day} · {e.dday}</span>
               <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                e.status === "uploaded_private" ? "bg-emerald-500/15 text-emerald-400"
+                e.status === "uploaded_private" || e.status === "rendered" ? "bg-emerald-500/15 text-emerald-400"
                   : e.status === "failed" ? "bg-red-500/15 text-red-400"
                   : e.status === "producing" ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground"
               }`}>
@@ -153,6 +167,15 @@ function SeriesInner() {
               <p className="text-[11px] text-muted-foreground">영상 {e.cost.video_seconds}초 · ${e.cost.video_usd.toFixed(2)}</p>
             )}
             {e.error && <p className="truncate text-[11px] text-red-400" title={e.error}>{e.error}</p>}
+            {e.preview_url && (
+              <video
+                src={e.preview_url}
+                controls
+                playsInline
+                preload="metadata"
+                className="mt-1 aspect-[9/16] w-full max-w-[240px] rounded-lg border border-border bg-black"
+              />
+            )}
             {e.video_url && (
               <a href={e.video_url} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs text-primary">
                 <ExternalLink className="h-3.5 w-3.5" /> 비공개 영상 보기

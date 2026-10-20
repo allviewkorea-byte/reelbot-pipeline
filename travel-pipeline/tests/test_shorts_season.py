@@ -313,6 +313,32 @@ def test_test_run_requires_all_approved(monkeypatch):
     monkeypatch.setattr(sp, "run_test", lambda days, **kw: started.append((days, kw)))
     assert c.post("/shorts/test-run", json={"days": [1, 2, 3, 4]}).status_code == 400
     r = c.post("/shorts/test-run", json={})
-    assert r.status_code == 200 and started == [([1, 4, 6], {"channel": CH, "compare_seedance": True})]
+    assert r.status_code == 200 and started == [([1, 4, 6], {"channel": CH, "compare_seedance": True, "upload": False})]
+    started.clear()
+    r = c.post("/shorts/test-run", json={"days": [1]})
+    assert r.status_code == 200 and r.json()["upload"] is False and started[0][0] == [1]
     monkeypatch.setattr(sp, "music_busy", lambda: True)
     assert c.post("/shorts/test-run", json={}).status_code == 409
+
+
+def test_produce_episode_saves_preview_without_upload(monkeypatch, tmp_path):
+    """테스트 기본: 유튜브 업로드 없이 R2 미리보기만 저장하고 series 에 preview_url 기록."""
+    from services import sayeon_assemble
+    saved, uploaded, updates = [], [], []
+    monkeypatch.setattr(sp.shorts_series, "load", lambda ch: {"episodes": []})
+    ep1 = _series_ep(1)[1]
+    monkeypatch.setattr(sp.shorts_series, "episode", lambda s, d: ep1)
+    monkeypatch.setattr(sp.shorts_series, "update_episode",
+                        lambda ch, d, **f: updates.append(f) or dict(f))
+    monkeypatch.setattr(sp, "make_clips", lambda series, ep, channel: (
+        {"hook": "h", "captions": ["c"], "summary": "s", "scenes": []},
+        [{"scene": 0, "url": "u", "seconds": 5, "cost_usd": 1.2}], {}))
+    monkeypatch.setattr(sp, "pick_music", lambda ch: None)
+    monkeypatch.setattr(sayeon_assemble, "_fetch", lambda url, p: p.write_bytes(b"x"))
+    monkeypatch.setattr(sp, "assemble", lambda paths, script, music, out, cwd: out.write_bytes(b"mp4") or 15.0)
+    monkeypatch.setattr(sp, "save_preview", lambda mp4, ch, day: saved.append(day) or "https://r2/p.mp4")
+    monkeypatch.setattr(sp, "upload_private", lambda *a, **k: uploaded.append(1) or {})
+    res = sp.produce_episode(1)
+    assert saved == [1] and uploaded == []
+    assert res["status"] == "rendered" and res["preview_url"] == "https://r2/p.mp4" and res["video_id"] is None
+    assert sp.preview_key(CH, 3).startswith(f"shorts/{CH}/previews/day03-")
