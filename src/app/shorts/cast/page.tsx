@@ -14,6 +14,7 @@ interface Aspect { key: string; label: string }
 interface CastEntry {
   role: string
   label: string
+  subtitle_name?: string | null
   summary: string
   aspects: Record<string, string>
   status: "draft" | "approved"
@@ -207,7 +208,9 @@ function ShortsCastInner() {
       ) : entry ? (
         <>
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card p-3">
-            <span className="text-sm font-semibold text-foreground">{entry.label}</span>
+            <span className="text-sm font-semibold text-foreground">
+              {entry.label}{entry.subtitle_name ? ` · ${entry.subtitle_name}` : ""}
+            </span>
             {entry.status === "approved" ? (
               <span className="flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-400">
                 <CheckCircle2 className="h-3 w-3" />
@@ -218,7 +221,7 @@ function ShortsCastInner() {
             )}
             <span className="text-xs text-muted-foreground">{entry.summary}</span>
             <p className="w-full text-[11px] text-muted-foreground">
-              ⚠️ 실존 인물(연예인·선수)과 닮아 보이면 확정하지 말고 정면부터 다시 만들어 주세요. 손·관절이 어색한 장은 개별 재생성.
+              ⚠️ 평소·반전 8장이 모두 같은 얼굴(이목구비)인지 확인해 주세요. 실존 인물(연예인·선수)과 닮아 보이면 확정하지 말고 평소 정면부터 다시 만들어 주세요. 손·관절이 어색한 장은 개별 재생성. 이름은 자막에만 쓰입니다.
             </p>
           </div>
 
@@ -252,7 +255,7 @@ function ShortsCastInner() {
                     <button
                       onClick={() => regenerate(a.key)}
                       disabled={running || !!busyAspect || (a.key !== "front" && !entry.aspects.front)}
-                      title={a.key === "front" ? "정면만 다시 — 나머지와 얼굴이 어긋날 수 있어요" : "이 장만 다시 생성"}
+                      title={a.key === "front" ? "기준 얼굴만 다시 — 나머지와 얼굴이 어긋날 수 있어요" : "이 장만 다시 생성"}
                       className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground hover:border-primary/40 hover:text-foreground disabled:opacity-40"
                     >
                       <RefreshCw className="h-3.5 w-3.5" />
