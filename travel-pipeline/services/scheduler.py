@@ -84,6 +84,15 @@ def _music_auto_run_tick() -> None:
         logger.exception("[auto-run] tick 실패")
 
 
+def _music_keyword_pool_daily() -> None:
+    """검색 키워드 풀(경쟁 인기 영상) 매일 갱신 — MUSIC_TREND_YOUTUBE_API_KEY 없으면 건너뜀(로그만)."""
+    try:
+        from services import music_keyword_pool
+        music_keyword_pool.run_daily()
+    except Exception:  # noqa: BLE001 - 실패가 스케줄러를 멈추지 않게
+        logger.exception("[keyword-pool] 매일 수집 실패")
+
+
 def start_scheduler() -> BackgroundScheduler:
     """FastAPI lifespan 에서 호출. 매일 04:00 KST 트리거를 등록한다."""
     global _scheduler
@@ -115,6 +124,15 @@ def start_scheduler() -> BackgroundScheduler:
         _music_recovery_tick,
         trigger=IntervalTrigger(seconds=60),
         id="music_recovery_tick",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    # 음악 검색 키워드 풀 — 매일 03:12 KST(= UTC 18:12). 제목·해시태그·태그의 검색어 출처.
+    scheduler.add_job(
+        _music_keyword_pool_daily,
+        trigger=CronTrigger(hour=(3 - _KST_OFFSET_HOURS) % 24, minute=12),
+        id="music_keyword_pool_daily",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

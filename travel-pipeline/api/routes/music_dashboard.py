@@ -639,8 +639,32 @@ def publish(mix_id: str, body: PublishBody | None = None):
     except Exception as e:  # noqa: BLE001 - 다국어 실패는 영상 공개를 막지 않음
         logger.warning("[music-dashboard] 다국어 적용 실패(영상은 공개됨): %s", e)
 
+    _log_upload_quota(mix_id, result, ml)
     # upload_music_video 내부 record_upload 가 status=uploaded 로 마킹.
     return {"ok": True, "youtube_url": result["video_url"], "youtube_video_id": result["video_id"], "multilang": ml}
+
+
+# YouTube Data API 단가(units) — 업로드 1편이 일일 쿼터(프로젝트당 기본 10,000)를 얼마나 쓰는지 로그로 남긴다.
+_Q_INSERT, _Q_THUMB, _Q_PLAYLIST, _Q_UPDATE, _Q_CAPTION, _Q_VERIFY = 1600, 50, 50, 50, 400, 1
+
+
+def _log_upload_quota(mix_id: str, result: dict, ml: dict) -> int:
+    """업로드 1편 추정 쿼터 + 자막 성공/실패 수 1줄(자막이 조용히 빠지는지 확인용). 추정 units 반환."""
+    cap = ml.get("captions") or {}
+    ok_n, fail = len(cap.get("uploaded") or []), dict(cap.get("failed") or {})
+    loc_tried = "applied" in (ml.get("localizations") or {})  # set_localizations 를 실제로 불렀나
+    units = (_Q_VERIFY + _Q_INSERT + _Q_THUMB * bool(result.get("thumbnail_set"))
+             + _Q_PLAYLIST * bool(result.get("playlist_added")) + _Q_UPDATE * loc_tried
+             + _Q_CAPTION * (ok_n + len(fail)))
+    logger.warning(
+        "[yt-quota] mix_id=%s video=%s 추정 %d units (insert %d + 썸네일 %s + 재생목록 %s + 다국어 %s + "
+        "자막 %d×%d) · 자막 성공 %d / 실패 %d / 건너뜀 %d%s",
+        mix_id, result.get("video_id"), units, _Q_INSERT, "50" if result.get("thumbnail_set") else "0",
+        "50" if result.get("playlist_added") else "0", "50" if loc_tried else "0", _Q_CAPTION, ok_n + len(fail),
+        ok_n, len(fail), len(cap.get("skipped") or []),
+        (" · 실패 언어: " + "; ".join(f"{k}({str(v)[:60]})" for k, v in sorted(fail.items()))) if fail else "",
+    )
+    return units
 
 
 # 가이드 페이지용 장르 팔레트(주제 헌법 §2 발췌, 읽기 전용).

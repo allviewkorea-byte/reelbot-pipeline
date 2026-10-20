@@ -301,6 +301,10 @@ def run(job_id: str) -> None:
                 checkpoint=cp,
             )
             mix = result.get("mix")
+            # 영상 언어(#345, 전 곡 같은 값) — 제목·해시태그·태그가 영어/연주 키워드 비중을 정한다(메타데이터만).
+            _langs = [t.get("language") for t in (result.get("produced") or []) if t.get("language")]
+            if _langs:
+                theme["video_language"] = max(set(_langs), key=_langs.count)
             if not mix or not mix.get("mp3_url"):
                 raise RuntimeError("믹스 생성 실패(음원 없음).")
             cp.set_stage("rendering", mix_id=mix.get("mix_id"))

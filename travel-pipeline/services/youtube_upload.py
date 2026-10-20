@@ -411,7 +411,8 @@ def build_music_metadata(theme: dict, mix: dict) -> tuple[str, str, list[str]]:
 
     제목: '{title_kr} | {genre} Mix'
     설명: 장르·상황·무드 + 곡 목록(mix 오프셋 기반, mm:ss).
-    태그: 장르·상황·무드(키워드) + style_prompt 영어 토큰 + 일반 음악 태그.
+    태그: 검색 키워드 풀(경쟁 인기 영상 실검색어, music_keyword_pool) + 장르·상황·무드 단어 + 일반어,
+      YouTube 한도 500자 이내. Suno style 문장 조각·옛 채널명("Rooftop Music")은 넣지 않는다(2026-10-20).
     """
     title_kr = (theme.get("title_kr") or theme.get("title") or "").strip()
     genre = (theme.get("genre") or "").strip()
@@ -437,21 +438,27 @@ def build_music_metadata(theme: dict, mix: dict) -> tuple[str, str, list[str]]:
                 lines.append(f"{mm:02d}:{ss:02d} {name}")
     description = "\n".join(lines).strip()
 
-    # 태그: 한국어 키워드 + style_prompt 영어 토큰 + 일반.
-    tags: list[str] = []
-    for kw in (genre, situation, mood):
-        for part in re.split(r"[·,/]", kw or ""):
+    return title, description, music_snippet_tags(theme)
+
+
+def music_snippet_tags(theme: dict) -> list[str]:
+    """snippet.tags — 키워드 풀(채널·장르·영상 언어) + 장르·상황·무드 단어 + 일반어, 500자 이내.
+    풀이 없거나 조회가 실패하면 장르·상황·무드 단어 + 일반어만(500자 검사는 같음)."""
+    from services import music_keyword_pool
+    extra: list[str] = []
+    for kw in (theme.get("genre"), theme.get("situation"), theme.get("mood")):
+        for part in re.split(r"[·,/]", str(kw or "")):
             part = part.strip()
-            if part and part not in tags:
-                tags.append(part)
-    for tok in re.split(r"[,\n]", theme.get("style_prompt") or ""):
-        tok = tok.strip()
-        if tok and len(tok) <= 30 and tok not in tags:
-            tags.append(tok)
-    for generic in ("music", "playlist", "mix", "Rooftop Music"):
-        if generic not in tags:
-            tags.append(generic)
-    return title, description, tags[:30]
+            if part and part not in extra and part.lower() != "custom":
+                extra.append(part)
+    extra += ["playlist", "music"]
+    try:
+        from services import music_meta
+        ch, genre, lang = music_meta._kw_channel(theme), music_meta._kw_genre(theme), music_meta.video_language(theme)
+    except Exception as e:  # noqa: BLE001 - 채널·장르·언어 판정 실패 → 풀 없이
+        logger.warning("[music-youtube] 검색 태그 조회 실패(기본 단어만): %s", e)
+        ch, genre, lang = "", None, None
+    return music_keyword_pool.snippet_tags(ch or None, genre, lang, extra=extra)
 
 
 def _verify_music_channel(youtube, channel: str | None = None) -> None:
@@ -614,6 +621,7 @@ def upload_music_video(
         logger.warning("[music-youtube] 업로드 성공: video_id=%s", video_id)
 
         # 썸네일 첨부(있으면). 실패해도 영상은 업로드됨.
+        thumbnail_set = playlist_added = False  # 쿼터 로그용(music_dashboard.publish)
         if thumbnail_path and os.path.exists(thumbnail_path):
             try:
                 youtube.thumbnails().set(
@@ -621,6 +629,7 @@ def upload_music_video(
                     media_body=MediaFileUpload(thumbnail_path, mimetype="image/png"),
                 ).execute()
                 logger.warning("[music-youtube] 썸네일 첨부 완료: video_id=%s", video_id)
+                thumbnail_set = True
             except Exception as e:  # noqa: BLE001
                 logger.warning("[music-youtube] 썸네일 첨부 실패(영상은 업로드됨): %s", e)
 
@@ -638,6 +647,7 @@ def upload_music_video(
                     theme.get("genre") or "-",
                 )
             elif add_to_playlist(youtube, video_id, playlist_id):
+                playlist_added = True
                 logger.warning(
                     "[playlist] 재생목록 추가 완료: video=%s playlist=%s", video_id, playlist_id
                 )
@@ -655,7 +665,8 @@ def upload_music_video(
     except Exception as e:  # noqa: BLE001
         logger.warning("[music-youtube] 업로드 기록 실패(영상은 업로드됨): %s", e)
 
-    return {"video_id": video_id, "video_url": video_url}
+    return {"video_id": video_id, "video_url": video_url,
+            "thumbnail_set": thumbnail_set, "playlist_added": playlist_added}
 
 
 def publish_to_youtube(

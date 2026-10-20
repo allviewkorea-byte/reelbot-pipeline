@@ -549,6 +549,15 @@ def design_config_set(body: DesignConfigBody, channel: str | None = None):
     return {"ok": True, "design_config": cfg}
 
 
+@router.get("/trends/keywords")
+def trends_keywords(channel: str | None = None):
+    """채널 검색 키워드 풀(읽기 전용) — 상위 키워드·장르별 풀·갱신 시각. 없으면 pool={}."""
+    from services import music_keyword_pool
+    from services.music_channel import resolve_channel
+    pool = music_keyword_pool.get_pool(resolve_channel(channel))
+    return {"pool": {k: v for k, v in pool.items() if k != "samples"}}
+
+
 @router.get("/trends")
 def trends_latest():
     """최신 트렌드 인사이트(대시보드/가이드 표시용). 없으면 trend=None."""

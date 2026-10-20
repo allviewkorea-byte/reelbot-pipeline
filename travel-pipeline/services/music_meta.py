@@ -312,25 +312,133 @@ def _has_hangul(s: str) -> bool:
 
 
 def _split_title_line(raw: str) -> tuple[str, str] | None:
-    """LLM 한 줄 "한국어 | 영어" → (ko, en). 앞자리에 한글이 없으면 None(재생성·폴백 대상)."""
+    """LLM 한 줄 "한국어 | 영어" → (ko, en). 앞자리에 한글이 없으면 None(재생성·폴백 대상).
+
+    LLM 이 "한국어 | 한국어 | 영어 |" 처럼 파이프를 더 넣으면(운영 제목에 | 3개 사고) 첫 조각을 한국어,
+    한글 없는 첫 조각을 영어로 쓰고 나머지는 버린다. 영어 조각이 없으면 None.
+    """
     line = (raw or "").strip().splitlines()[0].strip().strip('"').strip("'").strip() if (raw or "").strip() else ""
     if "|" not in line:
         return None
-    parts = [p.strip() for p in line.split("|", 1)]
-    if len(parts) == 2 and parts[0] and parts[1] and _has_hangul(parts[0]):
-        return parts[0][:40], parts[1][:50]
+    parts = [p.strip() for p in line.split("|")]
+    ko = parts[0]
+    en = next((p for p in parts[1:] if p and not _has_hangul(p)), "")
+    if ko and en and _has_hangul(ko):
+        return ko[:40], en[:50]
     return None
 
 
-def _call_title(system: str, user: str, tries: int = 2) -> tuple[str, str] | None:
-    """제목 카피 LLM — 앞자리 한국어 검증, 실패면 1회 재생성(총 2회). 둘 다 실패면 None."""
+def _call_title(system: str, user: str, tries: int = 2, validate=None) -> tuple[str, str] | None:
+    """제목 카피 LLM — 앞자리 한국어 검증(+validate: 검색 키워드 포함 등), 실패면 1회 재생성(총 2회).
+    둘 다 실패면 None."""
     from services import music_lyrics
     for i in range(tries):
         got = _split_title_line(music_lyrics._call(system, user, max_tokens=100))
+        if got and validate is not None:
+            got = validate(got)
         if got:
             return got
-        logger.warning("[music-meta] 제목 카피 앞자리 한국어 아님 → %s", "재생성" if i + 1 < tries else "폴백")
+        logger.warning("[music-meta] 제목 카피 검증 실패(앞자리 한국어·검색 키워드) → %s",
+                       "재생성" if i + 1 < tries else "폴백")
     return None
+
+
+# ── 검색 키워드(경쟁 인기 영상 풀, music_keyword_pool) ─────────────────────
+_KW_HOOKS: dict[str, list[str]] = {
+    "workout_music": ["헬스장 텐션 올려주는", "마지막 세트까지 버티게 해주는", "땀 흘릴수록 신나는",
+                      "숨차도 멈출 수 없는", "운동 가기 싫은 날 틀어두는", "하체 하는 날 이거 틀면 끝,"],
+    "": ["하루 끝에 틀어두기 좋은", "창가에서 듣기 좋은", "조용히 집중되는", "마음이 편안해지는",
+         "비 오는 날 생각나는", "혼자 있는 밤에 듣는"],
+}
+_lang_cache: dict[str, str | None] = {}
+
+
+def video_language(theme: dict) -> str | None:
+    """영상 언어 ko|en|inst — theme.video_language(제작 직후 실림) → 없으면 곡 DB(slug, #345)."""
+    lang = theme.get("video_language")
+    if lang:
+        return lang
+    slug = str(theme.get("slug") or theme.get("theme_slug") or "")
+    if not slug:
+        return None
+    if slug not in _lang_cache:
+        try:
+            from services import music_store
+            _lang_cache[slug] = music_store.track_language(slug)
+        except Exception:  # noqa: BLE001
+            _lang_cache[slug] = None
+    return _lang_cache[slug]
+
+
+def _kw_channel(theme: dict) -> str:
+    return str(theme.get("channel") or "rooftop_music")
+
+
+def _kw_genre(theme: dict) -> str | None:
+    from services.music_workout_style import is_workout_channel
+    if is_workout_channel(theme.get("channel")):
+        return None
+    return theme.get("genre_id") or music_genres.classify_theme(theme) or None
+
+
+def _kw_context(theme: dict) -> dict | None:
+    """제목에 넣을 검색 키워드·최근 제목. 키워드 풀이 없으면 None(기존 제목 방식 그대로)."""
+    try:
+        from services import music_keyword_pool as kp
+        ch = _kw_channel(theme)
+        recent = [f"{x.get('ko', '')} | {x.get('en', '')}" for x in kp.recent_titles(ch)
+                  if x.get("slug") != theme.get("slug")][-8:]
+        lang = video_language(theme)
+        ko, en = kp.keywords(ch, _kw_genre(theme), lang, recent=recent, n=6)
+    except Exception as e:  # noqa: BLE001 - 풀 조회 실패 → 기존 방식
+        logger.warning("[music-meta] 검색 키워드 조회 실패(기존 제목 방식): %s", e)
+        return None
+    if not (ko or en):
+        return None
+    return {"ko": ko, "en": en, "recent": recent[-5:], "lang": lang}
+
+
+def _kw_prompt(ctx: dict) -> str:
+    lang_line = {"en": "- 영어 곡 영상: 영어 노래라는 점이 드러나도 좋다(예: 영어 운동 노래, English songs).\n",
+                 "inst": "- 연주곡(가사 없음) 영상: 가사 없는·연주·instrumental 계열 표현을 쓴다.\n"}.get(ctx.get("lang") or "", "")
+    recent = "\n".join(f"  · {t}" for t in ctx.get("recent") or []) or "  · (없음)"
+    return (
+        "\n\n[검색 키워드 — 경쟁 인기 영상에서 실제로 많이 쓰는 검색어]\n"
+        f"- 한국어 카피: 아래 중 1~2개를 띄어쓰기 그대로 넣고, 클릭하고 싶어지는 훅 한 구절을 붙인다: "
+        f"{' / '.join(ctx['ko']) or '(없음)'}\n"
+        f"- 영어 카피: 아래 중 1개를 그대로 넣는다: {' / '.join(ctx['en']) or '(없음)'}\n"
+        "- 키워드 나열 금지(자연스러운 문장). 실존 가수·곡·채널명 금지. 과장 훅은 괜찮지만 거짓 정보 금지.\n"
+        "- 이 경우 한국어 카피는 35자 이내(위 글자 수 규칙보다 우선).\n"
+        f"{lang_line}"
+        f"- 최근 제목(키워드·훅이 겹치지 않게):\n{recent}"
+    )
+
+
+def _kw_key(s: str) -> str:
+    return re.sub(r"\s+", "", (s or "")).lower()
+
+
+def _kw_validator(ctx: dict):
+    """한국어 카피에 검색 키워드 1개 이상(없으면 재생성). 영어 카피에 없으면 첫 영어 키워드로 바꾼다."""
+    def check(got: tuple[str, str]) -> tuple[str, str] | None:
+        ko, en = got
+        if ctx["ko"] and not any(_kw_key(k) in _kw_key(ko) for k in ctx["ko"]):
+            return None
+        if ctx["en"] and not any(_kw_key(k) in _kw_key(en) for k in ctx["en"]):
+            en = ctx["en"][0]
+        return ko, en
+    return check
+
+
+def _kw_fallback(theme: dict, ctx: dict) -> tuple[str, str] | None:
+    """LLM 이 키워드를 못 넣으면 훅 + 검색 키워드로 결정적 조합(같은 영상은 같은 제목)."""
+    if not ctx.get("ko"):
+        return None
+    hooks = _KW_HOOKS.get(_kw_channel(theme)) or _KW_HOOKS[""]
+    seed = f"kw|{theme.get('slug') or theme.get('title_kr') or ''}"
+    ko = f"{_pick(hooks, seed)} {ctx['ko'][0]}".strip()
+    en = ctx["en"][0] if ctx.get("en") else ""
+    return (ko, en) if en else None
 
 
 def _generate_title_copy(theme: dict, vs: dict) -> tuple[str, str]:
@@ -354,9 +462,14 @@ def _generate_title_copy(theme: dict, vs: dict) -> tuple[str, str]:
             user += f"\n무드 키워드: {moods}"
         if g_style:
             user += f"\n장르 스타일: {g_style}"
-        got = _call_title(_TITLE_SYSTEM, user)
+        ctx = _kw_context(theme)
+        if ctx:
+            user += _kw_prompt(ctx)
+        got = _call_title(_TITLE_SYSTEM, user, validate=_kw_validator(ctx) if ctx else None)
         if got:
             return got
+        if ctx and (fb := _kw_fallback(theme, ctx)):
+            return fb
     except Exception as e:  # noqa: BLE001
         logger.warning("[music-meta] 제목 카피 LLM 실패(폴백): %s", e)
     return _copy(theme, vs), _title_genre_en(theme, vs)
@@ -392,9 +505,14 @@ def _generate_title_copy_tag(theme: dict) -> tuple[str, str]:
             f"형식: {'연주곡(instrumental)' if instrumental else '보컬곡(vocal)'}"
             f"{inst_hint}"
         )
-        got = _call_title(_TITLE_TAG_SYSTEM, user)
+        ctx = _kw_context(theme)
+        if ctx:
+            user += _kw_prompt(ctx)
+        got = _call_title(_TITLE_TAG_SYSTEM, user, validate=_kw_validator(ctx) if ctx else None)
         if got:
             return got
+        if ctx and (fb := _kw_fallback(theme, ctx)):
+            return fb
     except Exception as e:  # noqa: BLE001
         logger.warning("[music-meta] 태그 제목 카피 LLM 실패(폴백): %s", e)
     return _fallback_title_tag(theme)
@@ -457,6 +575,11 @@ def build_title(theme: dict, viz_spec: dict | None) -> str:
         ko_room = room * 2 // 3
         en_room = room - ko_room
         title = f"playlist🎧 {ko_copy[:ko_room]} | {en_copy[:en_room]}{tc_label}"
+    try:  # 최근 제목 기록 — 다음 영상이 키워드·훅을 겹치지 않게(같은 slug 는 1번만). best-effort.
+        from services import music_keyword_pool
+        music_keyword_pool.note_title(_kw_channel(theme), str(theme.get("slug") or ""), ko_copy, en_copy)
+    except Exception:  # noqa: BLE001
+        pass
     return title
 
 
@@ -728,6 +851,26 @@ def _time_bucket(theme: dict, vs: dict) -> str:
 
 
 def build_hashtags(theme: dict, viz_spec: dict | None) -> list[str]:
+    """해시태그 — 앞 3개 = 검색 키워드 풀 상위(있을 때), 나머지는 기존 조합. 최대 15개."""
+    return with_search_hashtags(theme, _build_hashtags_base(theme, viz_spec))
+
+
+def with_search_hashtags(theme: dict, tags: list[str]) -> list[str]:
+    """앞 3개(제목 위 노출)를 그 채널(·장르)·영상 언어의 검색량 최상위 키워드로, 전체 15개 상한.
+    키워드 풀이 없으면 기존 목록 그대로."""
+    try:
+        from services import music_keyword_pool as kp
+        front = kp.front_hashtags(_kw_channel(theme), _kw_genre(theme), video_language(theme))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[music-meta] 검색 해시태그 조회 실패(기존 그대로): %s", e)
+        return tags
+    if not front:
+        return tags
+    from services.music_keyword_pool import merge_hashtags
+    return merge_hashtags(front, tags)
+
+
+def _build_hashtags_base(theme: dict, viz_spec: dict | None) -> list[str]:
     """해시태그 10~14개 자동 조합(중복 없음).
 
     태그 조합이 있으면 태그 기반(카테고리당 1개). 없으면 기존 풀 기반.
