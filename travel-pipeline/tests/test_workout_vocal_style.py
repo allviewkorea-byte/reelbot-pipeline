@@ -38,12 +38,12 @@ def test_lock_respects_1000_chars():
     long_llm = ", ".join(f"layer{i} synth texture" for i in range(200))
     st = ws.lock_vocal_style("for workout, energetic, house", long_llm, "workout", finalize=lambda s: s + ", male vocals")
     assert len(st) <= ws.SUNO_STYLE_MAX
-    assert st.startswith("house") and st.endswith("95-105 BPM")  # 꼬리만 덜고 부스터는 유지
+    assert st.startswith("house") and st.endswith("150-160 BPM")  # 꼬리만 덜고 부스터는 유지
 
 
 def test_lock_empty_llm_style_is_tag_plus_booster():
     st = ws.lock_vocal_style("for running, upbeat, electronic", "", "running")
-    assert st.startswith("electronic, for running, upbeat") and "150-165 BPM" in st
+    assert st.startswith("electronic, for running, upbeat") and "150-160 BPM" in st
 
 
 def test_pools_and_tone():

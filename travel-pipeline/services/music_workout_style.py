@@ -67,13 +67,18 @@ _AXIS_POOLS: dict[str, dict[str, list[str]]] = {
 # Suno style 뒤에 붙는 구체 음악 용어. GENRE_TAGS 한 단어("hip-hop")로는
 # 평균적인 결과만 나온다 - v5.5 는 긴 프롬프트·풍부한 스타일 태그를 받는다.
 _STYLE_BOOST: dict[str, str] = {
+    # 2026-10-20 대표 결정: 레퍼런스(청량한 K 댄스팝, 약 160 BPM) 결 위주. 비트를 잘게 쪼개는
+    # 트랩·808 하프타임 대신 빠르지만 정박으로 밀고 가는 드럼. 보컬 단어는 넣지 않는다
+    # (연주곡에도 같은 부스터가 붙는다 — 성별은 _assign_genders 가 곡별로 정한다).
     "strength": (
-        "hard-hitting drums, punchy 808 bass, gritty texture, driving groove, "
-        "gym workout energy, powerful and confident, 95-105 BPM"
+        "bright fizzy dance-pop energy, analog synth arpeggios, retro punchy drumline, "
+        "steady straight four-on-the-floor kick and snappy snare, electric guitar riffs in the chorus, "
+        "refreshing summer hype, gym workout energy, powerful and confident, 150-160 BPM"
     ),
     "cardio": (
-        "steady four-on-the-floor kick, propulsive bassline, bright synth hooks, "
-        "running cadence, high energy, uplifting drive, 150-165 BPM"
+        "bright fizzy dance-pop energy, analog synth arpeggios, retro punchy drumline, "
+        "steady straight four-on-the-floor kick, propulsive bassline, electric guitar riffs in the chorus, "
+        "running cadence, uplifting drive, 150-160 BPM"
     ),
     "warmup": (
         "warm rounded bass, smooth steady groove, clean percussion, "
@@ -84,11 +89,28 @@ _STYLE_BOOST: dict[str, str] = {
 # negativeTags - 지금까지 **한 번도 채운 적 없는** 파라미터(music_suno._build_body 는
 # 값이 있을 때만 전송한다). AI 스러움·늘어짐을 줄이는 가장 직접적인 수단이다.
 # warmup 은 잔잔한 게 정상이라 soft·mellow 를 빼고 '졸린' 쪽만 막는다.
+_CHOPPY = "trap hi-hat rolls, glitchy chopped beats, stutter edits, breakbeat, drum and bass, halftime trap"
 _NEGATIVE: dict[str, str] = {
-    "strength": "soft, mellow, ambient, lo-fi, sleepy, drowsy, acoustic ballad, slow ballad",
-    "cardio": "soft, mellow, ambient, lo-fi, sleepy, drowsy, acoustic ballad, slow ballad",
+    "strength": f"soft, mellow, ambient, lo-fi, sleepy, drowsy, acoustic ballad, slow ballad, {_CHOPPY}",
+    "cardio": f"soft, mellow, ambient, lo-fi, sleepy, drowsy, acoustic ballad, slow ballad, {_CHOPPY}",
     "warmup": "sleepy, drowsy, lullaby, droning ambient, sad ballad, gloomy",
 }
+
+# 근력·유산소 영상의 첫 장르 — 댄스팝(pop) 위주(대표 결정 70%). 나머지는 풀에서 변화.
+MAIN_GENRE = "pop"
+MAIN_GENRE_RATE = float((__import__("os").getenv("MUSIC_WORKOUT_MAIN_GENRE_RATE") or "0.7").strip() or 0.7)
+# 운동 채널 보컬 성별 — 여성 위주(대표 결정 70%), 나머지는 남성.
+FEMALE_RATE = float((__import__("os").getenv("MUSIC_WORKOUT_FEMALE_RATE") or "0.7").strip() or 0.7)
+
+
+def _pick_genres(pool: list[str], axis: str) -> list[str]:
+    """장르 2개. 근력·유산소는 70% 확률로 댄스팝(pop)을 첫 장르로 고정, 둘째는 나머지 풀에서."""
+    if axis not in ("strength", "cardio") or MAIN_GENRE not in pool:
+        return random.sample(pool, min(2, len(pool)))
+    rest = [g for g in pool if g != MAIN_GENRE]
+    if random.random() < MAIN_GENRE_RATE:
+        return [MAIN_GENRE] + random.sample(rest, min(1, len(rest)))
+    return random.sample(rest, min(2, len(rest)))
 
 
 def is_workout_channel(channel: str | None) -> bool:
@@ -111,10 +133,14 @@ def refine_combo(combo: dict | None, *, channel: str | None = None) -> dict | No
     """
     if not is_workout_channel(channel) or not isinstance(combo, dict) or not combo:
         return combo
-    pools = _AXIS_POOLS[axis_for_action(combo.get("action"))]
+    ax = axis_for_action(combo.get("action"))
+    pools = _AXIS_POOLS[ax]
     out = dict(combo)
     for axis, pool in pools.items():
         if not pool:
+            continue
+        if axis == "genre":
+            out[axis] = _pick_genres(pool, ax)
             continue
         pick = 1 if axis in ("tempo", "situation") else min(2, len(pool))
         out[axis] = random.sample(pool, min(pick, len(pool)))

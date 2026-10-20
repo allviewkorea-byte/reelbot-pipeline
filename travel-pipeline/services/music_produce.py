@@ -32,11 +32,17 @@ _GENDERS = ("female", "male")
 _GENDER_RE = re.compile(r"\b(?:fe)?male\b", re.IGNORECASE)
 
 
-def _assign_genders(n: int) -> list[str]:
+def _assign_genders(n: int, channel: str | None = None) -> list[str]:
     """N곡에 줄 성별 리스트(곡 단위 랜덤). N≥2면 남·여 최소 1곡씩 보장(쏠림 방지),
-    순서는 무작위. 시드 고정 안 함(매번 달라야 함)."""
+    순서는 무작위. 시드 고정 안 함(매번 달라야 함).
+
+    운동 채널: 여성 보컬 위주(곡마다 FEMALE_RATE=0.7 확률로 여성, 나머지 남성 — 대표 결정 2026-10-20).
+    """
     if n <= 0:
         return []
+    from services import music_workout_style as _ws
+    if _ws.is_workout_channel(channel):
+        return ["female" if random.random() < _ws.FEMALE_RATE else "male" for _ in range(n)]
     if n == 1:
         return [random.choice(_GENDERS)]
     genders = ["female", "male"] + [random.choice(_GENDERS) for _ in range(n - 2)]
@@ -185,7 +191,7 @@ def _gen_vocal(
     valid = [s for s in songs if (s.get("lyrics") or "").strip()]
     if len(valid) < len(songs):
         logger.warning("[produce] 가사 빈 곡 %d개 건너뜀", len(songs) - len(valid))
-    genders = _assign_genders(len(valid))
+    genders = _assign_genders(len(valid), channel)
     seen = seen if seen is not None else set()
     for i, (s, gender) in enumerate(zip(valid, genders), 1):
         lyric = s["lyrics"].strip()
