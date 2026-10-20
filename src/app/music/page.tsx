@@ -3,10 +3,10 @@
 import { Suspense, useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
-import { Users, Eye, BarChart3, Video, ClipboardList, Play, Square, Loader2, Settings, Palette, Music2 } from "lucide-react"
+import { Users, Eye, BarChart3, Video, ClipboardList, Play, Square, Loader2, Settings, Palette, Music2, UserRound } from "lucide-react"
 import { PLATFORM_BADGE, PLATFORM_LABELS, TRACK_BADGE, TRACK_LABELS } from "@/lib/channels"
 import {
-  AUTO_RUN_CHANNELS, MUSIC_CHANNELS, channelParam, defaultPublishHours, fmtCount, normalizePublishHours,
+  AUTO_RUN_CHANNELS, MUSIC_CHANNELS, WORKOUT_CHANNEL_ID, channelParam, defaultPublishHours, fmtCount, normalizePublishHours,
   estimateProductionTime, fmtMinutes, resolveMusicChannel, withChannel, type MusicMetrics,
 } from "@/lib/music"
 import { useSearchParams } from "next/navigation"
@@ -265,6 +265,17 @@ function MusicDashboardPageInner() {
             <Music2 className="h-4 w-4" />
             음원 라이브러리
           </Link>
+          {/* 쇼츠 캐릭터 시트 — 운동 채널 전용(2주 몸만들기 챌린지 실사 캐스트) */}
+          {channel === WORKOUT_CHANNEL_ID && (
+            <Link
+              href={withChannel("/shorts/cast", channel)}
+              title="쇼츠 캐릭터 시트 — 챌린지 쇼츠 주인공(실사) 8장 생성·확정"
+              className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+            >
+              <UserRound className="h-4 w-4" />
+              쇼츠 캐릭터
+            </Link>
+          )}
           </div>{/* /네비 그룹 */}
           {/* 가동 토글 — PC 전용(모바일은 곡수 옆에 있음) */}
           <button
