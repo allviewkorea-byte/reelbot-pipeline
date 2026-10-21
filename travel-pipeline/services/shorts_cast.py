@@ -168,7 +168,29 @@ HUMAN_CAST: dict[str, list[dict]] = {
             ),
         },
         {
-            "role": "dad", "source": "upload", "active": True, "label": "아빠",
+            # 2026-10-21 대표 결정: 가족 캐스트 → 210cm 단독 주인공으로 리셋. 가족 role 은 보관(active=False).
+            "role": "hero", "source": "upload", "active": True, "label": "주인공",
+            "summary": "210cm · 길쭉하고 단단한 몸(옷발) · 갈색 레이어드 장발 · 네이비/화이트 운동복",
+            "bible": (
+                "the hero: an original fictional East Asian man in his twenties, extremely tall (210 cm) with "
+                "long legs and long arms and elongated model proportions; lean but solid muscle, broad "
+                "shoulders, narrow waist, strong V-taper, carved six-pack; messy layered shoulder-length "
+                "brown hair falling over the eyes; handsome, masculine face; navy sleeveless compression "
+                "top or shirtless, navy training shorts with a white compression liner, white wrist wraps, "
+                "white socks, plain white sneakers with no logo"
+            ),
+            "slots": [
+                {"key": "face", "label": "기준 얼굴", "kind": "single", "min": "face", "required": True},
+                {"key": "shirtless", "label": "상의 탈의 상반신", "kind": "single"},
+                {"key": "turnaround_shirtless", "label": "상의 탈의 4방향", "kind": "strip", "cols": 4, "required": True},
+                {"key": "turnaround", "label": "운동복 4방향", "kind": "strip", "cols": 4, "required": True},
+                {"key": "casual", "label": "외출복 전신", "kind": "single"},
+                {"key": "expressions", "label": "표정 2×2", "kind": "grid"},
+                {"key": "scale", "label": "키 비교(210cm)", "kind": "single"},
+            ],
+        },
+        {
+            "role": "dad", "source": "upload", "active": False, "label": "아빠",
             "summary": "30대 초반 · 근육질 헬스 마니아 · 코치 겸 방해꾼",
             "bible": (
                 "the dad: a Korean man in his early thirties, muscular gym enthusiast; a black "
@@ -183,7 +205,7 @@ HUMAN_CAST: dict[str, list[dict]] = {
             ],
         },
         {
-            "role": "mom", "source": "upload", "active": True, "label": "엄마",
+            "role": "mom", "source": "upload", "active": False, "label": "엄마",
             "summary": "30대 초반 · 주근깨 · 시즌1 주인공(돌잔치 D-14 챌린지) · 변화 전",
             "bible": (
                 "the mom: a Korean woman in her early thirties with freckles; a high ponytail with a "
@@ -199,7 +221,7 @@ HUMAN_CAST: dict[str, list[dict]] = {
             ],
         },
         {
-            "role": "mom_after", "source": "upload", "active": True, "label": "엄마 (변화 후)",
+            "role": "mom_after", "source": "upload", "active": False, "label": "엄마 (변화 후)",
             "summary": "같은 얼굴·같은 옷 · 살짝 슬림·탄탄 · 밝고 자신감 있는 표정",
             "bible": (
                 "the mom after two weeks of training: the SAME woman with the same face, freckles, "
@@ -212,7 +234,7 @@ HUMAN_CAST: dict[str, list[dict]] = {
             ],
         },
         {
-            "role": "baby", "source": "upload", "active": True, "label": "아기",
+            "role": "baby", "source": "upload", "active": False, "label": "아기",
             "summary": "돌 무렵 · 옆에서 따라 하는 귀여운 조연",
             "bible": (
                 "the baby: a Korean baby about one year old with short black bob hair, wearing a plain "
@@ -226,7 +248,7 @@ HUMAN_CAST: dict[str, list[dict]] = {
             ],
         },
         {
-            "role": "family", "source": "upload", "active": True, "label": "가족 단체",
+            "role": "family", "source": "upload", "active": False, "label": "가족 단체",
             "summary": "3인 단체 전신(키 비율 기준) · finale = 돌잔치 의상(선택)",
             "bible": "the family of three together: the dad, the mom and the baby",
             "slots": [

@@ -37,7 +37,7 @@ function ShortsCastInner() {
   const [aspects, setAspects] = useState<Aspect[]>([])
   const [anchor, setAnchor] = useState("glow_front")
   const [roles, setRoles] = useState<UploadRole[]>([])
-  const [tab, setTab] = useState("mom")
+  const [tab, setTab] = useState("hero")
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [progress, setProgress] = useState<Progress | null>(null)
@@ -221,7 +221,8 @@ function ShortsCastInner() {
       ) : (
         <>
           <div className="flex gap-1.5 overflow-x-auto pb-1">
-            {[...roles.map((r) => ({ key: r.role, label: r.label, ok: r.status === "approved" })),
+            {[...[...roles].sort((a, b) => Number(b.active) - Number(a.active))
+              .map((r) => ({ key: r.role, label: r.active ? r.label : `보관 · ${r.label}`, ok: r.status === "approved" })),
               ...(entry ? [{ key: "lead", label: `보관 · ${entry.subtitle_name ?? entry.label}`, ok: false }] : [])].map((t) => (
               <button
                 key={t.key}

@@ -157,7 +157,8 @@ def test_lead_archived_and_routes(real_upload, tmp_path):
     c = TestClient(app)
     r = c.get("/shorts/cast").json()
     assert r["cast"][0]["role"] == "lead" and r["cast"][0]["active"] is False      # 서준호 보관
-    assert [x["role"] for x in r["roles"]] == ["dad", "mom", "mom_after", "baby", "family"]
+    assert [x["role"] for x in r["roles"]] == ["hero", "dad", "mom", "mom_after", "baby", "family"]
+    assert [x["active"] for x in r["roles"]] == [True, False, False, False, False, False]   # 2026-10-21 단독 주인공
     fam = r["roles"][-1]
     assert [s["key"] for s in fam["slots"]] == ["group", "finale"] and fam["slots"][1]["required"] is False
     assert c.post("/shorts/cast/generate", json={"role": "mom"}).status_code == 400   # 업로드 role 생성 불가
@@ -173,3 +174,13 @@ def test_lead_archived_and_routes(real_upload, tmp_path):
     assert res.status_code == 200 and res.json()["labels"][1] == "threequarter"
     meta = json.loads(real_upload.s3.objs["cast/workout_music/slots.json"][0])
     assert meta["baby"]["turnaround"]["labels"][1] == "threequarter"
+
+
+def test_hero_role_slots():
+    """2026-10-21: 210cm 단독 주인공(hero) — 필수=기준 얼굴·상의 탈의 4방향·운동복 4방향, 가족은 보관."""
+    from services import shorts_cast as sc
+    hero = sc.get_entry(CH, "hero")
+    assert hero["source"] == "upload" and hero["active"] is True and "210 cm" in hero["bible"]
+    req = [s["key"] for s in hero["slots"] if s.get("required")]
+    assert req == ["face", "turnaround_shirtless", "turnaround"]
+    assert all(not sc.get_entry(CH, r)["active"] for r in ("dad", "mom", "mom_after", "baby", "family"))
