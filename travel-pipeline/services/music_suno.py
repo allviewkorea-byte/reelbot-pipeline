@@ -82,16 +82,18 @@ def _public_base() -> str:
     return ""
 
 
-def callback_url(theme_slug: str = "") -> str:
-    """외부 공개 베이스가 있으면 콜백 URL 을 구성(theme_slug 쿼리 포함).
+def callback_url(theme_slug: str = "", channel: str = "") -> str:
+    """외부 공개 베이스가 있으면 콜백 URL 을 구성(theme_slug·channel 쿼리 포함).
 
-    콜백은 theme_slug 를 모르므로 callBackUrl 쿼리에 실어 R2 키를 구성하게 한다.
+    콜백은 theme_slug·채널을 모르므로 callBackUrl 쿼리에 실어 R2 키·채널 축을 구성하게 한다.
+    channel 이 빠지면 콜백이 운동 곡을 where 채널로 덮어쓸 수 있어 함께 싣는다.
     미설정/내부도메인뿐이면 빈 문자열(→ callBackUrl 생략, 폴링만으로 동작).
     """
     base = _public_base()
     if not base:
         return ""
-    q = f"?theme_slug={quote(theme_slug)}" if theme_slug else ""
+    params = [(k, v) for k, v in (("theme_slug", theme_slug), ("channel", channel)) if v]
+    q = ("?" + "&".join(f"{k}={quote(v)}" for k, v in params)) if params else ""
     return f"{base}/api/music/suno-callback{q}"
 
 
@@ -128,7 +130,7 @@ def _build_body(theme: dict) -> dict:
     for opt in ("negativeTags", "vocalGender", "styleWeight", "weirdnessConstraint"):
         if theme.get(opt) is not None:
             body[opt] = theme[opt]
-    cb = callback_url(theme.get("theme_slug", ""))
+    cb = callback_url(theme.get("theme_slug", ""), theme.get("channel") or "")
     if cb:
         body["callBackUrl"] = cb
     else:
@@ -226,6 +228,7 @@ def _download_mp3(url: str, dest: str) -> str:
 def store_tracks(
     theme_slug: str, task_id: str, tracks: list[dict], *,
     genre: str = "", action: str = "", channel: str | None = None, language: str = "",
+    keep_channel: bool = False,
 ) -> list[dict]:
     """완료된 곡들을 R2 영구 저장 + DB 기록(멱등). 저장된 record 리스트 반환.
 
@@ -238,6 +241,9 @@ def store_tracks(
     폴링·콜백 양쪽에서 호출 가능 — r2_storage.music_exists 로 중복 업로드를 막고,
     DB 는 id(=audio_id) upsert 로 1행만 남긴다. R2 저장 완료 전에는 DB 를 건드리지
     않는다(15일 삭제 대비 — R2 가 진실의 출처).
+
+    keep_channel: 채널을 모르는 콜백(보조 경로)용 — channel 키를 생략하고 기본 채널로 채우지도
+    않아, 폴링이 기록한 채널(예: workout_music)을 where 로 덮어쓰지 않는다.
     """
     records: list[dict] = []
     for t in tracks:
@@ -293,7 +299,7 @@ def store_tracks(
             record["action"] = action
         if language:
             record["language"] = language
-        music_store.upsert_track(record)
+        music_store.upsert_track(record, fill_channel=not (keep_channel and not channel))
         records.append(record)
     return records
 
@@ -346,7 +352,9 @@ def generate_and_store(
     Returns: {task_id, tracks:[record...]}
     """
     theme_slug = theme.get("theme_slug") or "untitled"
-    task_id = submit_generation(theme)
+    ch = channel or theme.get("channel")
+    # 콜백 URL 에 채널을 싣기 위해 theme 에도 채널을 넣는다(원본 dict 는 건드리지 않음).
+    task_id = submit_generation({**theme, "channel": ch} if ch else theme)
     if on_task:
         try:
             on_task(task_id)

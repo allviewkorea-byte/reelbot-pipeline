@@ -254,7 +254,7 @@ def test_instrumental_variation_bad_titles_removed(monkeypatch):
 def test_language_recorded_on_both_clips(monkeypatch):
     from services import music_store, music_suno
     rows = []
-    monkeypatch.setattr(music_store, "upsert_track", lambda rec: rows.append(rec) or {"stored": True})
+    monkeypatch.setattr(music_store, "upsert_track", lambda rec, **kw: rows.append(rec) or {"stored": True})
     monkeypatch.setattr(music_suno.r2_storage, "music_exists", lambda *a: True)
     music_suno.store_tracks("s", "t1", [{"audio_id": "a", "audio_url": "u"}, {"audio_id": "b", "audio_url": "v"}],
                             genre="jazz", language="en")

@@ -566,8 +566,11 @@ def trends_latest():
 
 
 @router.post("/suno-callback")
-async def suno_callback(request: Request, theme_slug: str = ""):
-    """suno 생성 콜백. complete 면 멱등 R2 저장을 트리거한다."""
+async def suno_callback(request: Request, theme_slug: str = "", channel: str = ""):
+    """suno 생성 콜백. complete 면 멱등 R2 저장을 트리거한다.
+
+    channel: 제출 때 callBackUrl 쿼리로 실어 보낸 채널. 없으면(이전에 제출된 작업 등) 채널을
+    건드리지 않는다 — 폴링이 기록한 채널을 where 로 덮어쓰던 문제 방지."""
     try:
         body = await request.json()
     except Exception:  # noqa: BLE001 - 비정상 본문도 200 으로 흡수(재전송 폭주 방지)
@@ -592,7 +595,8 @@ async def suno_callback(request: Request, theme_slug: str = ""):
         return {"ok": True, "stored": 0}
 
     try:
-        records = music_suno.store_tracks(theme_slug or "untitled", task_id, tracks)
+        records = music_suno.store_tracks(theme_slug or "untitled", task_id, tracks,
+                                          channel=channel or None, keep_channel=not channel)
         return {"ok": True, "stored": len(records)}
     except Exception as e:  # noqa: BLE001 - 콜백 실패해도 폴링이 1차라 200 으로 흡수
         logger.warning("[music-callback] 저장 실패: %s", e)
