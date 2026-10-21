@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
-import { Users, Eye, BarChart3, Video, ClipboardList, Play, Square, Loader2, Settings, Palette, Music2, UserRound } from "lucide-react"
+import { Users, Eye, BarChart3, Video, ClipboardList, Play, Square, Loader2, Settings, Palette, Music2, UserRound, Clapperboard } from "lucide-react"
 import { PLATFORM_BADGE, PLATFORM_LABELS, TRACK_BADGE, TRACK_LABELS } from "@/lib/channels"
 import {
   AUTO_RUN_CHANNELS, MUSIC_CHANNELS, WORKOUT_CHANNEL_ID, channelParam, defaultPublishHours, fmtCount, normalizePublishHours,
@@ -274,6 +274,17 @@ function MusicDashboardPageInner() {
             >
               <UserRound className="h-4 w-4" />
               쇼츠 캐릭터
+            </Link>
+          )}
+          {/* 쇼츠 제작(hero 형식 A) — 운동 채널 전용, 테스트는 미리보기만 */}
+          {channel === WORKOUT_CHANNEL_ID && (
+            <Link
+              href={withChannel("/shorts/hero", channel)}
+              title="쇼츠 제작 — 형식 A 원테이크 테스트·미리보기·곡 분석"
+              className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+            >
+              <Clapperboard className="h-4 w-4" />
+              쇼츠 제작
             </Link>
           )}
           </div>{/* /네비 그룹 */}

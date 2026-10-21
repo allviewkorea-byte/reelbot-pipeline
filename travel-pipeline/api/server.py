@@ -22,6 +22,7 @@ from api.routes import (
     music_youtube,
     sayeon,
     shorts,
+    shorts_hero,
     status,
     storyboard,
     system,
@@ -80,6 +81,7 @@ app.include_router(trends.router, prefix="/trends", tags=["trends"])
 app.include_router(trends.channels_router, tags=["trends"])
 app.include_router(sayeon.router, prefix="/sayeon", tags=["sayeon"])
 app.include_router(shorts.router, prefix="/shorts", tags=["shorts"])
+app.include_router(shorts_hero.router, prefix="/shorts/hero", tags=["shorts"])
 app.include_router(youtube.router, prefix="/api/youtube", tags=["youtube"])
 app.include_router(music.router, prefix="/api/music", tags=["music"])
 app.include_router(music_youtube.router, prefix="/api/music/youtube", tags=["music"])
