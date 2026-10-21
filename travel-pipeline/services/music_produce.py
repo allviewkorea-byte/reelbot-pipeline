@@ -27,6 +27,12 @@ DEFAULT_BASE_STYLE = "city pop, 80s Japanese citypop, warm analog, lush chords, 
 
 # 보컬 명료도 — 반주에 묻히지 않게 모든 보컬 곡 style 에 붙인다(#5.1).
 _VOCAL_CLARITY = "clear, present, polished vocals"
+# 2026-10-21 대표 결정: 보컬은 멜로디가 좋아야 하고(도입부·후렴 훅), 비트보다 여유 있게 —
+# 잘게 쪼개지 않는 이어 부르기. 보컬 곡 style 에만 붙는다(연주곡 style 무관). 운동·where 공통.
+_VOCAL_MELODY = (
+    "catchy memorable vocal melody, strong singable chorus hook, smooth legato phrasing "
+    "with sustained notes, relaxed unhurried vocal rhythm riding over the beat"
+)
 _GENDERS = ("female", "male")
 # style 문자열에 이미 박힌 성별 단어 제거용(곡별 랜덤 성별과 충돌 방지).
 _GENDER_RE = re.compile(r"\b(?:fe)?male\b", re.IGNORECASE)
@@ -54,7 +60,9 @@ def _vocal_style(base: str, gender: str) -> str:
     """곡 style 에 랜덤 성별 + 명료도 표현을 붙인다(기존 성별 단어는 제거 후)."""
     base = _GENDER_RE.sub("", base or "")
     base = re.sub(r"\s{2,}", " ", base).strip().strip(",").strip()
-    return f"{base}, {gender} vocals, {_VOCAL_CLARITY}"
+    out = f"{base}, {gender} vocals, {_VOCAL_CLARITY}, {_VOCAL_MELODY}"
+    # Suno style 한도(1000자) 안전장치 — 넘으면 멜로디 문구만 뺀다(기존 문자열 그대로).
+    return out if len(out) <= 1000 else f"{base}, {gender} vocals, {_VOCAL_CLARITY}"
 
 
 

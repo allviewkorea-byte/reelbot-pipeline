@@ -90,10 +90,12 @@ _STYLE_BOOST: dict[str, str] = {
 # 값이 있을 때만 전송한다). AI 스러움·늘어짐을 줄이는 가장 직접적인 수단이다.
 # warmup 은 잔잔한 게 정상이라 soft·mellow 를 빼고 '졸린' 쪽만 막는다.
 _CHOPPY = "trap hi-hat rolls, glitchy chopped beats, stutter edits, breakbeat, drum and bass, halftime trap"
+# 2026-10-21 대표 결정: 보컬은 쪼개지 않고 비트보다 여유 있게 — 속사포·잘게 자른 보컬 금지.
+_CHOPPY_VOCALS = "rap, rapid-fire vocals, chopped vocals, vocal chops"
 _NEGATIVE: dict[str, str] = {
-    "strength": f"soft, mellow, ambient, lo-fi, sleepy, drowsy, acoustic ballad, slow ballad, {_CHOPPY}",
-    "cardio": f"soft, mellow, ambient, lo-fi, sleepy, drowsy, acoustic ballad, slow ballad, {_CHOPPY}",
-    "warmup": "sleepy, drowsy, lullaby, droning ambient, sad ballad, gloomy",
+    "strength": f"soft, mellow, ambient, lo-fi, sleepy, drowsy, acoustic ballad, slow ballad, {_CHOPPY}, {_CHOPPY_VOCALS}",
+    "cardio": f"soft, mellow, ambient, lo-fi, sleepy, drowsy, acoustic ballad, slow ballad, {_CHOPPY}, {_CHOPPY_VOCALS}",
+    "warmup": f"sleepy, drowsy, lullaby, droning ambient, sad ballad, gloomy, {_CHOPPY_VOCALS}",
 }
 
 # 근력·유산소 영상의 첫 장르 — 댄스팝(pop) 위주(대표 결정 70%). 나머지는 풀에서 변화.

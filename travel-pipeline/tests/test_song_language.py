@@ -23,6 +23,7 @@ from services import music_song_lang as sl  # noqa: E402
 def _rates(monkeypatch):
     monkeypatch.delenv("MUSIC_INSTRUMENTAL_RATE", raising=False)
     monkeypatch.delenv("MUSIC_LYRICS_EN_RATE", raising=False)
+    monkeypatch.delenv("MUSIC_LYRICS_KO_ENABLED", raising=False)
 
 
 # ── A 영상별 결정 분포(영상 하나는 한 가지로 통일) ─────────────────────────
@@ -31,16 +32,26 @@ def _videos(count=2000, n=10, seed=1):
     return [sl.assign(n, rng=rng) for _ in range(count)]
 
 
-def test_video_level_default_rates():
+def test_video_level_default_rates_no_korean():
+    """2026-10-21 대표 결정: 기본은 한국어 0 — 영어 75 · 연주 25(두 채널 공통)."""
     vids = _videos()
     assert all(len(set(v)) == 1 and len(v) == 10 for v in vids)          # 영상 안에서는 섞지 않음
     c = Counter(v[0] for v in vids)
-    assert abs(c["en"] / 2000 - 0.50) < 0.03                             # 영어 50
-    assert abs(c["ko"] / 2000 - 0.25) < 0.03                             # 한국어 25
+    assert c["ko"] == 0                                                  # 한국어 없음
+    assert abs(c["en"] / 2000 - 0.75) < 0.03                             # 영어 75
     assert abs(c["inst"] / 2000 - 0.25) < 0.03                           # 연주 25
 
 
+def test_korean_only_when_enabled(monkeypatch):
+    monkeypatch.setenv("MUSIC_LYRICS_KO_ENABLED", "1")
+    c = Counter(v[0] for v in _videos())
+    assert abs(c["en"] / 2000 - 0.50) < 0.03                             # 허용 시 기존 50 · 25 · 25
+    assert abs(c["ko"] / 2000 - 0.25) < 0.03
+    assert abs(c["inst"] / 2000 - 0.25) < 0.03
+
+
 def test_rates_follow_env(monkeypatch):
+    monkeypatch.setenv("MUSIC_LYRICS_KO_ENABLED", "1")
     monkeypatch.setenv("MUSIC_INSTRUMENTAL_RATE", "0.5")
     monkeypatch.setenv("MUSIC_LYRICS_EN_RATE", "0.2")
     c = Counter(v[0] for v in _videos())

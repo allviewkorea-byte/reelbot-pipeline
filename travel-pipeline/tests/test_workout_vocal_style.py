@@ -88,3 +88,17 @@ def test_retry_skipped_when_deadline_near(monkeypatch, tmp_path):
     monkeypatch.setattr(mai, "review_image", lambda p: {"pass": False, "reasons": ["글자"]})
     res = mai.generate_reviewed(None, str(tmp_path / "bg.png"), deadline=time.monotonic() + 30)
     assert len(calls) == 1 and res["attempts"][-1]["error"].startswith("시간 상한")
+
+
+def test_vocal_melody_and_no_chopped_vocals():
+    """2026-10-21: 보컬 곡 style 에 멜로디·이어 부르기, 운동 negativeTags 에 속사포·잘린 보컬 금지."""
+    from services import music_produce as mp
+    from services import music_workout_style as ws
+    st = mp._vocal_style("dance-pop, energetic", "female")
+    assert "catchy memorable vocal melody" in st and "legato" in st and "female vocals" in st
+    long_base = "x" * 900
+    assert mp._VOCAL_MELODY not in mp._vocal_style(long_base, "male")    # 1000자 넘으면 멜로디 문구만 생략
+    for action in ("weight", "running", "stretching"):
+        neg = ws.negative_tags(action, channel="workout_music")
+        assert "rapid-fire vocals" in neg and "vocal chops" in neg
+    assert ws.negative_tags("weight", channel="rooftop_music") is None   # where 는 그대로 미전송
