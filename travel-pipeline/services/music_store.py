@@ -73,17 +73,20 @@ def _resolve_channel(channel: str | None) -> str:
     return resolve_channel(channel)
 
 
-def upsert_track(record: dict) -> dict:
+def upsert_track(record: dict, *, fill_channel: bool = True) -> dict:
     """곡 메타 1행을 upsert(id 충돌 시 병합). 결과 dict 반환.
 
     record: {id, theme_slug, task_id, audio_id, title, tags, duration, r2_key, status}
     id(=audio_id) 로 멱등 — 폴링/콜백 양쪽이 같은 곡을 기록해도 1행만 남는다.
     record 에 channel 이 없으면 DEFAULT_CHANNEL(where)로 채워 저장한다 → 채널을 안 넘기는
     기존 호출부의 트랙은 전부 where 풀에 쌓인다(회귀 0).
+    fill_channel=False(채널 모르는 Suno 콜백): channel 키가 없으면 채우지 않는다 → merge upsert 가
+    기존 행의 channel 을 그대로 둔다(새 행이면 DB 기본값).
     Returns: {stored: bool, error: str|None}
     """
     record = dict(record or {})
-    record["channel"] = _resolve_channel(record.get("channel"))
+    if fill_channel or record.get("channel"):
+        record["channel"] = _resolve_channel(record.get("channel"))
     url, key = _supabase_cfg()
     if not (url and key):
         logger.warning("[music-db] SUPABASE_URL / SUPABASE_SECRET_KEY 미설정 — DB 기록 생략")
