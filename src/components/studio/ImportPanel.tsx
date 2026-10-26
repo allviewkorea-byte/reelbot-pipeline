@@ -10,9 +10,10 @@ import {
 
 // 기존 이미지 가져오기 — 여러 장 끌어다 놓기 → 모든 이미지를 비전 AI 가 보고 역할을 채운다 → 대표는 틀린
 // 것만 고친다 → 한 장씩 순서대로 등록.
-// 채우는 규칙: AI 우선(파일명과 다르면 "파일명과 다름" 태그). 단 파일명이 01_face/02_body 면 파일명 우선
-// (AI 얼굴 오판 보정 — AI 가 다르게 봤으면 "AI: …" 태그만). AI 가 "기준 이미지 아님"이면 항상 제외.
-// AI 실패 → 파일명으로 채우고 빨간 한 줄. 표시는 한 줄 배지·태그, AI 이유는 "이유" 툴팁/클릭.
+// 채우는 규칙: AI 우선. 단 파일명이 01_face/02_body 면 파일명 우선(AI 얼굴 오판 보정).
+// AI 가 "기준 이미지 아님"이면 항상 제외.
+// AI 실패 → 파일명으로 채우고 빨간 한 줄. 카드엔 손댈 것만 태그(역할 선택 필요·같은 역할 여러 장),
+// AI 이유·파일명과 다름·파일명 우선은 "이유" 툴팁/클릭에만.
 
 interface Staged {
   key: string
@@ -310,7 +311,8 @@ export function ImportPanel({ characterId, roleRe, presets, existing, catLabel, 
   )
 }
 
-/** 카드 아래 한 줄 — [포함] [AI 배지] [태그들] [이유]. 이유는 기본 숨김(툴팁·클릭). */
+/** 카드 아래 한 줄 — [포함] [AI 배지] [손댈 것 태그: 역할 선택 필요·같은 역할 여러 장] [이유].
+ * 실패는 빨간 한 줄. 파일명과 다름·파일명 우선 같은 참고 정보는 이유 툴팁·펼침에만. */
 function StatusRow({ it, editable, running, bad, dupe, reasonOpen, onToggleReason, onInclude }: {
   it: Staged
   editable: boolean
@@ -323,7 +325,13 @@ function StatusRow({ it, editable, running, bad, dupe, reasonOpen, onToggleReaso
 }) {
   const ai = it.ai
   const kind = ai.kind ? KIND_KO[ai.kind] : null
-  const reason = ai.reason?.trim()
+  // 참고 정보(대표가 손댈 필요 없음)는 카드에 태그로 두지 않고 ⓘ 이유 툴팁·펼침에만.
+  const details = [
+    ai.reason?.trim(),
+    ai.status === "differs" ? `파일명과 다름 — 파일명: ${it.fileRole}` : "",
+    ai.status === "kept" ? `파일명(${it.fileRole}) 우선 — AI는 ${ai.aiRole || kind || "다르게"} 로 봤어요` : "",
+    ai.status === "pick" ? `AI가 ${kind ?? "종류"}로 봤지만 목록에서 고르지 못했어요` : "",
+  ].filter((d): d is string => !!d)
 
   if (it.state === "analyzing")
     return <p className="flex items-center gap-1 text-[11px] text-primary"><Loader2 className="h-3 w-3 animate-spin" /> AI가 보는 중</p>
@@ -348,28 +356,19 @@ function StatusRow({ it, editable, running, bad, dupe, reasonOpen, onToggleReaso
         ) : ai.status === "not_ref" ? (
           <span className={`${TAG} bg-secondary text-muted-foreground`}>기준 이미지 아님</span>
         ) : (
-          kind && (
+          kind && ai.status !== "kept" && (
             <span className={`${TAG} bg-secondary/60 text-muted-foreground`} title={ai.aiRole || undefined}>
               <Sparkles className="h-2.5 w-2.5" /> AI {kind}{ai.pct !== undefined ? ` · ${ai.pct}%` : ""}
             </span>
           )
         )}
-        {ai.status === "differs" && (
-          <span className={`${TAG} bg-amber-500/10 text-amber-400`} title={`파일명: ${it.fileRole}`}>파일명과 다름</span>
-        )}
-        {ai.status === "kept" && (
-          <span className={`${TAG} bg-amber-500/10 text-amber-400`} title="파일명(01_face·02_body)을 우선했어요">
-            AI: {ai.aiRole || kind || "다름"}
-          </span>
-        )}
-        {ai.status === "pick" && <span className={`${TAG} bg-amber-500/10 text-amber-400`}>목록에서 선택</span>}
-        {bad && <span className={`${TAG} bg-amber-500/10 text-amber-400`}>{it.role ? "역할 이름 확인" : "역할 선택 필요"}</span>}
+        {bad && <span className={`${TAG} bg-amber-500/10 text-amber-400`}>역할 선택 필요</span>}
         {dupe && <span className={`${TAG} bg-amber-500/10 text-amber-400`} title="마지막 장이 확정돼요">같은 역할 여러 장</span>}
-        {reason && (
+        {details.length > 0 && (
           <button
             type="button"
             onClick={onToggleReason}
-            title={reason}
+            title={details.join("\n")}
             aria-expanded={reasonOpen}
             className="ml-auto flex shrink-0 items-center gap-0.5 text-[10px] text-muted-foreground hover:text-foreground"
           >
@@ -377,7 +376,7 @@ function StatusRow({ it, editable, running, bad, dupe, reasonOpen, onToggleReaso
           </button>
         )}
       </div>
-      {reasonOpen && reason && <p className="break-words text-[11px] text-muted-foreground">{reason}</p>}
+      {reasonOpen && details.map((d) => <p key={d} className="break-words text-[11px] text-muted-foreground">{d}</p>)}
       {it.state === "error" && <p className="min-w-0 truncate text-[11px] text-red-400" title={it.error}>{it.error}</p>}
     </div>
   )
