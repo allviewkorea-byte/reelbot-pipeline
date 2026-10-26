@@ -5,6 +5,7 @@ import Link from "next/link"
 import { toast } from "sonner"
 import { ChevronDown, ImageIcon, Loader2, RefreshCw, Shirt, Sparkles, Upload, X } from "lucide-react"
 import { prepareFile } from "@/components/shorts/FamilyCastPanel"
+import { PicksPanel } from "@/components/insta/PicksPanel"
 import { RefsPanel } from "@/components/insta/RefsPanel"
 import { jsonOrThrow, usd, type View } from "@/components/studio/studio-lib"
 
@@ -217,6 +218,7 @@ export default function InstaOutfitPage() {
       </div>
 
       <RefsPanel />
+      <PicksPanel />
 
       {character && !ready && (
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-400">

@@ -1,13 +1,15 @@
-"""인스타 쇼핑 API — 착장 사진 1장 생성 (A1, 테스트 화면 /insta/outfit). 상품 URL 추출(A2)·릴스(A3)는 별도."""
+"""인스타 쇼핑 API — 착장 생성(A1) · 레퍼런스 수집·분석(A2-1) · 쿠팡·네이버 상품 픽(A2-2). 테스트 화면 /insta/outfit."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
+from adapters.shopping import ShoppingError
 from services import character_studio as cs
 from services import insta_outfit as io
 from services import insta_outfit_plan as P
+from services import insta_picks as picks
 from services import insta_refs as refs
 
 router = APIRouter()
@@ -117,3 +119,61 @@ def api_usage():
         return {"youtube": refs.usage("youtube"), "has_youtube_key": bool(refs.yt_key())}
     except refs.RefsError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
+
+
+# ── 상품 픽(A2-2) ────────────────────────────────────────────────────────
+class PickReq(BaseModel):
+    video_id: str | None = None
+    look_index: int = 0
+
+
+class SwapReq(BaseModel):
+    item_index: int
+    product_id: int
+
+
+def _pcall(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except ShoppingError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except refs.RefsError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+
+
+@router.get("/shopping/status")
+def shopping_status():
+    """쿠팡·네이버 연결 여부(키 유무) + 오늘 호출 수."""
+    out = {"connected": picks.connections()}
+    try:
+        out["usage"] = {ch: refs.usage(ch) for ch in ("coupang", "naver")}
+    except refs.RefsError:
+        out["usage"] = None
+    return out
+
+
+@router.post("/looks/pick")
+def pick_look(req: PickReq, bg: BackgroundTasks):
+    """레퍼런스 룩 1벌의 상품 고르기(백그라운드). video_id 없으면 분석된 레퍼런스 중 조회수 1위."""
+    job = _pcall(picks.start, req.video_id, req.look_index)
+    if job["state"] == "queued":
+        bg.add_task(picks.run, job["id"])
+    return job
+
+
+@router.get("/looks/jobs/{job_id}")
+def pick_job(job_id: str):
+    return _pcall(picks.get_job, job_id)
+
+
+@router.get("/looks")
+def looks(limit: int = 10):
+    return {"looks": _pcall(picks.list_looks, limit)}
+
+
+@router.post("/looks/{look_id}/swap")
+def swap(look_id: str, req: SwapReq):
+    """아이템 1등을 예비 후보로 교체."""
+    return _pcall(picks.swap, look_id, req.item_index, req.product_id)

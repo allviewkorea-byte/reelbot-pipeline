@@ -1,6 +1,7 @@
 {
   "crons": [
     { "path": "/api/music/produce", "schedule": "0 0 * * *" },
-    { "path": "/api/music/trends/analyze", "schedule": "0 0 * * 1,4" }
+    { "path": "/api/music/trends/analyze", "schedule": "0 0 * * 1,4" },
+    { "path": "/api/cron/insta-refs", "schedule": "37 0 * * *" }
   ]
 }
