@@ -25,6 +25,7 @@ from api.routes import (
     shorts_hero,
     status,
     storyboard,
+    studio,
     system,
     trends,
     video,
@@ -87,6 +88,7 @@ app.include_router(music.router, prefix="/api/music", tags=["music"])
 app.include_router(music_youtube.router, prefix="/api/music/youtube", tags=["music"])
 app.include_router(music_dashboard.router, prefix="/music", tags=["music"])
 app.include_router(system.router, tags=["system"])
+app.include_router(studio.router, prefix="/studio", tags=["studio"])
 
 
 if __name__ == "__main__":
