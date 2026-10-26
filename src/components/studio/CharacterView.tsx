@@ -8,6 +8,7 @@ import { CustomPromptPanel } from "./CustomPromptPanel"
 import { GeneratePanel } from "./GeneratePanel"
 import { ImportPanel } from "./ImportPanel"
 import { Lightbox } from "./Lightbox"
+import { MeasurementsCard } from "./MeasurementsCard"
 import { RoleCard } from "./RoleCard"
 import {
   BODY_ROLE, FACE_ROLE, ROLE_FALLBACK, categoryOf, channelName, jsonOrThrow, roleName, startGenerate,
@@ -252,6 +253,8 @@ export function CharacterView({ characterId, initialJobId }: { characterId: stri
         {big(FACE_ROLE, "얼굴", 4)}
         {big(BODY_ROLE, "체형", 2)}
       </div>
+
+      <MeasurementsCard characterId={characterId} />
 
       <section className="flex min-w-0 flex-col gap-4 rounded-xl border border-border bg-card p-4">
         <div className="flex min-w-0 flex-wrap items-center gap-2">

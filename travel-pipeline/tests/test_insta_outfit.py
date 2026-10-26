@@ -224,6 +224,8 @@ def flow(studio, monkeypatch, tmp_path):  # noqa: F811
         ref = cs.insert_ref("chaei", role, r2_key=f"characters/chaei/{role}/x.png", url=f"https://img.test/{role}.png",
                             source="upload")
         cs.confirm_ref(ref["id"])
+    from services import character_measurements as cm
+    cm.save("chaei", cm.DRAFTS["chaei"])
     io._JOBS.clear()
     io._ACTIVE.clear()
     studio.rest_out, studio.muse = rest, muse
@@ -295,6 +297,11 @@ def test_start_validation(flow):
         io.start("chaei", [{"key": "characters/chaei/01_face/x.png", "kind": "top"}])
     cs.upsert_character("mina", "미나")
     with pytest.raises(io.OutfitError, match="준비 완료"):
+        io.start("mina", PRODS)
+    for role in ("01_face", "02_body"):
+        ref = cs.insert_ref("mina", role, r2_key=f"characters/mina/{role}/x.png", url="u", source="upload")
+        cs.confirm_ref(ref["id"])
+    with pytest.raises(io.OutfitError, match="치수"):
         io.start("mina", PRODS)
 
 
