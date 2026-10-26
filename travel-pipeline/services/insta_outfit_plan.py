@@ -1,0 +1,392 @@
+"""인스타 쇼핑 — 착장 장면 기획 + 프롬프트 (A1). 순수 로직(외부 호출은 plan_scene 의 Claude 1회뿐).
+
+흐름: 요일 → 생활 → 장소 후보 / 포즈 풀(17) / 확정 헤어 / 아이웨어(7종 × 4방식).
+1) 규칙으로 후보를 먼저 거른다(결정적·테스트 가능):
+   - 신발이 보이는 포즈는 방(room) 금지. 양말 포즈는 방에서만. 거울 포즈는 거울 있는 장소에서만.
+   - 신발 상품이 있으면 방 장소는 후보에서 뺀다(대안이 하나도 없을 때만 허용).
+   - 최근 2번 연속 같은 헤어·포즈·장소면 그 값은 제외(3연속 금지). 현관 거울은 최근 7일 2회까지.
+   - 아이웨어: 직전 2번 모두 없음 → 이번엔 씀 / 직전에 씀 → 안 씀 / 그 외 30% (3번 중 1번 정도),
+     같은 아이템 연속 금지.
+2) Claude 가 유효한 (장소, 포즈) 조합과 헤어 중에서 고르고 이유를 한 줄 남긴다(JSON). 응답이 목록 밖이거나
+   호출이 실패하면 후보 중 무작위로 고른다(기획이 생성을 막지 않게).
+3) 프롬프트는 대표 실측 골격 그대로. 참조 순서 ① 01_face ② 02_body ③ hair ④~ 상품(합계 최대 10).
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import random
+from datetime import date, datetime, timedelta, timezone
+
+logger = logging.getLogger(__name__)
+
+KST = timezone(timedelta(hours=9))
+MAX_REFS = 10
+
+# ── 장소 ─────────────────────────────────────────────────────────────────
+# kind: room(집 안 방·거실 — 신발 금지) / entry(현관 타일) / elevator / fitting / indoor(공공 실내) / outdoor
+LOCATIONS: dict[str, dict] = {
+    "entry_mirror": {"ko": "현관 거울", "kind": "entry", "mirror": True,
+                     "en": "standing on the entryway tile floor by the shoe cabinet of a Korean apartment, in front of a full-length mirror"},
+    "elevator_mirror": {"ko": "엘리베이터 거울", "kind": "elevator", "mirror": True,
+                        "en": "inside a Korean apartment elevator with a mirrored wall"},
+    "office_lobby": {"ko": "오피스 로비", "kind": "indoor", "mirror": False, "en": "in a bright modern office building lobby"},
+    "subway_stairs": {"ko": "지하철 출구 계단", "kind": "outdoor", "mirror": False, "stairs": True,
+                      "en": "at a Seoul subway station exit staircase"},
+    "evening_alley": {"ko": "저녁 골목", "kind": "outdoor", "mirror": False,
+                      "en": "in a quiet Seoul back alley in the early evening with warm shop lights"},
+    "restaurant_front": {"ko": "레스토랑 앞", "kind": "outdoor", "mirror": False,
+                         "en": "in front of a small restaurant entrance in Seoul at dusk"},
+    "fitting_room": {"ko": "백화점 피팅룸", "kind": "fitting", "mirror": True,
+                     "en": "inside a department store fitting room with a large mirror"},
+    "street": {"ko": "거리", "kind": "outdoor", "mirror": False, "en": "on a busy Seoul shopping street"},
+    "crosswalk": {"ko": "횡단보도", "kind": "outdoor", "mirror": False, "en": "on a Seoul crosswalk"},
+    "rooftop": {"ko": "루프탑", "kind": "outdoor", "mirror": False, "railing": True,
+                "en": "on a city rooftop terrace with the skyline behind"},
+    "bar_front": {"ko": "바 앞", "kind": "outdoor", "mirror": False, "en": "in front of a cozy bar entrance at night"},
+    "cafe": {"ko": "카페", "kind": "indoor", "mirror": False, "en": "inside a bright minimal cafe"},
+    "gallery_stairs": {"ko": "전시장 계단", "kind": "indoor", "mirror": False, "stairs": True, "railing": True,
+                       "en": "on the concrete stairs of an art gallery"},
+    "park_bench": {"ko": "공원 벤치", "kind": "outdoor", "mirror": False, "en": "in a city park by a wooden bench"},
+    "room": {"ko": "방", "kind": "room", "mirror": True,
+             "en": "in her bright bedroom with a full-length floor mirror"},
+    "neighborhood_alley": {"ko": "동네 골목", "kind": "outdoor", "mirror": False, "en": "in a quiet residential alley in Seoul"},
+    "bakery_front": {"ko": "빵집 앞", "kind": "outdoor", "mirror": False, "en": "in front of a neighborhood bakery"},
+}
+
+# 요일(0=월) → 생활 · 장소 후보
+WEEKDAYS: dict[int, dict] = {
+    0: {"ko": "월", "life": "출근", "locations": ["elevator_mirror", "office_lobby", "subway_stairs", "entry_mirror"]},
+    1: {"ko": "화", "life": "출근 + 퇴근 후 약속", "locations": ["elevator_mirror", "evening_alley", "restaurant_front"]},
+    2: {"ko": "수", "life": "출근", "locations": ["elevator_mirror", "office_lobby", "subway_stairs", "entry_mirror"]},
+    3: {"ko": "목", "life": "출근 + 쇼핑", "locations": ["fitting_room", "street"]},
+    4: {"ko": "금", "life": "퇴근 후 데이트", "locations": ["crosswalk", "rooftop", "bar_front"]},
+    5: {"ko": "토", "life": "카페·전시", "locations": ["cafe", "gallery_stairs", "park_bench"]},
+    6: {"ko": "일", "life": "집·동네 산책", "locations": ["room", "neighborhood_alley", "bakery_front"]},
+}
+
+# ── 포즈(17) ─────────────────────────────────────────────────────────────
+# feet: shoes(신발 보임) / socks(양말·맨발, 방 전용) / none(발 안 보임).
+# where: 허용 장소 키 목록, 또는 kinds: 허용 장소 종류. mirror: 거울 필요. face: 얼굴 가림 방식.
+POSES: dict[str, dict] = {
+    "mirror_lean": {"ko": "미러셀카 한쪽 다리 기대기", "cut": "서기", "feet": "shoes", "mirror": True, "face": "phone",
+                    "kinds": ["entry", "elevator", "fitting"],
+                    "en": "taking a mirror selfie with her weight on one leg, full body visible in the mirror"},
+    "mirror_back": {"ko": "거울 앞 반쯤 돌아 뒷모습", "cut": "서기", "feet": "shoes", "mirror": True, "face": "phone",
+                    "kinds": ["entry", "elevator", "fitting"],
+                    "en": "standing half-turned away from the mirror to show the back of the outfit, glancing at the phone in the reflection"},
+    "look_down": {"ko": "내려다보기 셀카", "cut": "서기", "feet": "shoes", "face": "out_of_frame",
+                  "kinds": ["entry", "elevator", "outdoor", "indoor", "fitting"],
+                  "en": "a selfie shot looking straight down at her outfit and shoes from above"},
+    "cafe_cross": {"ko": "카페 의자 다리 꼬기", "cut": "앉기", "feet": "shoes", "face": "shoulders", "where": ["cafe"],
+                   "en": "sitting on a cafe chair with her legs crossed"},
+    "stairs_sit": {"ko": "계단에 앉기", "cut": "앉기", "feet": "shoes", "face": "shoulders",
+                   "where": ["subway_stairs", "gallery_stairs"], "en": "sitting casually on the steps"},
+    "bench_side": {"ko": "벤치 옆 보기", "cut": "앉기", "feet": "shoes", "face": "shoulders", "where": ["park_bench"],
+                   "en": "sitting on the bench, body turned to look off to the side"},
+    "entry_shoes": {"ko": "현관 턱에서 신발 신기", "cut": "앉기", "feet": "shoes", "face": "shoulders", "where": ["entry_mirror"],
+                    "en": "sitting on the entryway step putting on her shoes"},
+    "bed_edge": {"ko": "침대 끝(양말)", "cut": "앉기", "feet": "socks", "face": "shoulders", "where": ["room"],
+                 "en": "sitting on the edge of the bed wearing socks"},
+    "floor_mirror": {"ko": "바닥 거울 셀카(양말)", "cut": "앉기", "feet": "socks", "mirror": True, "face": "phone", "where": ["room"],
+                     "en": "sitting on the floor in socks taking a mirror selfie in the floor mirror"},
+    "crosswalk_walk": {"ko": "횡단보도 걷기", "cut": "걷기", "feet": "shoes", "face": "shoulders", "where": ["crosswalk"],
+                       "en": "walking across the crosswalk mid-stride"},
+    "walk_toward": {"ko": "카메라 쪽 두세 걸음", "cut": "걷기", "feet": "shoes", "face": "shoulders", "kinds": ["outdoor"],
+                    "en": "walking two or three steps toward the camera"},
+    "wall_back": {"ko": "벽에 등 기대기", "cut": "기대기", "feet": "shoes", "face": "shoulders",
+                  "kinds": ["outdoor", "indoor", "elevator"], "en": "leaning her back against a wall"},
+    "railing": {"ko": "난간에 팔 걸치기", "cut": "기대기", "feet": "none", "face": "shoulders",
+                "where": ["rooftop", "gallery_stairs", "subway_stairs"], "en": "resting her forearms on a railing"},
+    "tie_laces": {"ko": "신발 끈 묶기", "cut": "쪼그려", "feet": "shoes", "face": "shoulders", "kinds": ["outdoor", "entry"],
+                  "en": "crouching down to tie her shoelaces"},
+    "detail_bag": {"ko": "가방·손 클로즈업", "cut": "디테일", "feet": "none", "face": "out_of_frame",
+                   "kinds": ["outdoor", "indoor", "elevator", "entry", "fitting"],
+                   "en": "a close-up of her hand holding the bag at hip height, showing the fabric of the outfit"},
+    "toe_down": {"ko": "발끝 내려다보기", "cut": "디테일", "feet": "shoes", "face": "out_of_frame",
+                 "kinds": ["outdoor", "entry", "elevator"],
+                 "en": "a shot looking down at her feet, showing the shoes and the hem of the bottoms"},
+    "flatlay": {"ko": "플랫레이(사람 없음)", "cut": "디테일", "feet": "none", "face": "none", "person": False,
+                "kinds": ["room", "entry"], "en": "a flat lay of the outfit items arranged neatly"},
+}
+
+# ── 아이웨어 7종 × 착용 4방식 ─────────────────────────────────────────────
+EYEWEAR: dict[str, dict] = {
+    "black_sunglasses": {"ko": "블랙 선글라스", "en": "classic black sunglasses", "sun": True},
+    "tortoise_sunglasses": {"ko": "호피 선글라스", "en": "tortoiseshell sunglasses", "sun": True},
+    "cateye_sunglasses": {"ko": "캣아이 선글라스", "en": "cat-eye sunglasses", "sun": True},
+    "slim_sunglasses": {"ko": "슬림 사각 선글라스", "en": "slim rectangular sunglasses", "sun": True},
+    "metal_round": {"ko": "얇은 메탈 원형 안경", "en": "thin gold metal round glasses", "sun": False},
+    "clear_acetate": {"ko": "투명 뿔테 안경", "en": "clear acetate glasses", "sun": False},
+    "brown_tint": {"ko": "브라운 틴트 안경", "en": "glasses with light brown tinted lenses", "sun": False},
+}
+EYEWEAR_STYLES: dict[str, dict] = {
+    "wear": {"ko": "쓰기", "en": "She is wearing {item}."},
+    "head": {"ko": "머리 위", "en": "She has {item} pushed up on top of her head."},
+    "neckline": {"ko": "넥라인", "en": "She has {item} hooked on the neckline of her top."},
+    "hand": {"ko": "손", "en": "She is holding {item} in one hand."},
+}
+
+# 헤어 키워드 → 어울리는 상황(Claude 에 힌트로만)
+HAIR_HINTS = {
+    "lowbun": "출근룩", "halfup": "출근룩·데이트", "straight": "기본", "wave": "데이트·주말", "ponytail": "스트릿·활동",
+    "cap": "스트릿·주말", "beanie": "겨울", "clawclip": "집·주말", "braid": "주말·여행", "beret": "가을·겨울 데이트",
+    "headband": "주말",
+}
+
+PRODUCT_KINDS = {
+    "top": ("상의", "the top"), "bottoms": ("하의", "the bottoms"), "dress": ("원피스", "the dress"),
+    "outerwear": ("아우터", "the outerwear"), "shoes": ("신발", "the shoes"), "bag": ("가방", "the bag"),
+    "accessory": ("액세서리", "the accessory"),
+}
+
+
+def season_of(d: date) -> str:
+    return {12: "winter", 1: "winter", 2: "winter", 3: "spring", 4: "spring", 5: "spring",
+            6: "summer", 7: "summer", 8: "summer"}.get(d.month, "autumn")
+
+
+SEASON_WEATHER = {
+    "spring": "a mild spring day with soft light", "summer": "a bright summer day",
+    "autumn": "a crisp autumn day", "winter": "a cold clear winter day",
+}
+SEASON_KO = {"spring": "봄", "summer": "여름", "autumn": "가을", "winter": "겨울"}
+
+
+# ── 규칙 ─────────────────────────────────────────────────────────────────
+def compatible(pose_key: str, loc_key: str) -> bool:
+    """포즈 ↔ 장소 상식 규칙. 신발 보이는 포즈는 방 금지, 양말은 방 전용, 거울 포즈는 거울 장소."""
+    pose, loc = POSES[pose_key], LOCATIONS[loc_key]
+    if "where" in pose and loc_key not in pose["where"]:
+        return False
+    if "kinds" in pose and loc["kind"] not in pose["kinds"]:
+        return False
+    if pose.get("mirror") and not loc.get("mirror"):
+        return False
+    if pose["feet"] == "shoes" and loc["kind"] == "room":
+        return False
+    if pose["feet"] == "socks" and loc["kind"] != "room":
+        return False
+    return True
+
+
+def _blocked_by_streak(history: list[dict], field: str) -> set:
+    """최근 2개가 같은 값이면 그 값은 이번에 금지(3연속 금지). history 는 최신순."""
+    vals = [((h.get("plan") or {}).get(field)) for h in history[:2]]
+    return {vals[0]} if len(vals) == 2 and vals[0] and vals[0] == vals[1] else set()
+
+
+def _entry_mirror_week(history: list[dict], now: datetime) -> int:
+    since = now - timedelta(days=7)
+    n = 0
+    for h in history:
+        try:
+            t = datetime.fromisoformat(str(h.get("created_at")).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if t >= since and (h.get("plan") or {}).get("location") == "entry_mirror":
+            n += 1
+    return n
+
+
+def choose_eyewear(history: list[dict], rng: random.Random, override: str | None = None) -> dict | None:
+    """3번 중 1번 정도: 직전 2번 모두 없음 → 씀 / 직전에 씀 → 안 씀 / 그 외 30%. 같은 아이템 연속 금지."""
+    if override == "none":
+        return None
+    recent = [(h.get("plan") or {}).get("eyewear") for h in history[:2]]
+    # 같은 아이템 연속 금지 — 직전 '착용한' 착장의 아이템과 비교(바로 앞 착장은 대개 안 쓴 날이다)
+    worn = [(h.get("plan") or {}).get("eyewear") for h in history if (h.get("plan") or {}).get("eyewear")]
+    last_item = worn[0].get("item") if worn else None
+    if override and override in EYEWEAR:
+        item = override
+    else:
+        if recent and recent[0]:
+            return None
+        if not (len(recent) == 2 and not recent[0] and not recent[1]) and rng.random() >= 0.3:
+            return None
+        choices = [k for k in EYEWEAR if k != last_item]
+        item = rng.choice(choices)
+    style = rng.choice(list(EYEWEAR_STYLES))
+    return {"item": item, "style": style}
+
+
+def candidates(*, weekday: int, products: list[dict], hair_roles: list[str], history: list[dict],
+               now: datetime, location: str | None = None, pose: str | None = None,
+               cut: str | None = None, hair: str | None = None) -> dict:
+    """규칙으로 거른 후보: {pairs: [(loc, pose)], hairs: [...], notes: [...]}. 대표 지정값은 그대로 존중하되
+    규칙 위반 조합은 만들지 않는다."""
+    notes: list[str] = []
+    has_shoes = any(p.get("kind") == "shoes" for p in products)
+    locs = [location] if location in LOCATIONS else list(WEEKDAYS[weekday]["locations"])
+    if not location:
+        blocked = _blocked_by_streak(history, "location")
+        if _entry_mirror_week(history, now) >= 2:
+            blocked.add("entry_mirror")
+            notes.append("현관 거울은 이번 주 2회 사용 — 제외")
+        keep = [x for x in locs if x not in blocked]
+        locs = keep or locs
+        if has_shoes:
+            no_room = [x for x in locs if LOCATIONS[x]["kind"] != "room"]
+            if no_room:
+                locs = no_room
+            else:
+                notes.append("신발 상품이 있지만 방 장소뿐 — 신발은 빼고 양말 컷")
+    poses = [pose] if pose in POSES else [k for k, v in POSES.items() if not cut or v["cut"] == cut]
+    if not pose:
+        blocked = _blocked_by_streak(history, "pose")
+        poses = [p for p in poses if p not in blocked] or poses
+        if not any(p.get("kind") == "bag" for p in products):
+            poses = [p for p in poses if p != "detail_bag"] or poses
+    pairs = [(lk, pk) for lk in locs for pk in poses if compatible(pk, lk)]
+    if not pairs and (location or pose):  # 대표 지정이 규칙과 충돌 → 지정 하나만 살리고 나머지 자동
+        notes.append("지정한 장소·포즈 조합이 장면 규칙과 맞지 않아 자동으로 맞췄어요")
+        fixed_locs = [location] if location in LOCATIONS else list(WEEKDAYS[weekday]["locations"])
+        pairs = [(lk, pk) for lk in fixed_locs for pk in POSES if compatible(pk, lk)]
+        if not pairs:
+            pairs = [(lk, pk) for lk in WEEKDAYS[weekday]["locations"] for pk in POSES if compatible(pk, lk)]
+    hairs = [hair] if hair in hair_roles else list(hair_roles)
+    if not hair:
+        blocked = _blocked_by_streak(history, "hair_role")
+        hairs = [h for h in hairs if h not in blocked] or hairs
+    return {"pairs": pairs, "hairs": hairs, "notes": notes}
+
+
+# ── 기획(Claude) ─────────────────────────────────────────────────────────
+_PLAN_SYSTEM = (
+    "You plan ONE everyday Instagram outfit photo for a Korean fashion account (an original virtual woman). "
+    "Pick from the given options only and return ONE JSON object: "
+    '{"pair": <index of the location/pose pair>, "hair_role": "<one of hairs or empty>", '
+    '"weather_en": "<short English weather/light phrase matching the season>", '
+    '"reason": "<한국어 한 줄: 왜 이 장소·포즈·헤어인지>"}. '
+    "Match the outfit to the day's life (commute look → office places, date → evening places), the season, and "
+    "the product types. Prefer variety versus the recent history."
+)
+
+
+def _summary(products: list[dict]) -> list[dict]:
+    return [{"kind": p.get("kind"), "desc": p.get("desc") or ""} for p in products]
+
+
+def plan_scene(*, character_id: str, products: list[dict], hair_roles: list[str], history: list[dict],
+               options: dict | None = None, now: datetime | None = None, rng: random.Random | None = None,
+               llm=None) -> dict:
+    """장면 기획 → plan dict. llm(system, user) -> str 은 테스트에서 주입(기본 Claude via music_lyrics._call)."""
+    options = options or {}
+    rng = rng or random.Random()
+    now = now or datetime.now(KST)
+    weekday = int(options["weekday"]) if str(options.get("weekday", "")).isdigit() and 0 <= int(options["weekday"]) <= 6 \
+        else now.astimezone(KST).weekday()
+    season = options.get("season") if options.get("season") in SEASON_WEATHER else season_of(now.astimezone(KST).date())
+    cand = candidates(weekday=weekday, products=products, hair_roles=hair_roles, history=history, now=now,
+                      location=options.get("location") or None, pose=options.get("pose") or None,
+                      cut=options.get("cut") or None, hair=options.get("hair") or None)
+    eyewear = choose_eyewear(history, rng, options.get("eyewear") or None)
+    pairs, hairs = cand["pairs"], cand["hairs"]
+    if not pairs:
+        raise ValueError("장면 규칙을 만족하는 장소·포즈 조합이 없어요.")
+
+    pick, hair_role, weather, reason, source = None, None, None, "", "random"
+    if llm is None:
+        from services import music_lyrics
+        llm = lambda s, u: music_lyrics._call(s, u, max_tokens=400, task="insta_plan")  # noqa: E731
+    recent = [{k: (h.get("plan") or {}).get(k) for k in ("location", "pose", "hair_role")} for h in history[:5]]
+    user = json.dumps({
+        "weekday": WEEKDAYS[weekday]["ko"], "life": WEEKDAYS[weekday]["life"], "season": season,
+        "products": _summary(products),
+        "pairs": [{"i": i, "location": LOCATIONS[l]["ko"], "pose": POSES[p]["ko"]} for i, (l, p) in enumerate(pairs)],
+        "hairs": [{"role": h, "suits": HAIR_HINTS.get(h.split("_")[-1], "")} for h in hairs],
+        "recent": recent,
+    }, ensure_ascii=False)
+    try:
+        from services import music_lyrics
+        data = music_lyrics._extract_json(llm(_PLAN_SYSTEM, user))
+        i = int(data.get("pair"))
+        if 0 <= i < len(pairs):
+            pick = pairs[i]
+            source = "ai"
+        hr = str(data.get("hair_role") or "")
+        hair_role = hr if hr in hairs else None
+        weather = str(data.get("weather_en") or "")[:80] or None
+        reason = str(data.get("reason") or "")[:160]
+    except Exception as e:  # noqa: BLE001 - 기획 실패가 생성을 막지 않게 규칙 후보에서 무작위
+        logger.warning("[insta-plan] Claude 기획 실패 → 무작위: %s", str(e)[:200])
+    if pick is None:
+        pick = rng.choice(pairs)
+        reason = reason or "규칙 후보 중 무작위 선택"
+    if hair_role is None and hairs:
+        hair_role = rng.choice(hairs)
+    loc, pose = pick
+    return {
+        "weekday": weekday, "weekday_ko": WEEKDAYS[weekday]["ko"], "life": WEEKDAYS[weekday]["life"],
+        "location": loc, "location_ko": LOCATIONS[loc]["ko"], "pose": pose, "pose_ko": POSES[pose]["ko"],
+        "cut": POSES[pose]["cut"], "hair_role": hair_role, "eyewear": eyewear,
+        "eyewear_ko": (f"{EYEWEAR[eyewear['item']]['ko']} · {EYEWEAR_STYLES[eyewear['style']]['ko']}" if eyewear else None),
+        "season": season, "season_ko": SEASON_KO[season], "weather_en": weather or SEASON_WEATHER[season],
+        "reason": reason, "source": source, "notes": cand["notes"],
+    }
+
+
+# ── 프롬프트 ─────────────────────────────────────────────────────────────
+_TAIL = ("Candid iPhone photo, not a professional shoot: slightly uneven exposure, natural skin texture, real fabric "
+         "wrinkles, a little everyday clutter, slight wide-angle phone lens distortion, natural color, no retouching.")
+_DETAIL = "keep every garment detail identical: color, fabric texture, buttons, pattern, neckline, length and fit"
+
+
+def _product_phrase(kind: str, n: int) -> str:
+    noun = PRODUCT_KINDS.get(kind, ("", "the item"))[1]
+    return f"carrying {noun} from image {n}" if kind == "bag" else f"{noun} from image {n}"
+
+
+def _face_line(plan: dict) -> str:
+    pose = POSES[plan["pose"]]
+    ew = plan.get("eyewear")
+    if pose["face"] == "phone":
+        return "phone held up covering her face"
+    if pose["face"] == "out_of_frame":
+        return "her face is not in the frame"
+    if ew and ew["style"] == "wear" and EYEWEAR[ew["item"]]["sun"]:
+        return "her eyes hidden behind the sunglasses, only the lower part of her face visible, face turned slightly away"
+    return "framed from the shoulders down so her face is not visible"
+
+
+def build(plan: dict, *, face_url: str, body_url: str, hair_url: str | None, products: list[dict],
+          fix_hint: str | None = None) -> tuple[str, list[str]]:
+    """(prompt, refs). 참조 순서 고정 ① face ② body ③ hair ④~ 상품. 방(양말) 컷은 신발 상품을 뺀다."""
+    loc = LOCATIONS[plan["location"]]
+    pose = POSES[plan["pose"]]
+    use = [p for p in products if not (p.get("kind") == "shoes" and (loc["kind"] == "room" or pose["feet"] == "socks"))]
+    weather = plan.get("weather_en") or SEASON_WEATHER.get(plan.get("season", ""), "")
+
+    if pose.get("person") is False:  # 플랫레이 — 사람 없음, 상품만 참조
+        refs = [p["url"] for p in use][:MAX_REFS]
+        items = ", ".join(_product_phrase(p.get("kind", ""), i + 1).replace("carrying ", "") for i, p in enumerate(use[:MAX_REFS]))
+        surface = "the light grey entryway tiles of a Korean apartment" if loc["kind"] == "entry" else "a neatly made white bed"
+        prompt = (f"Flat lay photo with no person: {items} arranged neatly on {surface}, shot from directly above, {weather}. "
+                  f"Take only the items from the product images — {_DETAIL}. {_TAIL}")
+    else:
+        refs = [face_url, body_url] + ([hair_url] if hair_url else [])
+        start = len(refs) + 1
+        room = MAX_REFS - len(refs)
+        use = use[:room]
+        refs += [p["url"] for p in use]
+        hair_part = "with the hairstyle from image 3" if hair_url else "with her usual long black hair"
+        wear = ", ".join(_product_phrase(p.get("kind", ""), start + i) for i, p in enumerate(use))
+        parts = [
+            f"Same woman as reference images 1 and 2 — same face shape, black hair color and the same body shape as the "
+            f"reference, {hair_part}. Take only the clothing from the product images — ignore the body and face of any "
+            f"model wearing them. She is wearing exactly {wear} — {_DETAIL}."
+        ]
+        if any(p.get("revealing") for p in use):
+            parts.append("She wears a plain fitted top underneath.")
+        if loc["kind"] == "room" or pose["feet"] == "socks":
+            parts.append("She is in socks, no shoes.")
+        ew = plan.get("eyewear")
+        if ew:
+            parts.append(EYEWEAR_STYLES[ew["style"]]["en"].format(item=EYEWEAR[ew["item"]]["en"]))
+        parts.append(f"{pose['en'][:1].upper()}{pose['en'][1:]}, {loc['en']}, {_face_line(plan)}, {weather}.")
+        parts.append(_TAIL)
+        prompt = " ".join(parts)
+    if fix_hint:
+        prompt += f" Important fix from the last attempt: {fix_hint.strip().rstrip('.')}."
+    return prompt, refs
