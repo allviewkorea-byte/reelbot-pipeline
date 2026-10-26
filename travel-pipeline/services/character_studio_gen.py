@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import random
 import re
 import secrets
 import shutil
@@ -158,10 +159,31 @@ def _pron(bible: dict) -> str:
 
 def face_prompt(bible: dict) -> str:
     summary = str(bible.get("summary_en") or f"{bible.get('age') or 24}-year-old Korean {_subject(bible)}").strip().rstrip(".")
-    hair = str(bible.get("hair_en") or "long straight black hair").strip().rstrip(".")
+    default_hair = "short black hair" if _subject(bible) == "man" else "long straight black hair"
+    hair = str(bible.get("hair_en") or default_hair).strip().rstrip(".")
     return (f"Original fictional {summary}, not resembling any real person or celebrity. {hair[:1].upper()}{hair[1:]}, "
-            "natural makeup, calm confident expression. Upper body portrait, front-facing, plain light gray background, "
-            "soft natural window light, photorealistic, shot on 50mm lens.")
+            "natural makeup, calm confident expression. Youthful and fresh-faced, looking her real age. Upper body "
+            "portrait, front-facing, plain light gray background, soft natural window light, photorealistic, shot on "
+            "50mm lens.")
+
+
+# 얼굴 후보 다양화 — 후보마다 얼굴형·눈매·분위기를 겹치지 않게 한 줄씩(같은 얼굴 4장 방지).
+FACE_SHAPES = ["an oval face", "a soft round face", "a slim, narrow face with a delicate jawline"]
+FACE_EYES = [
+    "double eyelids with slightly upturned outer eye corners",
+    "monolid eyes without a double eyelid crease, softly downturned outer corners",
+    "subtle inner double eyelids with a straight, calm eye line",
+    "clear double eyelids with gently drooping, friendly outer corners",
+]
+FACE_VIBES = ["an innocent, pure look", "a chic, cool look", "a bright, cheerful look", "a calm, gentle look"]
+
+
+def face_variants(n: int, rng: random.Random | None = None) -> list[str]:
+    """n 개 후보용 한 줄씩. 같은 잡 안에서 얼굴형(3)·눈매(4)·분위기(4)가 최대한 겹치지 않게 섞는다."""
+    rng = rng or random.Random()
+    shapes, eyes, vibes = (rng.sample(x, len(x)) for x in (FACE_SHAPES, FACE_EYES, FACE_VIBES))
+    return [f"Distinct features for this candidate: {shapes[i % len(shapes)]}, {eyes[i % len(eyes)]}, "
+            f"{vibes[i % len(vibes)]}." for i in range(n)]
 
 
 def body_prompt(bible: dict) -> str:
@@ -186,9 +208,22 @@ def pose_prompt(bible: dict, line: str) -> str:
             f"Natural candid photo, {_pron(bible)} face is not visible, photorealistic, soft natural light.")
 
 
-def plan(char: dict, role: str, refs: dict[str, dict], prompt: str | None = None) -> dict:
-    """역할 → {kind, prompt, references[url], parent_ref_id, aspect}. 기준 이미지가 없으면 StudioError."""
+def plan(char: dict, role: str, refs: dict[str, dict], prompt: str | None = None,
+         ref_roles: list[str] | None = None) -> dict:
+    """역할 → {kind, prompt, references[url], parent_ref_id, aspect}. 기준 이미지가 없으면 StudioError.
+
+    전문가 모드: prompt 와 ref_roles(참조로 넣을 확정 역할 목록, 빈 목록이면 참조 없이 t2i)를 함께 주면
+    프리셋·전제 조건 없이 그대로 쓴다(안전 필터 자동 재시도만 적용)."""
     role = cs.check_role(role)
+    if prompt and ref_roles is not None:
+        missing = [r for r in ref_roles if r not in refs]
+        if missing:
+            raise cs.StudioError(f"확정되지 않은 참조 역할이에요: {', '.join(missing)}")
+        urls = [refs[r]["url"] for r in ref_roles][:10]
+        face = refs.get(FACE_ROLE) if FACE_ROLE in ref_roles else None
+        kind = "pose" if cs.role_category(role) == "pose" else "custom"
+        return {"kind": kind, "prompt": prompt, "references": urls,
+                "parent_ref_id": face["id"] if face else None, "aspect": "9:16" if kind == "pose" else "3:4"}
     bible = char.get("bible") or {}
     pr = presets(char)
     face, body = refs.get(FACE_ROLE), refs.get(BODY_ROLE)
@@ -266,11 +301,16 @@ def prepare_job(character_id: str, items: list[dict], count: int | None = None) 
         prompt = (str(it.get("prompt") or "").strip() or None)
         if prompt and len(prompt) > 2000:
             raise cs.StudioError("프롬프트가 너무 길어요(2000자 이하).")
-        p = plan(char, role, refs, prompt)
+        ref_roles = it.get("refs")
+        if ref_roles is not None and not (isinstance(ref_roles, list) and all(isinstance(r, str) for r in ref_roles)):
+            raise cs.StudioError("참조 역할 목록 형식이 올바르지 않아요.")
+        p = plan(char, role, refs, prompt, ref_roles)
         n = int(it.get("count") or count or (FACE_COUNT if p["kind"] == "face" else DEFAULT_COUNT))
         if not 1 <= n <= MAX_COUNT:
             raise cs.StudioError(f"후보 장수는 1~{MAX_COUNT}장이에요.")
-        plans.append({**p, "role": cs.check_role(role), "count": n})
+        # 기본 얼굴 후보는 장마다 얼굴형·눈매·분위기를 다르게(고친 프롬프트는 그대로)
+        variants = face_variants(n) if p["kind"] == "face" and not prompt else None
+        plans.append({**p, "role": cs.check_role(role), "count": n, "variants": variants})
     if not get_muse_adapter().is_available():
         raise cs.StudioStoreError("WAVESPEED_API_KEY 미설정 — 이미지를 생성할 수 없어요.")
     if not r2_storage.is_available():
@@ -290,6 +330,8 @@ def prepare_job(character_id: str, items: list[dict], count: int | None = None) 
 async def _one(adapter, job_id: str, character_id: str, p: dict, sem: asyncio.Semaphore, tmp: Path, idx: int) -> None:
     async with sem:
         prompt = p["prompt"]
+        if p.get("variants"):
+            prompt = f"{prompt} {p['variants'][idx % len(p['variants'])]}"
         out = tmp / f"{p['role']}_{idx}.png"
         retried = False
         while True:

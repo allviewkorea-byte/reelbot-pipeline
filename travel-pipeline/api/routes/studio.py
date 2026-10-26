@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from services import character_studio as cs
 from services import character_studio_gen as gen
+from services import character_studio_import as imp
 
 router = APIRouter()
 
@@ -28,11 +29,17 @@ class GenItem(BaseModel):
     role: str
     prompt: str | None = None
     count: int | None = None
+    refs: list[str] | None = None  # 전문가 모드: 참조로 넣을 확정 역할(빈 목록 = 참조 없음)
 
 
 class GenerateReq(BaseModel):
     items: list[GenItem]
     count: int | None = None
+
+
+class ImportShortsReq(BaseModel):
+    channel: str = "workout_music"
+    role: str
 
 
 class PresetsReq(BaseModel):
@@ -141,3 +148,22 @@ async def suggest_role(character_id: str, file: UploadFile = File(...)):
     """비전 AI 역할 추천(저장 안 함) → {kind, role, confidence, reason}."""
     data = await file.read()
     return _call(gen.suggest_role, character_id, data, file.filename or "")
+
+
+# ── 채널별 목록 · 쇼츠 가져오기 ──────────────────────────────────────────
+@router.get("/overview")
+def overview():
+    """첫 화면: 채널별 캐릭터(얼굴 썸네일·준비 상태)."""
+    return {"channels": _call(imp.overview)}
+
+
+@router.get("/shorts-cast")
+def shorts_cast(channel: str = "workout_music"):
+    """쇼츠 캐스트 중 스튜디오로 가져올 수 있는 캐릭터(얼굴 이미지가 있는 역할)."""
+    return {"cast": _call(imp.shorts_candidates, channel)}
+
+
+@router.post("/import-shorts")
+def import_shorts(req: ImportShortsReq):
+    """쇼츠 캐스트 1명을 스튜디오 캐릭터로 복사(원본 cast/… 무변경)."""
+    return _call(imp.import_shorts, req.channel, req.role)

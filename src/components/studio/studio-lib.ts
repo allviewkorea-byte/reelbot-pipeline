@@ -37,7 +37,38 @@ export interface Job {
   cost_usd: number
   est_usd: number
 }
-export interface GenItem { role: string; prompt?: string; count?: number }
+export interface GenItem { role: string; prompt?: string; count?: number; refs?: string[] }
+
+// ── 채널·한글 이름 (기본 화면엔 역할 코드 대신 이 이름만) ──
+export const CHANNELS: { id: string; name: string }[] = [
+  { id: "insta_chaei", name: "인스타 쇼핑" },
+  { id: "workout_music", name: "2주안에몸매만들기" },
+]
+export function channelName(id: string | null | undefined): string {
+  return CHANNELS.find((c) => c.id === id)?.name ?? (id ? id : "채널 미지정")
+}
+
+const HAIR_KO: Record<string, string> = {
+  straight: "생머리", wave: "웨이브", halfup: "반묶음", lowbun: "로우번", ponytail: "포니테일", clawclip: "집게핀",
+  cap: "볼캡", beanie: "비니", braid: "땋기", beret: "베레모", headband: "헤어밴드",
+}
+
+/** 역할 → 한글 이름. 01_face 얼굴 / 02_body 체형 / hair_NN_key 헤어 이름 / pose 는 프리셋 라벨. */
+export function roleName(role: string, presets?: StudioPresets): string {
+  if (role === FACE_ROLE) return "얼굴"
+  if (role === BODY_ROLE) return "체형"
+  const hit = presets ? [...presets.hair, ...presets.pose].find((p) => p.role === role) : undefined
+  if (hit?.label) return hit.label.replace(/\(.*\)$/, "").trim()
+  if (role.startsWith("hair_")) {
+    const key = role.replace(/^hair_\d{2}_/, "").replace(/^hair_/, "")
+    return HAIR_KO[key] ?? key
+  }
+  if (role.startsWith("pose_")) return `포즈 ${role.slice(5)}`
+  return role
+}
+
+export interface OverviewCharacter { id: string; name: string; face_url: string | null; ready: boolean; source: string; shorts_role?: string | null }
+export interface ShortsCast { role: string; name: string; label: string; face_url: string; has_body: boolean; imported_id: string | null }
 
 export const FACE_ROLE = "01_face"
 export const BODY_ROLE = "02_body"
