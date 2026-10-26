@@ -2,15 +2,17 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
-import { Check, Loader2, Sparkles, Upload, X } from "lucide-react"
+import { Check, Info, Loader2, Sparkles, Upload, X } from "lucide-react"
 import {
   BODY_ROLE, FACE_ROLE, categoryOf, guessRole, suggestRole, uploadOne,
   type StudioPresets, type Suggestion,
 } from "./studio-lib"
 
-// 기존 이미지 가져오기 — 여러 장 끌어다 놓기 → 모든 이미지를 비전 AI 가 보고 역할을 채운다(AI 우선 —
-// 파일 이름과 다르면 AI 값 + "파일명과 다름" 표시, AI 가 실패하면 파일 이름으로 채우고 실패 사유 표시)
-// → 대표는 틀린 것만 고친다 → 한 장씩 순서대로 등록. "기준 이미지 아님"은 기본 제외.
+// 기존 이미지 가져오기 — 여러 장 끌어다 놓기 → 모든 이미지를 비전 AI 가 보고 역할을 채운다 → 대표는 틀린
+// 것만 고친다 → 한 장씩 순서대로 등록.
+// 채우는 규칙: AI 우선(파일명과 다르면 "파일명과 다름" 태그). 단 파일명이 01_face/02_body 면 파일명 우선
+// (AI 얼굴 오판 보정 — AI 가 다르게 봤으면 "AI: …" 태그만). AI 가 "기준 이미지 아님"이면 항상 제외.
+// AI 실패 → 파일명으로 채우고 빨간 한 줄. 표시는 한 줄 배지·태그, AI 이유는 "이유" 툴팁/클릭.
 
 interface Staged {
   key: string
@@ -20,12 +22,26 @@ interface Staged {
   fileRole: string
   custom: boolean
   include: boolean
-  hint: { by: "file" | "ai" | "none"; text: string; tone?: "warn" | "error" }
+  ai: AiNote
   state: "analyzing" | "idle" | "uploading" | "done" | "error"
   error?: string
 }
 
+// AI 추천 결과(화면 배지용). status: ok 정상 / differs 파일명과 다름 / kept 파일명 우선(AI 는 다르게 봄)
+// / pick 종류만 앎(목록에서 선택) / not_ref 기준 이미지 아님 / failed 호출 실패.
+interface AiNote {
+  status: "pending" | "ok" | "differs" | "kept" | "pick" | "not_ref" | "failed"
+  kind?: string
+  pct?: number
+  reason?: string
+  aiRole?: string
+  error?: string
+}
+
 const CUSTOM = "__custom__"
+// 파일명이 이 역할이면 파일명 우선(실사용에서 01_face 를 hair_01_straight 로 오판).
+const FILE_FIRST = new Set([FACE_ROLE, BODY_ROLE])
+const TAG = "inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium leading-none"
 const KIND_KO: Record<string, string> = { face: "얼굴", body: "체형", hair: "헤어", pose: "포즈" }
 
 export function ImportPanel({ characterId, roleRe, presets, existing, catLabel, onDone }: {
@@ -41,6 +57,7 @@ export function ImportPanel({ characterId, roleRe, presets, existing, catLabel, 
   const [dragOver, setDragOver] = useState(false)
   const [confirm, setConfirm] = useState(true)
   const [running, setRunning] = useState(false)
+  const [openReason, setOpenReason] = useState<string | null>(null)
   const itemsRef = useRef(items)
   useEffect(() => {
     itemsRef.current = items
@@ -66,39 +83,22 @@ export function ImportPanel({ characterId, roleRe, presets, existing, catLabel, 
     const worker = async () => {
       for (let it = queue.shift(); it; it = queue.shift()) {
         const fileRole = it.fileRole
-        const fileNote = fileRole ? ` · 파일명과 다름(파일명: ${fileRole})` : ""
         try {
           const s: Suggestion = await suggestRole(characterId, it.file)
-          const pct = Math.round(s.confidence * 100)
-          const why = s.reason ? ` · ${s.reason}` : ""
+          const base = { kind: s.kind, pct: Math.round(s.confidence * 100), reason: s.reason, aiRole: s.role }
           if (s.kind === "not_reference") {
-            update(it.key, {
-              state: "idle", include: false, role: "",
-              hint: { by: "ai", text: `기준 이미지 아님 — ${s.reason || "착장·스크린샷 등"}${fileNote}`, tone: "warn" },
-            })
+            update(it.key, { state: "idle", include: false, role: "", ai: { ...base, status: "not_ref" } })
+          } else if (FILE_FIRST.has(fileRole)) {
+            update(it.key, { state: "idle", include: true, role: fileRole, ai: { ...base, status: s.role === fileRole ? "ok" : "kept" } })
           } else if (!s.role) {
-            // 종류는 알았지만 목록에서 못 고름(예: 헤어인데 가장 가까운 걸 못 정함) → 파일 이름이 있으면 그걸로.
-            update(it.key, {
-              state: "idle", include: true, role: fileRole,
-              hint: { by: "ai", text: `AI: ${KIND_KO[s.kind] ?? s.kind} ${pct}% — 목록에서 골라 주세요${why}`, tone: "warn" },
-            })
+            update(it.key, { state: "idle", include: true, role: fileRole, ai: { ...base, status: "pick" } })
           } else {
             const differs = !!fileRole && fileRole !== s.role
-            update(it.key, {
-              state: "idle", include: true, role: s.role,
-              hint: {
-                by: "ai",
-                text: `AI 추천 · ${KIND_KO[s.kind] ?? s.kind} ${pct}%${why}${differs ? fileNote : ""}`,
-                tone: differs || pct < 60 ? "warn" : undefined,
-              },
-            })
+            update(it.key, { state: "idle", include: true, role: s.role, ai: { ...base, status: differs ? "differs" : "ok" } })
           }
         } catch (e) {
-          const msg = e instanceof Error ? e.message : "오류"
-          update(it.key, {
-            state: "idle", role: fileRole,
-            hint: { by: "none", text: `AI 추천 실패 — ${msg}${fileRole ? " · 파일명으로 채움" : " · 직접 골라 주세요"}`, tone: "error" },
-          })
+          const msg = (e instanceof Error ? e.message : "오류").replace(/^AI 역할 추천 실패:\s*/, "")
+          update(it.key, { state: "idle", role: fileRole, ai: { status: "failed", error: msg } })
         }
       }
     }
@@ -120,7 +120,7 @@ export function ImportPanel({ characterId, roleRe, presets, existing, catLabel, 
         fileRole,
         custom: false,
         include: true,
-        hint: { by: "ai", text: "AI가 보는 중…" },
+        ai: { status: "pending" },
         state: "analyzing",
       }
     })
@@ -274,36 +274,16 @@ export function ImportPanel({ characterId, roleRe, presets, existing, catLabel, 
                         className={`w-full min-w-0 rounded-md border bg-background px-1.5 py-1 text-xs text-foreground ${bad ? "border-amber-500/50" : "border-border"}`}
                       />
                     )}
-                    <div className="flex min-w-0 items-start gap-1.5 text-[11px]">
-                      {editable && (
-                        <label className="flex shrink-0 items-center gap-1 text-muted-foreground">
-                          <input type="checkbox" checked={it.include} disabled={running} onChange={(e) => update(it.key, { include: e.target.checked })} />
-                          포함
-                        </label>
-                      )}
-                      <span className="min-w-0 break-words">
-                        {it.state === "analyzing" ? (
-                          <span className="flex items-center gap-1 text-primary"><Loader2 className="h-3 w-3 animate-spin" /> AI가 보는 중</span>
-                        ) : it.state === "uploading" ? (
-                          <span className="flex items-center gap-1 text-primary"><Loader2 className="h-3 w-3 animate-spin" /> 올리는 중</span>
-                        ) : it.state === "done" ? (
-                          <span className="flex items-center gap-1 text-emerald-400"><Check className="h-3 w-3" /> 등록됨</span>
-                        ) : (
-                          <span className={`inline-flex items-start gap-1 ${it.hint.tone === "error" ? "text-red-400" : it.hint.tone === "warn" ? "text-amber-400" : "text-muted-foreground"}`}>
-                            {it.hint.by === "ai" && <Sparkles className="mt-0.5 h-3 w-3 shrink-0" />}
-                            {it.hint.text}
-                          </span>
-                        )}
-                      </span>
-                    </div>
-                    {/* 검증·업로드 오류는 AI 힌트를 가리지 않게 별도 줄 */}
-                    {it.state === "error" ? (
-                      <p className="break-words text-[11px] text-red-400">{it.error}</p>
-                    ) : bad ? (
-                      <p className="text-[11px] text-amber-400">{it.role ? "역할 이름: 소문자·숫자·_ 2~40자" : "역할을 골라 주세요"}</p>
-                    ) : it.include && editable && dupes.includes(it.role) ? (
-                      <p className="text-[11px] text-amber-400">같은 역할이 여러 장 — 마지막 장이 확정돼요</p>
-                    ) : null}
+                    <StatusRow
+                      it={it}
+                      editable={editable}
+                      running={running}
+                      bad={bad}
+                      dupe={it.include && editable && dupes.includes(it.role)}
+                      reasonOpen={openReason === it.key}
+                      onToggleReason={() => setOpenReason((k) => (k === it.key ? null : it.key))}
+                      onInclude={(v) => update(it.key, { include: v })}
+                    />
                   </div>
                 </div>
               )
@@ -326,6 +306,79 @@ export function ImportPanel({ characterId, roleRe, presets, existing, catLabel, 
           </div>
         </>
       )}
+    </div>
+  )
+}
+
+/** 카드 아래 한 줄 — [포함] [AI 배지] [태그들] [이유]. 이유는 기본 숨김(툴팁·클릭). */
+function StatusRow({ it, editable, running, bad, dupe, reasonOpen, onToggleReason, onInclude }: {
+  it: Staged
+  editable: boolean
+  running: boolean
+  bad: boolean
+  dupe: boolean
+  reasonOpen: boolean
+  onToggleReason: () => void
+  onInclude: (v: boolean) => void
+}) {
+  const ai = it.ai
+  const kind = ai.kind ? KIND_KO[ai.kind] : null
+  const reason = ai.reason?.trim()
+
+  if (it.state === "analyzing")
+    return <p className="flex items-center gap-1 text-[11px] text-primary"><Loader2 className="h-3 w-3 animate-spin" /> AI가 보는 중</p>
+  if (it.state === "uploading")
+    return <p className="flex items-center gap-1 text-[11px] text-primary"><Loader2 className="h-3 w-3 animate-spin" /> 올리는 중</p>
+  if (it.state === "done")
+    return <p className="flex items-center gap-1 text-[11px] text-emerald-400"><Check className="h-3 w-3" /> 등록됨</p>
+
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <div className="flex min-w-0 flex-wrap items-center gap-1">
+        {editable && (
+          <label className="mr-0.5 flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
+            <input type="checkbox" checked={it.include} disabled={running} onChange={(e) => onInclude(e.target.checked)} />
+            포함
+          </label>
+        )}
+        {ai.status === "failed" ? (
+          <span className="min-w-0 truncate text-[11px] text-red-400" title={ai.error}>
+            AI 추천 실패{it.fileRole ? " · 파일명으로 채움" : ""} · {ai.error}
+          </span>
+        ) : ai.status === "not_ref" ? (
+          <span className={`${TAG} bg-secondary text-muted-foreground`}>기준 이미지 아님</span>
+        ) : (
+          kind && (
+            <span className={`${TAG} bg-secondary/60 text-muted-foreground`} title={ai.aiRole || undefined}>
+              <Sparkles className="h-2.5 w-2.5" /> AI {kind}{ai.pct !== undefined ? ` · ${ai.pct}%` : ""}
+            </span>
+          )
+        )}
+        {ai.status === "differs" && (
+          <span className={`${TAG} bg-amber-500/10 text-amber-400`} title={`파일명: ${it.fileRole}`}>파일명과 다름</span>
+        )}
+        {ai.status === "kept" && (
+          <span className={`${TAG} bg-amber-500/10 text-amber-400`} title="파일명(01_face·02_body)을 우선했어요">
+            AI: {ai.aiRole || kind || "다름"}
+          </span>
+        )}
+        {ai.status === "pick" && <span className={`${TAG} bg-amber-500/10 text-amber-400`}>목록에서 선택</span>}
+        {bad && <span className={`${TAG} bg-amber-500/10 text-amber-400`}>{it.role ? "역할 이름 확인" : "역할 선택 필요"}</span>}
+        {dupe && <span className={`${TAG} bg-amber-500/10 text-amber-400`} title="마지막 장이 확정돼요">같은 역할 여러 장</span>}
+        {reason && (
+          <button
+            type="button"
+            onClick={onToggleReason}
+            title={reason}
+            aria-expanded={reasonOpen}
+            className="ml-auto flex shrink-0 items-center gap-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+          >
+            <Info className="h-3 w-3" /> 이유
+          </button>
+        )}
+      </div>
+      {reasonOpen && reason && <p className="break-words text-[11px] text-muted-foreground">{reason}</p>}
+      {it.state === "error" && <p className="min-w-0 truncate text-[11px] text-red-400" title={it.error}>{it.error}</p>}
     </div>
   )
 }
