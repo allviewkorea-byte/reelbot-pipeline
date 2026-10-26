@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from services import character_studio as cs
+from services import character_studio_gen as gen
 
 router = APIRouter()
 
@@ -15,6 +16,28 @@ class CharacterReq(BaseModel):
     name: str
     channel_id: str | None = None
     bible: dict | None = None
+
+
+class NewCharacterReq(BaseModel):
+    name: str
+    description: str
+    channel_id: str | None = None
+
+
+class GenItem(BaseModel):
+    role: str
+    prompt: str | None = None
+    count: int | None = None
+
+
+class GenerateReq(BaseModel):
+    items: list[GenItem]
+    count: int | None = None
+
+
+class PresetsReq(BaseModel):
+    kind: str
+    items: list[dict]
 
 
 def _call(fn, *args, **kwargs):
@@ -47,8 +70,9 @@ def save_character(req: CharacterReq):
 
 @router.get("/characters/{character_id}")
 def character(character_id: str):
-    """캐릭터 + 역할별 확정·후보 + 필수 역할(01_face·02_body) 충족 여부."""
-    return _call(cs.character_view, character_id)
+    """캐릭터 + 역할별 확정·후보 + 필수 역할(01_face·02_body) 충족 여부 + 헤어·포즈 프리셋."""
+    view = _call(cs.character_view, character_id)
+    return {**view, "presets": gen.presets(view["character"])}
 
 
 @router.post("/characters/{character_id}/upload")
@@ -73,3 +97,47 @@ def confirm(ref_id: int):
 def discard(ref_id: int):
     """버리기(목록에서 숨김, R2 파일은 보존)."""
     return _call(cs.discard_ref, ref_id)
+
+
+# ── 생성(A0-3) ───────────────────────────────────────────────────────────
+@router.post("/create")
+def new_character(req: NewCharacterReq, bg: BackgroundTasks):
+    """이름 + 자유 설명 → AI 가 bible 작성 → 캐릭터 등록 → 얼굴 후보 4장 생성 시작."""
+    char = _call(gen.create_character, req.name, req.description, req.channel_id)
+    job = _call(gen.prepare_job, char["id"], [{"role": gen.FACE_ROLE}])
+    bg.add_task(gen.run_job, job["id"])
+    return {"character": char, "job": gen.public_job(job)}
+
+
+@router.post("/characters/{character_id}/generate")
+def generate(character_id: str, req: GenerateReq, bg: BackgroundTasks):
+    """역할별 후보 생성(얼굴 4장·그 외 2장 기본). 고급 보기에서 고친 프롬프트는 item.prompt."""
+    job = _call(gen.prepare_job, character_id, [i.model_dump() for i in req.items], req.count)
+    bg.add_task(gen.run_job, job["id"])
+    return gen.public_job(job)
+
+
+@router.get("/jobs/{job_id}")
+def job(job_id: str):
+    return gen.public_job(_call(gen.get_job, job_id))
+
+
+@router.get("/characters/{character_id}/plan")
+def plan(character_id: str, role: str):
+    """그 역할의 기본 프롬프트(고급 보기 — 업로드 이미지처럼 프롬프트가 없는 경우)."""
+    char = _call(cs.get_character, character_id)
+    p = _call(gen.plan, char, role, _call(cs.confirmed_refs, character_id))
+    return {k: p[k] for k in ("kind", "prompt", "aspect")}
+
+
+@router.post("/characters/{character_id}/presets")
+def save_presets(character_id: str, req: PresetsReq):
+    """헤어·포즈 프리셋 추가·삭제(목록 통째 저장)."""
+    return _call(gen.save_presets, character_id, req.kind, req.items)
+
+
+@router.post("/characters/{character_id}/suggest-role")
+async def suggest_role(character_id: str, file: UploadFile = File(...)):
+    """비전 AI 역할 추천(저장 안 함) → {kind, role, confidence, reason}."""
+    data = await file.read()
+    return _call(gen.suggest_role, character_id, data, file.filename or "")

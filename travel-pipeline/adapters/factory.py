@@ -38,6 +38,13 @@ def get_kontext_adapter() -> ImageModelAdapter:
     return KontextImageAdapter()
 
 
+def get_muse_adapter() -> ImageModelAdapter:
+    """캐릭터 스튜디오·착장 생성용 Meta Muse Image(WaveSpeed). 참조가 있으면 edit, 없으면 t2i."""
+    from .image.muse_adapter import MuseImageAdapter
+
+    return MuseImageAdapter()
+
+
 def get_video_adapter(model: str = "default") -> VideoModelAdapter:
     """video_model 값에 따라 영상 어댑터 반환.
     값: 'default' / 'kling-v1' / 'kling-v3'. 키 없으면 fallback."""
