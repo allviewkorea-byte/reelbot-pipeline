@@ -33,6 +33,8 @@ class _FakeRest:
             cur = "" if row.get(k) is None else str(row.get(k))
             if (op == "eq" and cur != val) or (op == "neq" and cur == val):
                 return False
+            if op == "in" and cur not in val.strip("()").split(","):
+                return False
         return True
 
     def __call__(self, method, table, *, params=None, json=None, prefer=None):

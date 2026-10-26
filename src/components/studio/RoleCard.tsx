@@ -10,7 +10,7 @@ import { USD_PER_IMAGE, jsonOrThrow, uploadOne, usd, type GenItem, type Ref, typ
 
 const REGEN_COUNT = 2
 
-export function RoleCard({ characterId, slot, label, required, busyRef, canGenerate, genBlockedReason, generating, onAct, onChanged, onGenerate }: {
+export function RoleCard({ characterId, slot, label, required, busyRef, canGenerate, genBlockedReason, generating, onAct, onOpen, onChanged, onGenerate }: {
   characterId: string
   slot: RoleSlot
   label: string
@@ -20,6 +20,8 @@ export function RoleCard({ characterId, slot, label, required, busyRef, canGener
   genBlockedReason?: string
   generating: boolean
   onAct: (ref: Ref, action: "confirm" | "discard") => void
+  /** 사진 클릭 = 크게 보기(확정 변경은 크게 보기 안 버튼으로만) */
+  onOpen: (role: string, ref: Ref) => void
   onChanged: () => Promise<unknown>
   onGenerate: (items: GenItem[]) => Promise<boolean>
 }) {
@@ -111,10 +113,10 @@ export function RoleCard({ characterId, slot, label, required, busyRef, canGener
 
       <div className="relative flex h-56 items-center justify-center overflow-hidden rounded-lg bg-secondary/30">
         {c ? (
-          <a href={c.url} target="_blank" rel="noreferrer" className="h-full w-full">
+          <button type="button" onClick={() => onOpen(slot.role, c)} title="크게 보기" className="h-full w-full">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={c.url} alt={slot.role} className="h-full w-full object-contain" />
-          </a>
+          </button>
         ) : (
           <ImageIcon className="h-6 w-6 text-muted-foreground/30" />
         )}
@@ -133,14 +135,14 @@ export function RoleCard({ characterId, slot, label, required, busyRef, canGener
 
       {slot.candidates.length > 0 && (
         <div className="flex flex-col gap-1">
-          <p className="text-[11px] text-muted-foreground">후보 {slot.candidates.length}장 — 마음에 드는 것을 누르면 확정돼요</p>
+          <p className="text-[11px] text-muted-foreground">후보 {slot.candidates.length}장 — 눌러서 크게 보고 바꿀 수 있어요</p>
           <div className={`grid gap-1.5 ${slot.candidates.length >= 4 ? "grid-cols-4" : "grid-cols-3"}`}>
             {slot.candidates.map((r) => (
               <div key={r.id} className="group relative">
                 <button
-                  onClick={() => onAct(r, "confirm")}
+                  onClick={() => onOpen(slot.role, r)}
                   disabled={busyRef !== null}
-                  title="이 후보로 확정"
+                  title="크게 보기"
                   className="block h-24 w-full overflow-hidden rounded-md border border-border bg-secondary/30 hover:border-primary/60 disabled:opacity-60"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
