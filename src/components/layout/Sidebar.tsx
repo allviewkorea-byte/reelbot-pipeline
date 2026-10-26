@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { usePathname, useSearchParams } from "next/navigation"
 import { useEffect, useState, Suspense } from "react"
-import { Settings, PlayCircle, Menu, Plus, Activity } from "lucide-react"
+import { Settings, PlayCircle, Menu, Plus, Activity, UserRound } from "lucide-react"
 import { ThemeToggle } from "@/components/theme/ThemeToggle"
 import { cn } from "@/lib/utils"
 import {
@@ -217,6 +217,7 @@ function SidebarBody({ activeChannel }: { activeChannel: string }) {
   const inMusic = pathname === "/music" || pathname.startsWith("/music/")
   const musicActive = inMusic && activeChannel === DEFAULT_MUSIC_CHANNEL
   const workoutActive = inMusic && activeChannel === WORKOUT_CHANNEL_ID
+  const studioActive = pathname === "/studio" || pathname.startsWith("/studio/")
   const systemActive = pathname === "/system" || pathname.startsWith("/system/")
   const settingsActive =
     pathname === "/settings" || pathname.startsWith("/settings/")
@@ -324,6 +325,25 @@ function SidebarBody({ activeChannel }: { activeChannel: string }) {
         {/* 하단: 시스템 상태 + 설정 + 헬스 인디케이터 */}
         <div className="px-3 pb-4">
           <Separator className="mb-4" />
+          {/* 캐릭터 스튜디오(채널 공통) — 캐릭터 기준 이미지 등록·확정 */}
+          <Link
+            href="/studio"
+            onClick={closeMobile}
+            className={cn(
+              "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150",
+              studioActive
+                ? "bg-primary/20 text-foreground border border-primary/30"
+                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+            )}
+          >
+            <UserRound
+              className={cn(
+                "h-4 w-4 shrink-0",
+                studioActive ? "text-primary" : "text-muted-foreground"
+              )}
+            />
+            <span>캐릭터 스튜디오</span>
+          </Link>
           <Link
             href="/system"
             onClick={closeMobile}
