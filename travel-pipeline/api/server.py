@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 
 from api.routes import (
     health,
+    insta,
     music,
     music_dashboard,
     music_youtube,
@@ -89,6 +90,7 @@ app.include_router(music_youtube.router, prefix="/api/music/youtube", tags=["mus
 app.include_router(music_dashboard.router, prefix="/music", tags=["music"])
 app.include_router(system.router, tags=["system"])
 app.include_router(studio.router, prefix="/studio", tags=["studio"])
+app.include_router(insta.router, prefix="/insta", tags=["insta"])
 
 
 if __name__ == "__main__":
