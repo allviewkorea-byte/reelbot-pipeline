@@ -48,7 +48,7 @@ async function jsonOrThrow(res: Response) {
 }
 
 /** 큰 파일은 긴 변 maxLong 으로 줄이고 JPEG 로 다시 압축(서버가 PNG 로 통일). */
-async function prepareFile(file: File, maxLong: number): Promise<File> {
+export async function prepareFile(file: File, maxLong: number): Promise<File> {
   if (!/\.(png|jpe?g|webp)$/i.test(file.name)) throw new Error("png·jpg·webp 이미지만 올릴 수 있어요.")
   if (file.size <= MAX_SEND) return file
   const bmp = await createImageBitmap(file)
