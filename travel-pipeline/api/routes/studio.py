@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
+from services import character_measurements as cm
 from services import character_studio as cs
 from services import character_studio_gen as gen
 from services import character_studio_import as imp
@@ -167,3 +168,20 @@ def shorts_cast(channel: str = "workout_music"):
 def import_shorts(req: ImportShortsReq):
     """쇼츠 캐스트 1명을 스튜디오 캐릭터로 복사(원본 cast/… 무변경)."""
     return _call(imp.import_shorts, req.channel, req.role)
+
+
+# ── 치수(A2 0-1) ─────────────────────────────────────────────────────────
+class MeasurementsReq(BaseModel):
+    values: dict
+
+
+@router.get("/characters/{character_id}/measurements")
+def get_measurements(character_id: str):
+    """실측 치수(저장 전이면 초안) + 입력 칸 정의."""
+    return _call(cm.get, character_id)
+
+
+@router.post("/characters/{character_id}/measurements")
+def save_measurements(character_id: str, req: MeasurementsReq):
+    """치수 저장(bible.measurements). 착장 핏 계산의 입력."""
+    return _call(cm.save, character_id, req.values)

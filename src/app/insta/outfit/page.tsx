@@ -5,6 +5,7 @@ import Link from "next/link"
 import { toast } from "sonner"
 import { ChevronDown, ImageIcon, Loader2, RefreshCw, Shirt, Sparkles, Upload, X } from "lucide-react"
 import { prepareFile } from "@/components/shorts/FamilyCastPanel"
+import { RefsPanel } from "@/components/insta/RefsPanel"
 import { jsonOrThrow, usd, type View } from "@/components/studio/studio-lib"
 
 // 착장 1장 만들기(테스트 화면, A1 — A4 에서 /insta 로 합침). 대표는 상품 사진 넣기 + 버튼만:
@@ -82,6 +83,7 @@ export default function InstaOutfitPage() {
   const [selected, setSelected] = useState<string | null>(null)
   const [showOriginal, setShowOriginal] = useState(false)
   const [dragOver, setDragOver] = useState(false)
+  const [measured, setMeasured] = useState<boolean | null>(null)
 
   const loadOutfits = useCallback(
     () => fetch(`/api/insta/outfits?character_id=${CHARACTER}`, { cache: "no-store" }).then(jsonOrThrow)
@@ -92,6 +94,8 @@ export default function InstaOutfitPage() {
   useEffect(() => {
     fetch("/api/insta/outfit-options").then(jsonOrThrow).then(setOpts).catch(() => setOpts(null))
     fetch(`/api/studio/characters/${CHARACTER}`, { cache: "no-store" }).then(jsonOrThrow).then(setCharacter).catch(() => setCharacter(null))
+    fetch(`/api/studio/characters/${CHARACTER}/measurements`, { cache: "no-store" }).then(jsonOrThrow)
+      .then((d) => setMeasured(!!d.saved)).catch(() => setMeasured(null))
     loadOutfits()
   }, [loadOutfits])
 
@@ -212,6 +216,8 @@ export default function InstaOutfitPage() {
         <p className="text-xs text-muted-foreground">상품 사진을 넣고 버튼만 누르세요. 장소·포즈·헤어·아이웨어는 AI가 정해요.</p>
       </div>
 
+      <RefsPanel />
+
       {character && !ready && (
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-400">
           캐릭터의 얼굴·체형이 아직 확정되지 않았어요. <Link href={`/studio?character=${CHARACTER}`} className="underline">캐릭터 스튜디오</Link>에서 먼저 확정해 주세요.
@@ -307,11 +313,19 @@ export default function InstaOutfitPage() {
               <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> <span className="truncate">{job.step}{job.attempts ? ` · ${usd(job.cost_usd)}` : ""}</span>
             </span>
           )}
-          <button onClick={make} disabled={!canMake}
-            className="flex min-h-[36px] items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
-            <Sparkles className="h-3.5 w-3.5" /> 착장 만들기
-            {est && <span className="opacity-80">· {usd(est.min)}~{usd(est.max)} + AI 검수</span>}
-          </button>
+          {measured === false ? (
+            // 핏은 실측 치수로 계산 — 치수가 없으면 버튼 대신 안내(백엔드도 같은 이유로 거부)
+            <Link href={`/studio?character=${CHARACTER}`}
+              className="flex min-h-[36px] items-center rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 text-xs font-medium text-amber-400">
+              치수를 먼저 입력해 주세요
+            </Link>
+          ) : (
+            <button onClick={make} disabled={!canMake}
+              className="flex min-h-[36px] items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+              <Sparkles className="h-3.5 w-3.5" /> 착장 만들기
+              {est && <span className="opacity-80">· {usd(est.min)}~{usd(est.max)} + AI 검수</span>}
+            </button>
+          )}
         </div>
       </div>
 

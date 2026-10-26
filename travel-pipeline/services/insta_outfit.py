@@ -35,6 +35,7 @@ from adapters.base import ImageGenerationRequest
 from adapters.factory import get_muse_adapter
 from adapters.image.muse_adapter import USD_PER_IMAGE
 from adapters.video.wavespeed_ref_video_adapter import RefBlocked
+from services import character_measurements as cm
 from services import character_studio as cs
 from services import character_studio_gen as gen
 from services import insta_outfit_plan as P
@@ -301,6 +302,8 @@ def start(character_id: str, products: list[dict], options: dict | None = None, 
     refs = cs.confirmed_refs(char["id"])
     if not (refs.get(gen.FACE_ROLE) and refs.get(gen.BODY_ROLE)):
         raise OutfitError("캐릭터가 '준비 완료'가 아니에요 — 스튜디오에서 얼굴·체형을 확정해 주세요.")
+    if not cm.saved(char):  # 핏은 실측 치수로 계산(A2) — 치수 없이는 만들지 않는다
+        raise OutfitError("치수를 먼저 입력해 주세요 — 스튜디오 캐릭터 화면의 '치수' 카드에서 저장해 주세요.")
     prods = _clean_products(products)
     opts = _clean_options(options)
     if not get_muse_adapter().is_available():

@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from services import character_studio as cs
 from services import insta_outfit as io
 from services import insta_outfit_plan as P
+from services import insta_refs as refs
 
 router = APIRouter()
 
@@ -81,3 +82,38 @@ def outfit(outfit_id: str):
 @router.get("/outfit-jobs/{job_id}")
 def outfit_job(job_id: str):
     return io.public_job(_call(io.get_job, job_id))
+
+
+# ── 레퍼런스(A2-1) ───────────────────────────────────────────────────────
+def _run_refs(force: bool) -> None:
+    try:
+        refs.run(force=force)
+    except Exception:  # noqa: BLE001 - 결과는 refs.status()["last"] 에 남는다
+        pass
+
+
+@router.post("/refs/collect")
+def collect_refs(bg: BackgroundTasks, force: bool = False):
+    """유튜브 레퍼런스 수집(오늘 이미 했으면 건너뜀, force=true 면 다시) → 새 레퍼런스 분석. 백그라운드."""
+    if not refs.try_begin():
+        return {"started": False, "status": refs.status()}
+    bg.add_task(_run_refs, force)
+    return {"started": True, "status": refs.status()}
+
+
+@router.get("/refs")
+def list_refs(limit: int = 20):
+    try:
+        items = refs.list_refs(limit)
+    except refs.RefsError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return {"refs": items, "status": refs.status()}
+
+
+@router.get("/usage")
+def api_usage():
+    """외부 API 오늘 사용량(유튜브 유닛 상한 포함)."""
+    try:
+        return {"youtube": refs.usage("youtube"), "has_youtube_key": bool(refs.yt_key())}
+    except refs.RefsError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
