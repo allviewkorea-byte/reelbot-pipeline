@@ -180,6 +180,57 @@ def test_suggest_parse():
     assert p('{"kind":"hair","role":"ponytail"}')["role"] == "hair_05_ponytail"
     assert p('{"kind":"hair","role":"hair_08_beanie"}')["role"] == "hair_08_beanie"
     assert p('{"kind":"weird","role":"01_face"}')["kind"] == "not_reference"
+    # 착장·라이프스타일 컷이 pose 로 와도 목록에 없는 역할이면 기준 이미지 아님(기본 제외)
+    assert p('{"kind":"pose","role":"pose_xxx","reason":"착장"}') == \
+        {"kind": "not_reference", "role": "", "confidence": 0.0, "reason": "착장"}
+    assert p('{"kind":"pose","role":""}')["kind"] == "not_reference"
+    assert p('{"kind":"pose","role":"pose_walk"}')["role"] == "pose_walk"
+    sysmsg = gen._suggest_system(pr["hair"], pr["pose"])
+    assert "pose_walk" in sysmsg and "hair_02_wave" in sysmsg and "outfit" in sysmsg and "ignore any file name" in sysmsg
+
+
+def test_suggest_role_calls_vision(g, monkeypatch, tmp_path):
+    """route → 서비스 → Claude 비전 호출 → 파싱까지(가짜 클라이언트). 실패는 502 + 사유."""
+    import subprocess
+    from types import SimpleNamespace
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from api.routes import studio as routes
+    from services import music_lyrics
+
+    sent = {}
+
+    class _Msgs:
+        def create(self, **kw):
+            sent.update(kw)
+            if sent.get("fail"):
+                raise RuntimeError("boom")
+            return SimpleNamespace(content=[SimpleNamespace(text='{"kind":"hair","role":"hair_02_wave","confidence":0.8,"reason":"웨이브"}')],
+                                   usage=None)
+
+    class _Client:
+        messages = _Msgs()
+
+        def with_options(self, **kw):
+            return self
+
+    monkeypatch.setattr(music_lyrics, "_client", lambda: _Client())
+    img = tmp_path / "hair_02_straight.png"
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=1024x1536",
+                    "-frames:v", "1", str(img)], check=True)
+    app = FastAPI()
+    app.include_router(routes.router, prefix="/studio")
+    c = TestClient(app)
+    r = c.post("/studio/characters/chaei/suggest-role", files={"file": (img.name, img.read_bytes(), "image/png")})
+    assert r.status_code == 200 and r.json()["role"] == "hair_02_wave" and r.json()["kind"] == "hair"
+    assert sent["messages"][0]["content"][0]["type"] == "image" and "hair_11_headband" in sent["system"]
+    sent["fail"] = True
+    from services import music_llm_fallback as fb
+    monkeypatch.setattr(fb, "enabled", lambda: False)
+    r = c.post("/studio/characters/chaei/suggest-role", files={"file": (img.name, img.read_bytes(), "image/png")})
+    assert r.status_code == 502 and "AI 역할 추천 실패" in r.json()["detail"]
 
 
 def test_api_generate_and_job(g):

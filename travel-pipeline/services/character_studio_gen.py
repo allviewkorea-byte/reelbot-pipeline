@@ -417,23 +417,27 @@ def create_character(name: str, description: str, channel_id: str | None = None)
 
 
 # ── AI 역할 추천(가져오기) ───────────────────────────────────────────────
-def _suggest_system(hair: list[dict]) -> str:
-    lines = "\n".join(f'  - "{h["role"]}": {h["line"]}' for h in hair)
+def _suggest_system(hair: list[dict], pose: list[dict]) -> str:
+    hair_lines = "\n".join(f'    - "{h["role"]}": {h["line"]}' for h in hair)
+    pose_lines = "\n".join(f'    - "{p["role"]}": {p["line"]}' for p in pose)
     return (
         "You sort reference images for an AI character studio. Look at ONE image and classify it.\n"
-        "Kinds:\n"
+        "Reference images are plain studio shots made to define a character. Kinds:\n"
         '  - "face": a single person, head/upper-body portrait, face clearly visible, plain background.\n'
-        '  - "body": a body reference sheet — the same person shown front view AND side view, in workout/athletic '
+        '  - "body": a body reference sheet — the same person shown front view AND side view, in plain workout '
         "clothes (tank top + leggings), plain background.\n"
-        '  - "hair": upper body + head of one person, front view, plain background, where the hairstyle or headwear '
-        "is the point. Pick the closest hairstyle role from this list:\n"
-        f"{lines}\n"
-        '  - "pose": a full-body or partial lifestyle photo of the person with the face hidden (mirror selfie, '
-        "shoulders-down framing).\n"
-        '  - "not_reference": anything else — outfit/product shots, screenshots, text, multiple different people, '
-        "scenery.\n"
-        'Return ONE JSON object only: {"kind": "...", "role": "01_face" | "02_body" | "<hair role from list>" | '
-        '"pose_xxx" | "", "confidence": 0.0-1.0, "reason": "짧은 한국어 이유"}.'
+        '  - "hair": upper body + head of one person, front view, plain studio background, plain t-shirt, where the '
+        "hairstyle or headwear is the point. Pick the closest role from this list by what you SEE (ignore any "
+        "file name):\n"
+        f"{hair_lines}\n"
+        '  - "pose": only if it clearly matches one of these pose samples:\n'
+        f"{pose_lines}\n"
+        '  - "not_reference": everything else. IMPORTANT: outfit / fashion / lookbook / street / mirror-selfie photos '
+        "that show styled clothes are NOT references even when a person is visible — classify them as "
+        '"not_reference". Also product shots, screenshots, text, several different people, scenery.\n'
+        'Return ONE JSON object only: {"kind": "face" | "body" | "hair" | "pose" | "not_reference", '
+        '"role": "01_face" | "02_body" | "<a role from the lists above>" | "", "confidence": 0.0-1.0, '
+        '"reason": "짧은 한국어 이유"}.'
     )
 
 
@@ -461,9 +465,9 @@ def _parse_suggest(text: str, hair: list[dict], pose: list[dict]) -> dict:
         if role not in hair_roles:  # 키만 맞춘 경우("straight", "hair_straight") 보정
             tail = role.split("_")[-1]
             role = next((r for r in hair_roles if r.endswith(f"_{tail}")), "")
-    elif kind == "pose":
-        role = role if role in pose_roles else ""
-    else:
+    elif kind == "pose" and role in pose_roles:
+        pass
+    else:  # 포즈인데 목록에 없는 역할(대개 착장·라이프스타일 컷)·알 수 없는 kind → 기준 이미지 아님
         kind, role = "not_reference", ""
     try:
         conf = max(0.0, min(1.0, float(data.get("confidence") or 0)))
@@ -485,7 +489,7 @@ def suggest_role(character_id: str, data: bytes, filename: str) -> dict:
         raise cs.StudioError("png·jpg·webp 이미지만 볼 수 있어요.")
     if not data or len(data) > cs.MAX_BYTES:
         raise cs.StudioError("빈 파일이거나 너무 커요.")
-    system = _suggest_system(pr["hair"])
+    system = _suggest_system(pr["hair"], pr["pose"])
     ask = "이 이미지를 분류하고 JSON 만 출력해."
     tmp = Path(tempfile.mkdtemp(prefix="studio_sug_"))
     try:
@@ -511,13 +515,17 @@ def suggest_role(character_id: str, data: bytes, filename: str) -> dict:
             music_ops_log.add_usage_from(msg, model)
         except Exception as e:  # noqa: BLE001 - Claude API 오류면 OpenAI 비전 1회 대체
             if not (fb.enabled() and fb.is_anthropic_api_error(e)):
+                logger.warning("[studio] 역할 추천 호출 실패 %s: %s", filename, str(e)[:300])
                 raise cs.StudioStoreError(f"AI 역할 추천 실패: {str(e)[:160]}") from e
             text, model = fb.vision(system, b64, ask, max_tokens=300, task="studio_suggest", cause=e)
         try:
             out = _parse_suggest(text, pr["hair"], pr["pose"])
         except Exception as e:  # noqa: BLE001
+            logger.warning("[studio] 역할 추천 응답 파싱 실패 %s: %s", filename, (text or "")[:200])
             raise cs.StudioStoreError("AI 역할 추천 응답을 읽지 못했어요.") from e
         out["model"] = model
+        logger.info("[studio] 역할 추천 %s → %s/%s %.2f (%s)", filename, out["kind"], out["role"] or "-",
+                    out["confidence"], model)
         return out
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
