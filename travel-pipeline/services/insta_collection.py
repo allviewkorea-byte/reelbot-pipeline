@@ -327,26 +327,72 @@ def _recent_concepts(d: picks.Deps, limit: int = 6) -> list[str]:
         return []
 
 
-def start(character_id: str = "chaei", n: int = N_LOOKS, d: picks.Deps | None = None) -> dict:
-    d = d or picks.Deps()
+# 장면 후보(Look 1 포즈 → 어울리는 장소) — 미리보기에서 보여 주고 그대로 만든다
+LOOK1_SCENES: dict[str, list[str]] = {
+    "mirror_lean": ["elevator_mirror", "entry_mirror", "fitting_room"],
+    "wall_knee_camera": ["entry_mirror", "fitting_room", "elevator_mirror"],
+}
+
+
+def _guard(character_id: str, d: picks.Deps) -> None:
     coordi._ready(character_id)
     if not d.coupang.is_available():
         raise CollectionError("쿠팡 연결이 필요해요(키 없음).")
     if not io.get_muse_adapter().is_available():
         raise CollectionError("이미지 생성 키(WAVESPEED)가 없어요.")
+
+
+def _register(kind: str, cid: str, d: picks.Deps, args: dict, n: int) -> dict:
+    job_id = f"clj_{secrets.token_hex(5)}"
+    with _LOCK:
+        _JOBS[job_id] = {"id": job_id, "kind": kind, "collection_id": cid, "state": "queued", "step": "준비", "error": None,
+                         "done_looks": 0, "n": n, "_deps": d, "_args": args}
+    return public_job(_JOBS[job_id])
+
+
+def _busy(character_id: str) -> dict | None:
     with _LOCK:
         for j in _JOBS.values():
             if j["state"] in ("queued", "running") and j["_args"]["character_id"] == character_id:
                 return public_job(j)
+    return None
+
+
+def start_plan(character_id: str = "chaei", n: int = N_LOOKS, d: picks.Deps | None = None) -> dict:
+    """1단계(미리보기): 테마·장면·상품만 정한다(이미지 생성 없음). 결과는 ig_collections status=planned."""
+    d = d or picks.Deps()
+    _guard(character_id, d)
+    if (j := _busy(character_id)):
+        return j
     n = max(3, min(7, int(n or N_LOOKS)))
     cid = f"cl-{datetime.now(timezone.utc):%Y%m%d}-{secrets.token_hex(3)}"
-    d.rest("ig_collections", "POST", json_body=[{"id": cid, "character_id": character_id, "status": "making"}],
+    d.rest("ig_collections", "POST", json_body=[{"id": cid, "character_id": character_id, "status": "planned"}],
            prefer="return=minimal")
-    job_id = f"clj_{secrets.token_hex(5)}"
+    return _register("plan", cid, d, {"character_id": character_id, "n": n}, n)
+
+
+def start_make(collection_id: str, d: picks.Deps | None = None) -> dict:
+    """2단계: 미리보기에서 확인한 기획 그대로 이미지·영상을 만든다."""
+    d = d or picks.Deps()
+    rows = d.rest("ig_collections", "GET", params={"select": "*", "id": f"eq.{collection_id}"})
+    if not rows:
+        raise LookupError("컬렉션을 찾을 수 없어요.")
+    row = rows[0]
+    if row.get("status") != "planned" or not (row.get("theme") or {}).get("plan"):
+        raise CollectionError("미리보기(기획)가 끝난 컬렉션만 만들 수 있어요.")
+    _guard(row["character_id"], d)
+    if (j := _busy(row["character_id"])):
+        return j
+    _patch(d, collection_id, {"status": "making"})
+    return _register("make", collection_id, d, {"character_id": row["character_id"]}, len(row.get("looks") or []))
+
+
+def start(character_id: str = "chaei", n: int = N_LOOKS, d: picks.Deps | None = None) -> dict:
+    """호환: 기획 + 만들기를 한 번에(run 이 두 단계를 이어서 실행)."""
+    j = start_plan(character_id, n, d)
     with _LOCK:
-        _JOBS[job_id] = {"id": job_id, "collection_id": cid, "state": "queued", "step": "준비", "error": None,
-                         "done_looks": 0, "n": n, "_deps": d, "_args": {"character_id": character_id, "n": n}}
-    return public_job(_JOBS[job_id])
+        _JOBS[j["id"]]["kind"] = "plan+make"
+    return get_job(j["id"])
 
 
 def _patch(d: picks.Deps, cid: str, fields: dict) -> None:
@@ -354,39 +400,64 @@ def _patch(d: picks.Deps, cid: str, fields: dict) -> None:
            json_body={**fields, "updated_at": datetime.now(timezone.utc).isoformat()})
 
 
-def run(job_id: str, *, llm=None, rng: random.Random | None = None) -> None:
-    with _LOCK:
-        j = _JOBS[job_id]
-        j["state"] = "running"
-        d, cid, args = j["_deps"], j["collection_id"], dict(j["_args"])
-    character_id, n = args["character_id"], args["n"]
-    rng = rng or random.Random()
-    tmp = Path(tempfile.mkdtemp(prefix="insta_coll_"))
+_KEEP = ("id", "channel", "product_id", "name", "mall", "price", "image_url", "image_key", "link", "affiliate_link", "kind")
+
+
+def _keep(c: dict) -> dict:
+    return {k: c.get(k) for k in _KEEP}
+
+
+def _plan(job_id: str, d: picks.Deps, cid: str, args: dict, llm, rng: random.Random) -> dict:
+    """테마 → 장면 → 상품 픽 → ig_collections(planned). 쿠팡 이미지 사본은 지운다(만들 때 다시 받음)."""
     usage: dict = {}
-    cost = 0.0
-    all_products: list[dict] = []
+    products: list[dict] = []
     try:
-        season = _season()
-        life = coordi._life_today()
+        season, life = _season(), coordi._life_today()
         _set(job_id, step="테마 정하는 중")
         theme = plan_theme(season, life, _recent_concepts(d), llm=llm, rng=rng)
+        pose = rng.choice(LOOK1_POSES)
+        location = rng.choice(LOOK1_SCENES[pose])
+        theme["plan"] = {"pose": pose, "pose_ko": P.POSES[pose]["ko"], "location": location,
+                         "location_ko": P.LOCATIONS[location]["ko"], "face": "chin_crop", "season": season}
         _set(job_id, step=f"「{theme['concept']}」 상품 고르는 중", theme={k: theme[k] for k in ("concept", "title_ko", "zip")})
-        _patch(d, cid, {"theme": theme})
-        variants = _saved(pick_variants(theme, d, usage, n), d)
+        variants = _saved(pick_variants(theme, d, usage, args["n"]), d)
         base = pick_base(theme, d, usage)
         base_saved = _saved([b["pick"] for b in base], d) if base else []
-        all_products = variants + base_saved
+        for c in variants:
+            c["kind"] = theme["kind"]
+        for b, c in zip(base, base_saved):
+            c["kind"] = b["kind"]
+        products = variants + base_saved
         if len(variants) < 3:
-            raise CollectionError(f"「{theme['concept']}」 상품을 3개 이상 못 찾았어요 — 다시 눌러 주세요.")
-        for c in all_products:
-            c["kind"] = c.get("kind") or theme["kind"]
-        items = [{"kind": theme["kind"], "pick": variants[0], "source": "coupang"}] + \
-                [{"kind": b["kind"], "pick": s, "source": "coupang"} for b, s in zip(base, base_saved)]
+            raise CollectionError(f"「{theme['concept']}」 상품을 3개 이상 못 찾았어요 — 다시 기획해 주세요.")
+        looks = [{"n": i + 1, "product": _keep(v)} for i, v in enumerate(variants)]
+        _patch(d, cid, {"theme": theme, "looks": looks, "base_items": [_keep(c) for c in base_saved],
+                        "status": "planned", "usage": usage,
+                        "cost_usd": round(picks.vision_cost_usd(d.meter), 4)})
+        return {"theme": theme, "looks": looks, "base": base_saved}
+    finally:
+        picks.delete_images(products, d)
+        for c in products:
+            c["image_key"] = None
 
-        # Look 1 — A1 파이프라인(턱 아래 크롭·착장 중심)
-        _set(job_id, step="Look 1 만드는 중")
+
+def _make(job_id: str, d: picks.Deps, cid: str, character_id: str, rng: random.Random) -> None:
+    """기획(ig_collections) 그대로: Look 1 → 옷 교체 Look 2~N → 영상."""
+    row = d.rest("ig_collections", "GET", params={"select": "*", "id": f"eq.{cid}"})[0]
+    theme, plan = row["theme"], row["theme"]["plan"]
+    variants = [dict(lk["product"]) for lk in row.get("looks") or []]
+    base = [dict(b) for b in row.get("base_items") or []]
+    for c in variants + base:
+        c["image_key"] = None   # 기획 때 지웠으므로 원본 URL 에서 다시 받는다
+    tmp = Path(tempfile.mkdtemp(prefix="insta_coll_"))
+    cost = float(row.get("cost_usd") or 0)
+    meter0 = picks.vision_cost_usd(d.meter)
+    try:
+        items = [{"kind": theme["kind"], "pick": variants[0], "source": "coupang"}] + \
+                [{"kind": c.get("kind"), "pick": c, "source": "coupang"} for c in base]
+        _set(job_id, step="Look 1 만드는 중", n=len(variants))
         coordi.ensure_images(items, d)
-        opts = {"pose": rng.choice(LOOK1_POSES), "face": "chin_crop"}
+        opts = {"pose": plan["pose"], "location": plan["location"], "face": plan.get("face", "chin_crop")}
         if theme.get("styling_en"):
             opts["styling_en"] = theme["styling_en"]
         oj = io.start(character_id, coordi._cap_products(coordi._outfit_products(items)), opts,
@@ -396,16 +467,13 @@ def run(job_id: str, *, llm=None, rng: random.Random | None = None) -> None:
         cost += oj.get("cost_usd") or 0.0
         if oj["state"] != "done":
             raise CollectionError(f"Look 1 생성 실패: {oj.get('error') or ''}")
-        row = io.get_outfit(oj["outfit_id"])
-        base_key = row["image_key"]
+        out1 = io.get_outfit(oj["outfit_id"])
+        base_key = out1["image_key"]
         base_url = io.public_url(base_key)
         base_path = io._download(base_url, tmp / "look1.png")
-        looks = [{"n": 1, "outfit_id": oj["outfit_id"], "image_key": base_key, "processed_key": row.get("processed_key"),
-                  "product": {k: variants[0].get(k) for k in ("id", "name", "mall", "price", "link", "affiliate_link")},
-                  "review": row.get("review")}]
+        looks = [{"n": 1, "outfit_id": oj["outfit_id"], "image_key": base_key, "processed_key": out1.get("processed_key"),
+                  "product": _keep(variants[0]), "review": out1.get("review")}]
         _set(job_id, done_looks=1)
-
-        # Look 2~N — 옷만 교체
         imgs = [str(io.postprocess(base_path, tmp / "p1.jpg").name)]
         for i, v in enumerate(variants[1:], start=2):
             _set(job_id, step=f"Look {i} 만드는 중")
@@ -420,38 +488,53 @@ def run(job_id: str, *, llm=None, rng: random.Random | None = None) -> None:
                                     public_base_url=r2_storage._character_public_base(), content_type="image/png")
             imgs.append(str(io.postprocess(out, tmp / f"p{i}.jpg").name))
             looks.append({"n": i, "image_key": key, "review": got["review"], "attempts": got["attempts"],
-                          "product": {k: v.get(k) for k in ("id", "name", "mall", "price", "link", "affiliate_link")}})
+                          "product": _keep(v)})
             _set(job_id, done_looks=i)
-            _patch(d, cid, {"looks": looks})
-
-        # 영상
+            _patch(d, cid, {"looks": looks + [{"n": k + 1, "product": _keep(x)} for k, x in enumerate(variants) if k >= i]})
         _set(job_id, step="릴스 영상 만드는 중")
         video, cover = render_reel(tmp, imgs, theme)
         vkey, ckey = f"insta/collections/{cid}/reel.mp4", f"insta/collections/{cid}/cover.jpg"
         bucket, pub = r2_storage._character_bucket(), r2_storage._character_public_base()
         r2_storage.upload_image(str(tmp / video), vkey, bucket=bucket, public_base_url=pub, content_type="video/mp4")
         r2_storage.upload_image(str(tmp / cover), ckey, bucket=bucket, public_base_url=pub, content_type="image/jpeg")
-        total = round(cost + picks.vision_cost_usd(d.meter), 4)
-        _patch(d, cid, {"looks": looks, "base_items": [{k: b.get(k) for k in ("id", "name", "mall", "link")} for b in base_saved],
-                        "video_key": vkey, "cover_key": ckey, "status": "ok", "cost_usd": total, "usage": usage})
-        _set(job_id, state="done", step="완료", cost_usd=total)
+        total = round(cost + picks.vision_cost_usd(d.meter) - meter0, 4)
+        _patch(d, cid, {"looks": looks, "video_key": vkey, "cover_key": ckey, "status": "ok", "cost_usd": total})
+        _set(job_id, cost_usd=total)
+    finally:
+        picks.delete_images(variants + base, d)
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def run(job_id: str, *, llm=None, rng: random.Random | None = None) -> None:
+    """BackgroundTasks 진입점: kind=plan(미리보기) / make(만들기) / plan+make(한 번에)."""
+    with _LOCK:
+        j = _JOBS[job_id]
+        j["state"] = "running"
+        d, cid, args, kind = j["_deps"], j["collection_id"], dict(j["_args"]), j.get("kind", "plan+make")
+    rng = rng or random.Random()
+    try:
+        if kind in ("plan", "plan+make"):
+            _plan(job_id, d, cid, args, llm, rng)
+        if kind in ("make", "plan+make"):
+            if kind == "plan+make":
+                _patch(d, cid, {"status": "making"})
+            _make(job_id, d, cid, args["character_id"], rng)
+        _set(job_id, state="done", step="완료")
     except Exception as e:  # noqa: BLE001
         msg = str(e)[:300]
         logger.warning("[insta-collection] %s 실패: %s", cid, msg)
         _set(job_id, state="failed", step="실패", error=msg)
         try:
-            _patch(d, cid, {"status": "failed", "error": msg, "cost_usd": round(cost, 4)})
+            _patch(d, cid, {"status": "failed", "error": msg})
         except Exception:  # noqa: BLE001
             pass
-    finally:
-        picks.delete_images(all_products, d)   # 쿠팡 이미지 사본: 쓰고 지운다
-        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def view(row: dict) -> dict:
     url = io.public_url
     return {**row, "video_url": url(row.get("video_key")), "cover_url": url(row.get("cover_key")),
-            "looks": [{**lk, "image_url": url(lk.get("processed_key") or lk.get("image_key"))} for lk in (row.get("looks") or [])]}
+            "looks": [{**lk, "image_url": url(lk.get("processed_key") or lk.get("image_key")),
+                       "product_image": (lk.get("product") or {}).get("image_url")} for lk in (row.get("looks") or [])]}
 
 
 def list_collections(limit: int = 10, d: picks.Deps | None = None) -> list[dict]:

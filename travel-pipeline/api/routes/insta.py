@@ -237,6 +237,24 @@ def start_collection(req: CollectionReq, bg: BackgroundTasks):
     return job
 
 
+@router.post("/collections/plan")
+def plan_collection(req: CollectionReq, bg: BackgroundTasks):
+    """컬렉션 릴스 1단계(미리보기): 테마·장면·상품만 정한다. 이미지 생성 없음."""
+    job = _call(coll.start_plan, req.character_id, req.n)
+    if job["state"] == "queued":
+        bg.add_task(coll.run, job["id"])
+    return job
+
+
+@router.post("/collections/{collection_id}/make")
+def make_collection(collection_id: str, bg: BackgroundTasks):
+    """컬렉션 릴스 2단계: 미리보기에서 확인한 기획 그대로 이미지·영상."""
+    job = _call(coll.start_make, collection_id)
+    if job["state"] == "queued":
+        bg.add_task(coll.run, job["id"])
+    return job
+
+
 @router.get("/collections/jobs/{job_id}")
 def collection_job(job_id: str):
     return _call(coll.get_job, job_id)

@@ -95,3 +95,43 @@ def test_collection_end_to_end(coordi, monkeypatch):  # noqa: F811
     assert not [k for k in coordi.s3.objs if k.startswith("insta/products/coupang/")]   # 쿠팡 사본 삭제
     shown = CL.list_collections(d=d)[0]
     assert shown["video_url"].endswith("reel.mp4") and shown["looks"][0]["image_url"]
+
+
+@needs_ffmpeg
+def test_plan_then_make(coordi, monkeypatch):  # noqa: F811
+    """미리보기(테마·장면·상품, 이미지 생성 없음) → 확인 후 만들기."""
+    if not all(Path(f).exists() for f in DEJAVU):
+        pytest.skip("DejaVu 폰트 없음")
+    monkeypatch.setattr(CL, "_SERIF", [DEJAVU[0]])
+    monkeypatch.setattr(CL, "_BOLD", [DEJAVU[1]])
+    t = coordi.t
+    t.t["ig_collections"] = []
+    theme = dict(CL.FALLBACK_THEMES["autumn"][0])
+    monkeypatch.setattr(CL, "plan_theme", lambda *a, **k: {**theme, "source": "fallback"})
+    furs = [_c(f"f{i}", f"여성 퍼 자켓 {i}", price=69000, ch="coupang") for i in range(5)]
+    shop = _Shop("coupang", {"여성 퍼 자켓": furs, "여성 블랙 미니스커트": [_c("sk", "여성 블랙 미니스커트", ch="coupang")],
+                             "여성 블랙 롱부츠": [_c("bt", "여성 블랙 롱부츠", price=59000, ch="coupang")]})
+    hexes = ["#F2EDE3", "#3B2A20", "#808080", "#111111", "#C8A27A"]
+    scores = {f"coupang_f{i}": (9 - i * 0.2, hexes[i]) for i in range(5)} | {"coupang_sk": (9, "#111111"), "coupang_bt": (9, "#111111")}
+    d = K.Deps(coupang=shop, vision=_vision(scores), download=_dl, rest=t)
+    j = CL.start_plan("chaei", n=3, d=d)
+    CL.run(j["id"], rng=random.Random(1))
+    assert CL.get_job(j["id"])["state"] == "done"
+    row = t.t["ig_collections"][0]
+    assert row["status"] == "planned" and len(row["looks"]) == 3 and row["theme"]["plan"]["pose"] in CL.LOOK1_POSES
+    assert row["theme"]["plan"]["location"] in CL.LOOK1_SCENES[row["theme"]["plan"]["pose"]]
+    assert all(lk["product"]["image_url"] for lk in row["looks"]) and len(row["base_items"]) == 2
+    assert not coordi.muse.calls                                                          # 미리보기는 이미지 생성 없음
+    assert not [k for k in coordi.s3.objs if k.startswith("insta/products/coupang/")]   # 사본 삭제
+    shown = CL.list_collections(d=d)[0]
+    assert shown["looks"][0]["product_image"]
+    with pytest.raises(CL.CollectionError):
+        t.t["ig_collections"].append({"id": "cl-20261027-aaaa", "character_id": "chaei", "status": "ok", "theme": {}})
+        CL.start_make("cl-20261027-aaaa", d=d)
+    m = CL.start_make(row["id"], d=d)
+    CL.run(m["id"], rng=random.Random(1))
+    assert CL.get_job(m["id"])["state"] == "done", CL.get_job(m["id"])
+    row = next(r for r in t.t["ig_collections"] if r["id"] == row["id"])
+    assert row["status"] == "ok" and row["video_key"] and len(row["looks"]) == 3
+    first = coordi.muse.calls[0].prompt
+    assert row["theme"]["plan"]["location"] and "mirror" in first.lower() or "wall" in first.lower()
