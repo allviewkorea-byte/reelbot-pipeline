@@ -130,7 +130,7 @@ def plan_theme(season: str, life: str, recent: list[str] | None = None, llm=None
     return {**r.choice(fresh), "source": "fallback"}
 
 
-# 표지 하단 박스 — 채널 슬로건(대표 2026-10-27, ".zip" 대신). theme["zip"]은 캡션 제목용으로 남김.
+# 표지 맨 위 가장 큰 글씨 — 채널 슬로건(대표 2026-10-27). 아래 박스는 테마별 "○○ 모음.zip".
 SLOGAN = "오늘 뭐 입지?"
 
 VARIANT_SCORE_TOP = 15   # 컬렉션은 5개를 색 고르게 뽑아야 해서 코디(8)보다 많이 심사
@@ -323,15 +323,15 @@ def render_reel(work: Path, look_images: list[str], theme: dict, out_name: str =
     serif = _stage(work, _font(_SERIF), "serif")
     bold = _stage(work, _font(_BOLD), "bold")
     shadow = "shadowcolor=black@0.45:shadowx=2:shadowy=2"
+    # 표지(대표 2026-10-27): 맨 위 가장 큰 글씨로 슬로건 → 영문 소제목 → 흰 박스 "○○ 모음.zip".
+    # 감성 카피(title_ko)는 표지에서 빼고 캡션 첫 줄용으로 남긴다.
     cover = [
-        f"drawtext=fontfile={bold}:textfile={_txt(work, 't_en.txt', theme['title_en'])}:fontsize=34:fontcolor=white:"
+        f"drawtext=fontfile={bold}:textfile={_txt(work, 't_slogan.txt', SLOGAN)}:fontsize=104:fontcolor=white:"
         f"x=90:y=h*0.64:{shadow}",
-        f"drawtext=fontfile={bold}:textfile={_txt(work, 't_k1.txt', theme['title_ko'][0])}:fontsize=76:fontcolor=white:"
-        f"x=90:y=h*0.67:{shadow}",
-        f"drawtext=fontfile={bold}:textfile={_txt(work, 't_k2.txt', theme['title_ko'][1])}:fontsize=76:fontcolor=white:"
-        f"x=90:y=h*0.67+96:{shadow}",
-        f"drawtext=fontfile={bold}:textfile={_txt(work, 't_zip.txt', SLOGAN)}:fontsize=34:fontcolor=black:"
-        f"box=1:boxcolor=white@0.95:boxborderw=12:x=90:y=h*0.67+214",
+        f"drawtext=fontfile={bold}:textfile={_txt(work, 't_en.txt', theme['title_en'])}:fontsize=34:fontcolor=white:"
+        f"x=94:y=h*0.64+136:{shadow}",
+        f"drawtext=fontfile={bold}:textfile={_txt(work, 't_zip.txt', theme['zip'])}:fontsize=40:fontcolor=black:"
+        f"box=1:boxcolor=white@0.95:boxborderw=14:x=94:y=h*0.64+198",
     ]
     _segment(work, look_images[0], COVER_SEC, cover, "seg0.mp4")
     segs = ["seg0.mp4"]

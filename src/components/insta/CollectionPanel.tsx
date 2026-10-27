@@ -99,7 +99,7 @@ export function CollectionPanel({ character, ready }: { character: string; ready
         <div className="flex min-w-0 flex-col gap-3 rounded-lg border border-border bg-background p-3">
           <div className="flex min-w-0 flex-col gap-0.5">
             <div className="text-sm font-semibold text-foreground">{planned.theme?.concept || planned.theme?.zip}</div>
-            {planned.theme?.title_ko && <p className="text-xs text-muted-foreground">표지: {planned.theme.title_ko.join(" / ")} · 오늘 뭐 입지?</p>}
+            {planned.theme?.title_ko && <p className="text-xs text-muted-foreground">표지: 오늘 뭐 입지? · {planned.theme.zip} — 캡션: {planned.theme.title_ko.join(" ")}</p>}
             {planned.theme?.plan && (
               <p className="text-xs text-muted-foreground">자세: {planned.theme.plan.pose_ko} · 장소: {planned.theme.plan.location_ko} · 얼굴은 턱 아래로</p>
             )}
