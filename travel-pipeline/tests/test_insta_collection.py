@@ -93,7 +93,7 @@ def test_collection_end_to_end(coordi, monkeypatch):  # noqa: F811
     assert [lk["n"] for lk in row["looks"]] == [1, 2, 3, 4]
     assert len({lk["product"]["id"] for lk in row["looks"]}) == 4                         # 룩마다 다른 상품
     calls = coordi.muse.calls
-    assert len(calls) >= 4 and all("reference image 1" in c.prompt for c in calls)        # 룩마다 새로 생성(얼굴·체형 참조)
+    assert len(calls) >= 4 and all("reference image 1" in c.prompt for c in calls), [c.prompt[:200] for c in calls if "reference image 1" not in c.prompt]
     scenes = [(lk["scene"]["pose"], lk["scene"]["location"]) for lk in row["looks"]]
     assert len({p for p, _ in scenes}) == 4 and len({loc for _, loc in scenes}) == 4       # 포즈·장소 모두 다름
     assert all(lk["items"] for lk in row["looks"])                                         # 함께 입는 옷도 룩마다

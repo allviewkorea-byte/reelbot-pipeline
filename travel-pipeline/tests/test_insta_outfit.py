@@ -140,7 +140,7 @@ def test_build_prompt_and_refs():
     assert refs == ["F", "B", "H", "t", "b", "s", "g"]
     assert prompt.startswith(P._SHOT) and "Her face is exactly the woman in reference image 1" in prompt
     assert "Lighting:" in prompt and "no cinematic color grading" in prompt and "wide-angle" not in prompt
-    assert "with the hairstyle from image 3" in prompt and "matches reference image 2 exactly" in prompt
+    assert "with the hairstyle from image 3" in prompt and "proportions match reference image 2" in prompt
     assert ("She is wearing exactly the top from image 4, the bottoms from image 5, the shoes from image 6, carrying "
             "the bag from image 7 — keep every garment detail identical") in prompt
     assert "phone held up covering her face" in prompt and prompt.endswith("no beauty filter.")
@@ -443,7 +443,7 @@ def test_body_line_and_identity_review_refs(tmp_path):
     """체형은 금지어 없이 참조 2 + 실측 숫자, 검수는 기준 얼굴·체형을 같이 본다(대표 2026-10-27)."""
     line = P.body_line({"height": 172, "chest": 90, "waist": 63, "hip": 92})
     from services import character_studio_gen as gen
-    assert "172 cm tall" in line and "90-63-92" in line and gen.strip_unsafe(line) == line
+    assert "172 cm tall" in line and "90" not in line and gen.strip_unsafe(line) == line   # 3사이즈 숫자는 필터에 걸려 뺌
     assert "(" not in P.body_line(None)
     assert "identity" in io._REVIEW_SYSTEM and "body reference" in io._REVIEW_SYSTEM
 
@@ -460,3 +460,13 @@ def test_night_locations_are_rare():
     forced = P.plan_scene(character_id="chaei", products=[{"kind": "top", "desc": ""}], hair_roles=[], history=[],
                           options={"location": "bar_front"}, rng=_r.Random(1), llm=lambda s, u: "{}")
     assert forced["location"] == "bar_front" or forced["notes"]
+
+
+def test_safe_build_drops_body_skin_mood():
+    """안전 필터 재시도용 — 체형·피부·분위기 문장 없이."""
+    plan = {"location": "street", "pose": "mirror_lean", "face": "phone", "mood": "caught mid-laugh", "season": "autumn"}
+    prods = [{"kind": "top", "url": "t"}]
+    full, _ = P.build(plan, face_url="F", body_url="B", hair_url=None, products=prods, measurements={"height": 172})
+    safe, refs = P.build(plan, face_url="F", body_url="B", hair_url=None, products=prods, safe=True)
+    assert "proportions match" in full and "Real skin" in full and "mid-laugh" in full
+    assert "proportions match" not in safe and "Real skin" not in safe and "mid-laugh" not in safe and refs[:2] == ["F", "B"]

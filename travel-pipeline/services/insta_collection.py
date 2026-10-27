@@ -477,7 +477,10 @@ def _scenes(character_id: str, looks_products: list[list[dict]], rng: random.Ran
         summary = [{"kind": p.get("kind"), "desc": p.get("name") or ""} for p in prods]
         hist = [{"plan": x} for x in reversed(plans)] + history
 
-        def fresh(pl: dict) -> bool:
+        def fresh(pl: dict) -> bool:   # 사람 없는 플랫레이·디테일 컷은 컬렉션 룩으로 안 씀
+            pose = P.POSES[pl["pose"]]
+            if pose.get("person") is False or pose.get("cut") == "디테일":
+                return False
             return all(pl["pose"] != x["pose"] and pl["location"] != x["location"] for x in plans)
 
         plan = None
@@ -490,7 +493,8 @@ def _scenes(character_id: str, looks_products: list[list[dict]], rng: random.Ran
             cand = P.candidates(weekday=datetime.now(P.KST).weekday(), products=summary, hair_roles=hair_roles,
                                 history=hist, now=datetime.now(P.KST))
             free = [(loc, pose) for loc, pose in cand["pairs"]
-                    if all(pose != x["pose"] and loc != x["location"] for x in plans)]
+                    if P.POSES[pose].get("person") is not False and P.POSES[pose].get("cut") != "디테일"
+                    and all(pose != x["pose"] and loc != x["location"] for x in plans)]
             if free:
                 loc, pose = rng.choice(free)
                 plan = P.plan_scene(character_id=character_id, products=summary, hair_roles=hair_roles, history=hist,
@@ -610,11 +614,17 @@ def _make(job_id: str, d: picks.Deps, cid: str, character_id: str, rng: random.R
             opts = {k: v for k, v in {"pose": sc.get("pose"), "location": sc.get("location"), "face": sc.get("face"),
                                       "hair": sc.get("hair_role"), "styling_en": theme.get("styling_en")}.items() if v}
             try:   # 한 룩이 실패해도 나머지로 계속(대표 2026-10-27: 실패하면 스스로) — 3룩 이상이면 완성
-                oj = io.start(character_id, coordi._cap_products(coordi._outfit_products(items)), opts,
-                              remake_of=f"{cid}:{i}:{secrets.token_hex(2)}")
-                io.run(oj["id"], rng=rng)
-                oj = io.get_job(oj["id"])
-                cost += oj.get("cost_usd") or 0.0
+                for scene_try in range(2):   # 1회 실패하면 장면(포즈·장소)을 AI에 맡겨 한 번 더
+                    o = opts if scene_try == 0 else {k: v for k, v in opts.items() if k in ("hair", "styling_en")}
+                    oj = io.start(character_id, coordi._cap_products(coordi._outfit_products(items)), o,
+                                  remake_of=f"{cid}:{i}:{scene_try}:{secrets.token_hex(2)}")
+                    io.run(oj["id"], rng=rng)
+                    oj = io.get_job(oj["id"])
+                    cost += oj.get("cost_usd") or 0.0
+                    if oj["state"] == "done":
+                        break
+                    logger.warning("[insta-collection] %s %02d 시도 %d 실패: %s", cid, i, scene_try + 1,
+                                   str(oj.get("error"))[:160])
                 if oj["state"] != "done":
                     raise CollectionError(oj.get("error") or "생성 실패")
                 out = io.get_outfit(oj["outfit_id"])

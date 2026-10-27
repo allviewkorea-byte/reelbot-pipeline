@@ -500,8 +500,8 @@ def plan_scene(*, character_id: str, products: list[dict], hair_roles: list[str]
 # 적고, 과장되던 지시(노출 불균형·잡동사니·광각 왜곡)는 뺀다. AI 티는 시네마틱 보정·HDR·과샤픈에서 난다.
 _SHOT = ("A realistic vertical smartphone snapshot — handheld, subject slightly off-center, natural candid framing, "
          "true-to-life proportions.")
-_SKIN = ("Real skin with natural texture and fine pores on her face, neck, shoulders and arms — no airbrushing, no "
-         "plastic or waxy skin. Fabrics show real texture and subtle natural creases.")
+_SKIN = ("Real skin with natural texture and fine pores — no airbrushing, no plastic or waxy skin. Fabrics show real "
+         "texture and subtle natural creases.")
 _TAIL = ("Shot on an iPhone main camera: true-to-life colors, clean natural exposure, faint mobile sensor noise, the "
          "background in natural soft focus — no cinematic color grading, no HDR glow, no oversharpening, no beauty filter.")
 
@@ -548,12 +548,11 @@ _YOUTH = ("Her styling has a hip early-20s Seoul street vibe (Seongsu, Hongdae) 
 
 
 def body_line(m: dict | None) -> str:
-    """체형 — 금지어 없이 참조 2 비율 + 실측 숫자(필터에 안 걸림). 대표 2026-10-27: 옷맵시·체형이 기준과 다름."""
-    nums = ""
-    if m and all(m.get(k) for k in ("height", "chest", "waist", "hip")):
-        nums = (f" ({m['height']:g} cm tall, body measurements {m['chest']:g}-{m['waist']:g}-{m['hip']:g} cm)")
-    return (f"Her figure matches reference image 2 exactly — the same proportions and silhouette{nums}; fitted pieces "
-            "follow her shape naturally and never look shapeless or flattened.")
+    """체형 — 참조 2(체형 사진) 비율을 따르게. 2026-10-28: 가슴-허리-엉덩이 숫자는 Muse 안전 필터에 걸려
+    (Content flagged as potentially sensitive) 키만 넣는다 — 체형은 참조 사진이 전달한다."""
+    nums = f" ({m['height']:g} cm tall)" if m and m.get("height") else ""
+    return (f"Her body proportions match reference image 2{nums}; the clothes fit her naturally the way they would "
+            "on her real figure.")
 _MAKEUP = "Natural everyday makeup: light dewy base and a soft rosy lip tint — nothing heavy."
 _EFFORTLESS = ("Effortless, not overdressed (꾸안꾸): the clothes sit naturally on her with her own silhouette, minimal "
                "accessories — at most a thin necklace or small earrings, no pearls or brooches.")
@@ -590,7 +589,8 @@ def _face_line(plan: dict) -> str:
 
 
 def build(plan: dict, *, face_url: str, body_url: str, hair_url: str | None, products: list[dict],
-          fix_hint: str | None = None, measurements: dict | None = None) -> tuple[str, list[str]]:
+          fix_hint: str | None = None, measurements: dict | None = None, safe: bool = False) -> tuple[str, list[str]]:
+    """safe=True: 안전 필터에 걸린 뒤 다시 보낼 때 — 체형·피부·분위기 문장을 빼고 단순하게."""
     """(prompt, refs). 참조 순서 고정 ① face ② body ③ hair ④~ 상품. 방(양말) 컷은 신발 상품을 뺀다."""
     loc = LOCATIONS[plan["location"]]
     pose = POSES[plan["pose"]]
@@ -615,7 +615,7 @@ def build(plan: dict, *, face_url: str, body_url: str, hair_url: str | None, pro
             _SHOT,
             "Her face is exactly the woman in reference image 1 — same eyes, nose, lips, jawline, face shape and moles, "
             f"clearly recognisable as the same person; only the hairstyle may differ ({hair_part}, black hair color).",
-            body_line(measurements),
+            *([] if safe else [body_line(measurements)]),
             "Take only the clothing from the product images — ignore the body and face of any model wearing them. "
             f"She is wearing exactly {wear} — {_DETAIL}.",
             _YOUTH,
@@ -631,11 +631,12 @@ def build(plan: dict, *, face_url: str, body_url: str, hair_url: str | None, pro
             parts.append(EYEWEAR_STYLES[ew["style"]]["en"].format(item=EYEWEAR[ew["item"]]["en"]))
         if plan.get("prop"):
             parts.append(f"She is {plan['prop']}.")
-        if plan.get("mood"):
+        if plan.get("mood") and not safe:
             parts.append(f"Free-spirited mood: {plan['mood']}.")
         parts.append(f"{pose['en'][:1].upper()}{pose['en'][1:]}, {loc['en']}, {_face_line(plan)}, {weather}.")
         parts.append(light_line(plan["location"]))
-        parts.append(_SKIN)
+        if not safe:
+            parts.append(_SKIN)
         if (plan.get("face") or pose["face"]) in ("chin_crop", "sunglasses", "full", "profile", "mirror_full"):
             parts.append(_MAKEUP)
         parts.append(_EFFORTLESS)
