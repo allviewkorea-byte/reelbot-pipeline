@@ -70,7 +70,7 @@ WEEKDAYS: dict[int, dict] = {
 # feet: shoes(신발 보임) / socks(양말·맨발, 방 전용) / none(발 안 보임).
 # where: 허용 장소 키 목록, 또는 kinds: 허용 장소 종류. mirror: 거울 필요. face: 얼굴 가림 방식.
 POSES: dict[str, dict] = {
-    "mirror_lean": {"self": True, "ko": "미러셀카 한쪽 다리 기대기", "cut": "서기", "feet": "shoes", "mirror": True, "face": "phone",
+    "mirror_lean": {"self": True, "faces": ["phone", "chin_crop"], "ko": "미러셀카 한쪽 다리 기대기", "cut": "서기", "feet": "shoes", "mirror": True, "face": "phone",
                     "kinds": ["entry", "elevator", "fitting"],
                     "en": "taking a mirror selfie with her weight on one leg, full body visible in the mirror"},
     "mirror_back": {"self": True, "ko": "거울 앞 반쯤 돌아 뒷모습", "cut": "서기", "feet": "shoes", "mirror": True, "face": "phone",
@@ -108,19 +108,38 @@ POSES: dict[str, dict] = {
                       "where": ["cafe", "park_bench", "subway_stairs", "gallery_stairs", "office_lobby"],
                       "en": "a first-person shot from her own eyes while seated, looking down at her lap, legs and shoes, "
                             "her hand holding a coffee cup or phone at the edge of the frame"},
-    "glass_reflection": {"self": True, "ko": "가게 유리창에 비친 셀카", "cut": "서기", "feet": "shoes", "face": "phone",
+    "glass_reflection": {"self": True, "faces": ["phone", "chin_crop"], "ko": "가게 유리창에 비친 셀카", "cut": "서기", "feet": "shoes", "face": "phone",
                          "kinds": ["outdoor"],
                          "en": "taking a selfie of her reflection in a shop's glass window, phone held up in front of "
                                "her face, the street faintly visible through the glass"},
-    "mirror_crouch": {"self": True, "ko": "거울 앞 쪼그려 미러셀카", "cut": "쪼그려", "feet": "shoes", "mirror": True, "face": "phone",
+    "mirror_crouch": {"self": True, "faces": ["phone", "chin_crop"], "ko": "거울 앞 쪼그려 미러셀카", "cut": "쪼그려", "feet": "shoes", "mirror": True, "face": "phone",
                       "kinds": ["entry", "elevator", "fitting"],
                       "en": "crouching slightly in front of the mirror taking a mirror selfie, phone covering her face"},
+    # 대표 레퍼런스(2026-10-27) — 꾸안꾸 셀카 앵글
+    "arm_selfie_high": {"self": True, "ko": "팔 뻗어 위에서 찍는 셀카", "cut": "서기", "feet": "none", "face": "chin_crop",
+                        "kinds": ["outdoor", "indoor", "elevator", "entry", "fitting"],
+                        "en": "a high-angle selfie with one arm stretched up toward the camera, looking down over her outfit "
+                              "to about the knees, slightly tilted"},
+    "closeup_sunglasses": {"self": True, "ko": "선글라스 클로즈업 셀카", "cut": "디테일", "feet": "none", "face": "sunglasses",
+                           "force_eyewear": "sun", "kinds": ["outdoor", "indoor"],
+                           "en": "a close-up selfie from the chest up, chin resting lightly on her hand, relaxed expression"},
+    "wall_knee_camera": {"self": True, "ko": "벽에 기대 한쪽 무릎 들기(디카 들고)", "cut": "기대기", "feet": "shoes",
+                         "face": "chin_crop", "kinds": ["indoor", "entry", "elevator", "fitting"],
+                         "en": "standing against a plain wall with one knee bent up playfully, holding a compact silver "
+                               "digital camera at chest height, shot on a phone timer from waist level"},
+    "cafe_terrace": {"self": True, "ko": "카페 테라스에 앉아 아아 들고", "cut": "앉기", "feet": "none", "face": "sunglasses",
+                     "force_eyewear": "sun", "where": ["cafe", "street", "bakery_front", "restaurant_front"],
+                     "tail": "A casual phone snapshot a friend took across the table — not a photoshoot, unposed.",
+                     "en": "sitting at an outdoor cafe table holding an iced americano, looking away down the street"},
     "toe_down": {"self": True, "ko": "발끝 내려다보기", "cut": "디테일", "feet": "shoes", "face": "out_of_frame",
                  "kinds": ["outdoor", "entry", "elevator"],
                  "en": "a shot looking down at her feet, showing the shoes and the hem of the bottoms"},
     "flatlay": {"self": True, "ko": "플랫레이(사람 없음)", "cut": "디테일", "feet": "none", "face": "none", "person": False,
                 "kinds": ["room", "entry"], "en": "a flat lay of the outfit items arranged neatly"},
 }
+
+# 소품(절반 확률, 디테일·플랫레이 제외) — 대표 레퍼런스의 아아·디카 느낌
+PROPS = ["holding an iced americano", "holding a compact silver digital camera", "earphones in, phone in one hand"]
 
 # 대표 피드백(2026-10-27): "모델처럼 남이 찍어 준 느낌" 말고 **스스로 찍은 셀카 느낌**만.
 # 미러셀카·유리창 반사·내려다보기(1인칭)·디테일·플랫레이만 쓰고, 제3자 시점 포즈(벤치 옆 보기·걷기·벽 기대기 등)는 끈다.
@@ -334,7 +353,15 @@ def plan_scene(*, character_id: str, products: list[dict], hair_roles: list[str]
     if hair_role is None and hairs:
         hair_role = rng.choice(hairs)
     loc, pose = pick
+    face = rng.choice(POSES[pose].get("faces") or [POSES[pose]["face"]])
+    if POSES[pose].get("force_eyewear") == "sun" or face == "sunglasses":
+        if not (eyewear and EYEWEAR[eyewear["item"]]["sun"] and eyewear["style"] == "wear"):
+            eyewear = {"item": rng.choice([k for k, v in EYEWEAR.items() if v["sun"]]), "style": "wear"}
+        face = "sunglasses"
+    prop = None if POSES[pose].get("person") is False or POSES[pose]["cut"] == "디테일" else (
+        rng.choice(PROPS) if rng.random() < 0.5 else None)
     return {
+        "face": face, "prop": prop,
         "weekday": weekday, "weekday_ko": WEEKDAYS[weekday]["ko"], "life": WEEKDAYS[weekday]["life"],
         "location": loc, "location_ko": LOCATIONS[loc]["ko"], "pose": pose, "pose_ko": POSES[pose]["ko"],
         "cut": POSES[pose]["cut"], "hair_role": hair_role, "eyewear": eyewear,
@@ -349,6 +376,9 @@ _TAIL = ("Candid iPhone photo, not a professional shoot: slightly uneven exposur
          "wrinkles, a little everyday clutter, slight wide-angle phone lens distortion, natural color, no retouching.")
 _SELF_TAIL = ("She took this photo herself with her own phone for her Instagram — a casual, unposed self-shot, not a "
               "photographer's or model shoot: natural relaxed stance, slightly tilted, imperfect off-center framing.")
+_MAKEUP = "Natural everyday makeup: light dewy base and a soft rosy lip tint — nothing heavy."
+_EFFORTLESS = ("Effortless, not overdressed (꾸안꾸): the clothes sit naturally on her with her own silhouette, minimal "
+               "accessories — at most a thin necklace or small earrings, no pearls or brooches.")
 _DETAIL = "keep every garment detail identical: color, fabric texture, buttons, pattern, neckline, length and fit"
 
 
@@ -360,11 +390,15 @@ def _product_phrase(kind: str, n: int) -> str:
 def _face_line(plan: dict) -> str:
     pose = POSES[plan["pose"]]
     ew = plan.get("eyewear")
-    if pose["face"] == "phone":
+    face = plan.get("face") or pose["face"]
+    if face == "phone":
         return "phone held up covering her face"
-    if pose["face"] == "out_of_frame":
+    if face == "out_of_frame":
         return "her face is not in the frame"
-    if ew and ew["style"] == "wear" and EYEWEAR[ew["item"]]["sun"]:
+    if face == "chin_crop":
+        return ("the top edge of the frame cuts across her face just below the eyes, so only the tip of her nose, her "
+                "lips and chin show — her eyes are never visible")
+    if face == "sunglasses" or (ew and ew["style"] == "wear" and EYEWEAR[ew["item"]]["sun"]):
         return "her eyes hidden behind the sunglasses, only the lower part of her face visible, face turned slightly away"
     return "framed from the shoulders down so her face is not visible"
 
@@ -403,8 +437,15 @@ def build(plan: dict, *, face_url: str, body_url: str, hair_url: str | None, pro
         ew = plan.get("eyewear")
         if ew:
             parts.append(EYEWEAR_STYLES[ew["style"]]["en"].format(item=EYEWEAR[ew["item"]]["en"]))
+        if plan.get("prop"):
+            parts.append(f"She is {plan['prop']}.")
         parts.append(f"{pose['en'][:1].upper()}{pose['en'][1:]}, {loc['en']}, {_face_line(plan)}, {weather}.")
-        if pose.get("self"):
+        if (plan.get("face") or pose["face"]) in ("chin_crop", "sunglasses"):
+            parts.append(_MAKEUP)
+        parts.append(_EFFORTLESS)
+        if pose.get("tail"):
+            parts.append(pose["tail"])
+        elif pose.get("self"):
             parts.append(_SELF_TAIL)
         parts.append(_TAIL)
         prompt = " ".join(parts)
