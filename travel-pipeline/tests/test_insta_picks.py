@@ -1,4 +1,5 @@
-"""A2-2 — 쿠팡·네이버 픽: 서명·파싱·한도 · 1차 필터(키즈·남성·세트·중복·가격) · 색 조합 · 쿠팡 우선 · 전체 흐름."""
+"""A2-2 — 쿠팡 픽: 서명·파싱·한도·1시간 캐시 · 1차 필터(키즈·남성·세트·중복·가격) · 색 조합 · 쿠팡 우선 · 전체 흐름.
+A2-3a — 네이버 꺼짐(약관) · 2단계 비전(싼 모델 256px → 512px) 비용 · 쿠팡 이미지 쓰고 지우기 · 참고 안 함 레퍼런스 건너뜀."""
 
 from __future__ import annotations
 
@@ -20,6 +21,15 @@ from services import insta_refs as R  # noqa: E402
 from test_shorts_cast import env  # noqa: E402,F401
 
 needs_ffmpeg = pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg 필요")
+
+
+@pytest.fixture(autouse=True)
+def _fresh_coupang_limits():
+    S._CALLS.clear()
+    S._SEARCH_CACHE.clear()
+    yield
+    S._CALLS.clear()
+    S._SEARCH_CACHE.clear()
 
 
 # ── 어댑터 ───────────────────────────────────────────────────────────────
@@ -45,10 +55,12 @@ def test_coupang_search_cap_and_deeplink():
     got = c.search("니트", 30)
     assert got[0]["name"] == "여성 니트 & 가디건" and got[0]["mall"] == "쿠팡 로켓" and len(got) == 1   # 이미지 없는 건 제외
     assert "limit=10" in calls[0][1] and calls[0][2]["Authorization"].startswith("CEA algorithm=HmacSHA256, access-key=ak, signed-date=")
-    for _ in range(S.COUPANG_SEARCH_HOURLY_CAP - 1):
-        c.search("x")
+    assert c.search("니트", 10)[0]["product_id"] == "7" and c.cached and len(calls) == 1   # 같은 검색어 1시간 캐시 — 호출 안 함
+    for i in range(S.COUPANG_SEARCH_HOURLY_CAP - 1):
+        c.search(f"x{i}")
     with pytest.raises(S.QuotaExceeded):
-        c.search("x")
+        c.search("새 검색어")
+    assert c.search("니트", 10) and c.cached                                                 # 한도에 걸려도 캐시는 준다
     links = c.deeplinks(["https://link.coupang.com/re/AFF", "https://www.coupang.com/vp/products/1"])
     assert links["https://link.coupang.com/re/AFF"] == "https://link.coupang.com/re/AFF"
     assert links["https://www.coupang.com/vp/products/1"] == "https://link.coupang.com/a/x"
@@ -119,14 +131,20 @@ def test_total_score_and_season_penalty():
 # ── 전체 흐름 ────────────────────────────────────────────────────────────
 class _Tables:
     def __init__(self):
-        self.t = {"ig_refs": [], "ig_products": [], "ig_looks": [], "ig_api_usage": []}
+        self.t = {"ig_refs": [], "ig_products": [], "ig_looks": [], "ig_api_usage": [], "ig_feedback": []}
         self.next_id = 1
 
     def _m(self, r, params):
         for k, v in params.items():
             if k in ("select", "order", "limit", "on_conflict"):
                 continue
-            if str(r.get(k)) != v.split(".", 1)[1]:
+            op, arg = v.split(".", 1)
+            val = r.get(k)
+            ok = {"eq": lambda: str(val) == arg, "neq": lambda: str(val) != arg,
+                  "in": lambda: str(val) in arg.strip("()").split(","),
+                  "not": lambda: val is not None if arg == "is.null" else True,
+                  "lt": lambda: val is not None and str(val) < arg, "gte": lambda: val is not None and str(val) >= arg}[op]()
+            if not ok:
                 return False
         return True
 
@@ -167,6 +185,8 @@ class _Shop:
 
     def search(self, q, n):
         self.calls.append(q)
+        if self.items == "quota":
+            raise S.QuotaExceeded("cap")
         return [dict(i) for i in self.items.get(q, [])]
 
     def deeplinks(self, urls):
@@ -187,17 +207,18 @@ LOOK = {"concept": "가을 출근룩", "seasons": ["autumn"], "items": [
 
 def _setup(tables):
     tables.t["ig_refs"].append({"video_id": "v1", "status": "analyzed", "views": 10, "analysis": {"looks": [LOOK]}})
-    cp = _Shop("coupang", {"아이보리 니트 여성": [_c("c1", "여성 아이보리 니트", ch="coupang") | {"link": "https://www.coupang.com/vp/1", "mall": "쿠팡"}]})
-    nv = _Shop("naver", {
-        "아이보리 니트 여성": [_c("n1", "아이보리 울 니트"), _c("n2", "키즈 니트")],
-        "울 니트 여성": [_c("n3", "여성 울 라운드 니트")],
-        "차콜 슬랙스 여성": [_c("n4", "차콜 와이드 슬랙스"), _c("n5", "레드 슬랙스"), _c("n6", "블랙 슬랙스")],
+    cp = _Shop("coupang", {
+        "아이보리 니트 여성": [_c("c1", "여성 아이보리 니트", ch="coupang") | {"link": "https://www.coupang.com/vp/1", "mall": "쿠팡"},
+                         _c("c2", "키즈 니트", ch="coupang"), _c("c3", "여성 울 라운드 니트", ch="coupang")],
+        "차콜 슬랙스 여성": [_c("c4", "차콜 와이드 슬랙스", ch="coupang"), _c("c5", "레드 슬랙스", ch="coupang"),
+                        _c("c6", "블랙 슬랙스", ch="coupang")],
     })
+    nv = _Shop("naver", {"아이보리 니트 여성": [_c("n1", "아이보리 울 니트")]})
     return cp, nv
 
 
 def _vision(scores_by_name):
-    def v(system, labeled, ask, task, max_tokens=1500):
+    def v(system, labeled, ask, task, max_tokens=1500, **kw):
         if task == "insta_pick_usable":
             return {"results": [{"n": i + 1, "usable": True} for i in range(len(labeled))]}
         names = [str(p) for _, p in labeled]
@@ -210,13 +231,15 @@ def _vision(scores_by_name):
     return v
 
 
+SCORES = {"coupang_c1": (8.7, "#F2EDE3"), "coupang_c3": (7, "#EEE8DD"), "coupang_c4": (9, "#36454F"),
+          "coupang_c5": (8, "#E02020"), "coupang_c6": (7, "#111111")}
+
+
 @needs_ffmpeg
 def test_pick_look_end_to_end(env):  # noqa: F811
     t = _Tables()
     cp, nv = _setup(t)
-    scores = {"coupang_c1": (8.7, "#F2EDE3"), "naver_n1": (9, "#F2EDE3"), "naver_n3": (7, "#EEE8DD"),
-              "naver_n4": (9, "#36454F"), "naver_n5": (8, "#E02020"), "naver_n6": (7, "#111111")}
-    d = K.Deps(coupang=cp, naver=nv, vision=_vision(scores), download=_dl, rest=t)
+    d = K.Deps(coupang=cp, naver=nv, vision=_vision(SCORES), download=_dl, rest=t)
     import services.insta_refs as refs_mod
     orig = refs_mod.rest
     refs_mod.rest = t
@@ -230,18 +253,19 @@ def test_pick_look_end_to_end(env):  # noqa: F811
     look = t.t["ig_looks"][0]
     assert look["status"] == "picked" and look["concept"] == "가을 출근룩"
     top, bottom = look["items"]
-    assert top["pick"]["channel"] == "coupang" and top["pick"]["product_id"] == "c1"      # 네이버 90 vs 쿠팡 87 → 쿠팡
+    assert top["pick"]["channel"] == "coupang" and top["pick"]["product_id"] == "c1"
     assert top["pick"]["affiliate_link"] == "https://link.coupang.com/a/1"                 # 쿠팡 딥링크
-    assert top["filtered"]["excluded"] == 1 and "n2" not in [b["product_id"] for b in top["backups"]]
-    assert bottom["pick"]["product_id"] == "n4" and [b["product_id"] for b in bottom["backups"]] == ["n5", "n6"]
+    assert top["filtered"]["excluded"] == 1 and "c2" not in [b["product_id"] for b in top["backups"]]
+    assert bottom["pick"]["product_id"] == "c4" and [b["product_id"] for b in bottom["backups"]] == ["c5", "c6"]
     assert cp.calls == ["아이보리 니트 여성", "차콜 슬랙스 여성"]                           # 쿠팡은 아이템당 검색어 1개
-    assert set(nv.calls) == {"아이보리 니트 여성", "울 니트 여성", "차콜 슬랙스 여성"}
-    assert look["usage"] == {"coupang": 2, "naver": 3, "vision": 4}
+    assert nv.calls == []                                                                   # 네이버는 약관상 꺼 둠
+    assert {k: look["usage"][k] for k in ("coupang", "vision")} == {"coupang": 2, "vision": 4}
+    assert look["usage"]["vision_usd"] == 0.0                                               # 가짜 비전은 토큰을 안 셈
     assert look["combo"]["ok"]
     prods = {p["product_id"]: p for p in t.t["ig_products"]}
     assert prods["c1"]["image_key"] == "insta/products/coupang/c1.jpg" and env.s3.objs["insta/products/coupang/c1.jpg"][0][:3] == b"\xff\xd8\xff"
     assert t.t["ig_refs"][0]["status"] == "used"
-    assert {(u["api"], u["calls"]) for u in t.t["ig_api_usage"]} == {("coupang", 2), ("naver", 3)}
+    assert {(u["api"], u["calls"]) for u in t.t["ig_api_usage"]} == {("coupang", 2)}
 
 
 @needs_ffmpeg
@@ -252,20 +276,95 @@ def test_vision_failure_falls_back(env):  # noqa: F811
     def boom(*a, **k):
         raise RuntimeError("anthropic down")
 
-    d = K.Deps(coupang=_Shop("coupang", {}, ok=False), naver=nv, vision=boom, download=_dl, rest=t)
+    d = K.Deps(coupang=cp, naver=nv, vision=boom, download=_dl, rest=t)
     job = K.start(d=d)
     K.run(job["id"])
     look = t.t["ig_looks"][0]
     top = look["items"][0]
-    assert "쿠팡 연결 필요" in top["notes"] and any("AI 호출 실패" in n for n in top["notes"])
+    assert any("AI 호출 실패" in n for n in top["notes"])
     assert top["pick"] and top["pick"]["scores"]["fallback"] is True
+
+
+def test_naver_disabled_and_hidden():
+    assert K.NAVER_ENABLED is False
+    d = K.Deps(coupang=_Shop("c", {}), rest=_Tables())
+    assert isinstance(d.naver, K._Off) and not d.naver.is_available()
+    conn = K.connections()
+    assert conn["naver"] is False and conn["naver_enabled"] is False
+    cands, notes = K.gather({"queries": ["a", "b"]}, K.Deps(coupang=_Shop("c", {}, ok=False), rest=_Tables()), {})
+    assert cands == [] and notes == ["쿠팡 연결 필요"]                                          # "네이버 연결 필요" 표시 없음
+
+
+def test_gather_quota_and_cache_counting(monkeypatch):
+    monkeypatch.setattr(R, "add_usage", lambda *a, **k: None)
+    usage: dict = {}
+    _, notes = K.gather({"queries": ["a"]}, K.Deps(coupang=_Shop("c", "quota"), rest=_Tables()), usage)
+    assert notes == ["쿠팡 검색 한도 — 잠시 후 다시 해 주세요"] and usage == {}
+    shop = _Shop("c", {"a": [_c("1", "여성 니트", ch="coupang")]})
+    shop.cached = True
+    got, _ = K.gather({"queries": ["a"]}, K.Deps(coupang=shop, rest=_Tables()), usage)
+    assert len(got) == 1 and usage == {"coupang_cached": 1}                                    # 캐시는 호출 수에 안 셈
+
+
+@needs_ffmpeg
+def test_judge_two_stage_models_and_cost(tmp_path):
+    seen = []
+
+    def vision(system, labeled, ask, task, max_tokens=1500, *, model=None, meter=None):
+        seen.append((task, model, labeled[0][1].name))
+        meter.setdefault(model or "default", {"in": 0, "out": 0})
+        meter[model or "default"]["in"] += 1_000_000
+        if task == "insta_pick_usable":
+            return {"results": [{"n": i + 1, "usable": True} for i in range(len(labeled))]}
+        return {"results": [{"n": i + 1, "kind": 9, "color": 9, "fit": 9, "length": 9, "details": 9, "hex": "#111111"}
+                            for i in range(len(labeled))]}
+
+    d = K.Deps(coupang=_Shop("c", {}), vision=vision, download=_dl, rest=_Tables())
+    scored, _ = K.judge({"kind": "top", "queries": []}, {"seasons": []}, [_c("1", "여성 니트", ch="coupang")], d, {}, tmp_path)
+    assert scored and seen[0] == ("insta_pick_usable", K.SCREEN_MODEL, "coupang_1_s.jpg")    # 1단계: 싼 모델 · 256px
+    assert seen[1][0] == "insta_pick_score" and seen[1][1] is None and seen[1][2] == "coupang_1_m.jpg"  # 2단계: 기본 · 512px
+    assert K.vision_cost_usd(d.meter) > 0
+
+
+def _delete_env(monkeypatch):
+    deleted = []
+
+    class _Cli:
+        def delete_object(self, Bucket, Key):
+            deleted.append(Key)
+
+    monkeypatch.setattr(K.r2_storage, "is_available", lambda: True)
+    monkeypatch.setattr(K.r2_storage, "_character_bucket", lambda: "chars")
+    monkeypatch.setattr(K.r2_storage, "_get_client", lambda: _Cli())
+    return deleted
+
+
+def test_delete_images_coupang_only(monkeypatch):
+    deleted = _delete_env(monkeypatch)
+    t = _Tables()
+    t.t["ig_products"] += [{"id": 1, "channel": "coupang", "image_key": "insta/products/coupang/a.jpg"},
+                           {"id": 2, "channel": "bose", "image_key": "insta/products/upload/b/0.png"}]
+    rows = [dict(r) for r in t.t["ig_products"]] + [{"id": 3, "channel": "coupang", "image_key": None}]
+    n = K.delete_images(rows, K.Deps(coupang=_Shop("c", {}), rest=t))
+    assert n == 1 and deleted == ["insta/products/coupang/a.jpg"] and rows[0]["image_key"] is None
+    cp, bose = t.t["ig_products"]
+    assert cp["image_key"] is None and cp["image_deleted_at"]                                 # 삭제 시각 기록
+    assert bose["image_key"] == "insta/products/upload/b/0.png" and "image_deleted_at" not in bose  # 보세 업로드는 보관
+
+
+def test_next_ref_skips_unusable():
+    t = _Tables()
+    t.t["ig_refs"] += [{"video_id": "m", "status": "analyzed", "views": 99, "analysis": {"usable": False, "looks": []}},
+                       {"video_id": "w", "status": "analyzed", "views": 5, "analysis": {"usable": True, "looks": [LOOK]}}]
+    assert K.next_ref(K.Deps(coupang=_Shop("c", {}), rest=t))["video_id"] == "w"
+    assert not K.usable_ref({"analysis": {"usable": False}}) and K.usable_ref({"analysis": {"looks": []}})
 
 
 def test_start_errors():
     t = _Tables()
     no = _Shop("x", {}, ok=False)
-    with pytest.raises(S.ShoppingError, match="연결"):
-        K.start(d=K.Deps(coupang=no, naver=no, rest=t))
+    with pytest.raises(S.ShoppingError, match="쿠팡 연결"):
+        K.start(d=K.Deps(coupang=no, naver=_Shop("n", {}), rest=t))                          # 네이버 키가 있어도 안 씀
     with pytest.raises(S.ShoppingError, match="레퍼런스"):
         K.start(d=K.Deps(coupang=_Shop("c", {}), naver=no, rest=t))
 
@@ -277,5 +376,6 @@ def test_swap(env):  # noqa: F811
     out = K.swap("lk-20261026-abcd", 0, 3, d=K.Deps(coupang=_Shop("c", {}), naver=_Shop("n", {}), rest=t))
     it = out["items"][0]
     assert it["pick"]["id"] == 3 and [b["id"] for b in it["backups"]] == [2, 1]
+    assert t.t["ig_feedback"] == [{"event": "swap", "look_id": "lk-20261026-abcd", "item_index": 0, "product_id": 1, "to_product_id": 3}]
     with pytest.raises(S.ShoppingError):
         K.swap("lk-20261026-abcd", 0, 99, d=K.Deps(coupang=_Shop("c", {}), naver=_Shop("n", {}), rest=t))

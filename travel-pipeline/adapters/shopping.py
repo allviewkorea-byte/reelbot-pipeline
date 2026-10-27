@@ -30,6 +30,10 @@ COUPANG_HOST = "https://api-gateway.coupang.com"
 COUPANG_SEARCH = "/v2/providers/affiliate_open_api/apis/openapi/v1/products/search"
 COUPANG_DEEPLINK = "/v2/providers/affiliate_open_api/apis/openapi/v1/deeplink"
 COUPANG_SEARCH_HOURLY_CAP = 10
+SEARCH_CACHE_SEC = 3600   # 같은 검색어 결과 1시간 메모리 캐시(저장 아님) — 한도 아끼기
+_SEARCH_CACHE: dict[tuple[str, int], tuple[float, list[dict]]] = {}
+_CALLS: list[float] = []  # 시간당 상한(프로세스 공용 — 픽마다 클라이언트를 새로 만들어도 같이 센다)
+_CALLS_LOCK = threading.Lock()
 NAVER_SHOP = "https://openapi.naver.com/v1/search/shop.json"
 
 
@@ -57,8 +61,6 @@ class CoupangClient:
         self.access = access if access is not None else (os.getenv("COUPANG_PARTNERS_ACCESS_KEY") or "").strip()
         self.secret = secret if secret is not None else (os.getenv("COUPANG_PARTNERS_SECRET_KEY") or "").strip()
         self.http = http  # 테스트 주입: (method, url, headers, json) -> dict
-        self._calls: list[float] = []
-        self._lock = threading.Lock()
 
     def is_available(self) -> bool:
         return bool(self.access and self.secret)
@@ -83,20 +85,31 @@ class CoupangClient:
     def search(self, keyword: str, limit: int = 10) -> list[dict]:
         if not self.is_available():
             raise ShoppingError("쿠팡 파트너스 키 없음")
-        with self._lock:  # 시간당 상한(이 프로세스 기준 — 하루 합계는 ig_api_usage 에 따로 기록)
+        limit = max(1, min(int(limit), 10))
+        key = (keyword.strip(), limit)
+        with _CALLS_LOCK:
             now = time.time()
-            self._calls = [t for t in self._calls if now - t < 3600]
-            if len(self._calls) >= COUPANG_SEARCH_HOURLY_CAP:
+            hit = _SEARCH_CACHE.get(key)
+            if hit and now - hit[0] < SEARCH_CACHE_SEC:
+                self.cached = True
+                return [dict(x) for x in hit[1]]
+            # 시간당 상한(이 프로세스 기준 — 하루 합계는 ig_api_usage 에 따로 기록)
+            _CALLS[:] = [t for t in _CALLS if now - t < 3600]
+            if len(_CALLS) >= COUPANG_SEARCH_HOURLY_CAP:
                 raise QuotaExceeded("쿠팡 검색 시간당 상한")
-            self._calls.append(now)
-        data = self._request("GET", COUPANG_SEARCH, {"keyword": keyword, "limit": max(1, min(int(limit), 10))})
+            _CALLS.append(now)
+        self.cached = False
+        data = self._request("GET", COUPANG_SEARCH, {"keyword": keyword, "limit": limit})
         items = ((data.get("data") or {}).get("productData")) or []
-        return [{
+        out = [{
             "channel": "coupang", "product_id": str(it.get("productId")), "name": _clean(it.get("productName", "")),
             "price": int(it.get("productPrice") or 0), "image_url": it.get("productImage"), "link": it.get("productUrl"),
             "mall": "쿠팡" + (" 로켓" if it.get("isRocket") else ""), "category": it.get("categoryName") or "",
             "raw": {k: it.get(k) for k in ("productId", "categoryName", "isRocket", "isFreeShipping", "rank")},
         } for it in items if it.get("productId") and it.get("productImage")]
+        with _CALLS_LOCK:
+            _SEARCH_CACHE[key] = (time.time(), out)
+        return [dict(x) for x in out]
 
     def deeplinks(self, urls: list[str]) -> dict[str, str]:
         """원래 URL → 제휴 단축 링크. 이미 link.coupang.com 이면 그대로."""

@@ -95,10 +95,12 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def list_outfits(character_id: str, limit: int = 12) -> list[dict]:
+def list_outfits(character_id: str, limit: int = 12, *, include_hidden: bool = False) -> list[dict]:
+    """최근 착장. 내린 착장(hidden_at)은 기본 제외(연속 금지 이력엔 include_hidden=True 로 모두)."""
     cid = cs.check_character_id(character_id)
-    return _rest("GET", params={"select": "*", "character_id": f"eq.{cid}", "order": "created_at.desc",
+    rows = _rest("GET", params={"select": "*", "character_id": f"eq.{cid}", "order": "created_at.desc",
                                 "limit": str(max(1, min(int(limit), 50)))})
+    return rows if include_hidden else [r for r in rows if not r.get("hidden_at")]
 
 
 def get_outfit(outfit_id: str) -> dict:
@@ -285,8 +287,17 @@ def _clean_products(products: list[dict]) -> list[dict]:
             raise OutfitError("상품 사진은 이 화면에서 올린 것만 쓸 수 있어요.")
         if kind not in P.PRODUCT_KINDS:
             raise OutfitError("상품마다 종류를 골라 주세요.")
-        out.append({"key": key, "url": public_url(key), "kind": kind, "desc": str(p.get("desc") or "")[:160],
-                    "revealing": bool(p.get("revealing"))})
+        row = {"key": key, "url": public_url(key), "kind": kind, "desc": str(p.get("desc") or "")[:160],
+               "revealing": bool(p.get("revealing"))}
+        # A2-3: 출처·링크·쇼핑몰(있을 때만 — 기존 A1 요청과 호환). 링크는 저장·표시만, 서버가 접속하지 않는다.
+        if p.get("source") in ("bose", "coupang", "upload"):
+            row["source"] = p["source"]
+        for k in ("link", "mall", "name"):
+            if p.get(k):
+                row[k] = str(p[k])[:500]
+        if isinstance(p.get("product_row_id"), int):
+            row["product_row_id"] = p["product_row_id"]
+        out.append(row)
     return out
 
 
@@ -296,7 +307,11 @@ def _clean_options(options: dict | None) -> dict:
     return {k: v for k, v in o.items() if k in allowed}
 
 
-def start(character_id: str, products: list[dict], options: dict | None = None, *, remake_of: str | None = None) -> dict:
+CAPTION_NOTE = "AI 가상 착용 · 가상 모델 기준"
+
+
+def start(character_id: str, products: list[dict], options: dict | None = None, *, remake_of: str | None = None,
+          look_id: str | None = None) -> dict:
     """검증 → (같은 요청이 돌고 있으면 그 잡) → 잡 등록. 실행은 run(백그라운드). 반환: 잡."""
     char = cs.get_character(character_id)
     refs = cs.confirmed_refs(char["id"])
@@ -316,7 +331,11 @@ def start(character_id: str, products: list[dict], options: dict | None = None, 
         if running and _JOBS.get(running, {}).get("state") in ("queued", "running"):
             return dict(_JOBS[running])
     outfit_id = f"of-{datetime.now(timezone.utc):%Y%m%d}-{secrets.token_hex(3)}"
-    _insert({"id": outfit_id, "character_id": char["id"], "product_images": prods, "status": "generating"})
+    row = {"id": outfit_id, "character_id": char["id"], "product_images": prods, "status": "generating",
+           "caption_note": CAPTION_NOTE}
+    if look_id:
+        row["look_id"] = look_id
+    _insert(row)
     job_id = f"oj_{secrets.token_hex(5)}"
     with _LOCK:
         _JOBS[job_id] = {"id": job_id, "outfit_id": outfit_id, "state": "queued", "step": "대기",
@@ -351,7 +370,7 @@ def run(job_id: str, *, rng: random.Random | None = None) -> None:
         _job(job_id, state="running", step="장면 기획")
         refs = cs.confirmed_refs(cid)
         hair_roles = sorted(r for r in refs if cs.role_category(r) == "hair")
-        history = [h for h in list_outfits(cid, HISTORY_N) if h["id"] != outfit_id and h.get("plan")]
+        history = [h for h in list_outfits(cid, HISTORY_N, include_hidden=True) if h["id"] != outfit_id and h.get("plan")]
         plan = P.plan_scene(character_id=cid, products=prods, hair_roles=hair_roles, history=history,
                             options=opts, rng=rng)
         _patch(outfit_id, {"plan": plan})

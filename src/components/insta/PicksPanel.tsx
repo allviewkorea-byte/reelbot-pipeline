@@ -5,13 +5,13 @@ import { toast } from "sonner"
 import { ExternalLink, Loader2, ShoppingBag } from "lucide-react"
 import { jsonOrThrow } from "@/components/studio/studio-lib"
 
-// 상품 픽(A2-2) — 레퍼런스 룩 → 쿠팡·네이버에서 아이템마다 1등 + 예비 2개. 예비 사진을 누르면 교체.
+// 상품 픽(A2-2) — 레퍼런스 룩 → 쿠팡에서(네이버는 약관상 꺼 둠, A2-3a) 아이템마다 1등 + 예비 2개. 예비 사진을 누르면 교체.
 // 초보자 화면: 사진·이름·가격·몰만. 점수·검색어는 숨김. (A2-3 에서 "오늘의 코디 찾기" 한 번에 흐름으로 합친다)
 
 interface Prod { id: number | null; channel: "coupang" | "naver"; name: string; price: number | null; mall: string | null; image: string | null; link: string | null; affiliate_link: string | null }
 interface Item { index: number; kind: string; pick: Prod | null; backups: Prod[]; notes: string[] }
-interface Look { id: string; concept: string | null; status: string; items: Item[]; ref_video_id: string | null; error: string | null }
-interface Status { connected: { coupang: boolean; naver: boolean } }
+interface Look { id: string; concept: string | null; status: string; items: Item[]; ref_video_id: string | null; error: string | null; cost_krw?: number | null }
+interface Status { connected: { coupang: boolean; naver: boolean; naver_enabled?: boolean } }
 interface Job { id: string; state: "queued" | "running" | "done" | "failed"; error: string | null }
 
 const KIND_KO: Record<string, string> = { top: "상의", bottoms: "하의", dress: "원피스", outerwear: "아우터", shoes: "신발", bag: "가방", accessory: "액세서리" }
@@ -83,7 +83,7 @@ export function PicksPanel() {
 
   const look = looks[0]
   const conn = status?.connected
-  const none = conn && !conn.coupang && !conn.naver
+  const none = conn && !conn.coupang && !(conn.naver_enabled && conn.naver)
 
   return (
     <section className="flex min-w-0 flex-col gap-3 rounded-xl border border-border bg-card p-4">
@@ -92,8 +92,12 @@ export function PicksPanel() {
         {conn && (
           <span className="flex gap-1.5 text-[11px]">
             <span className={conn.coupang ? "text-emerald-400" : "text-amber-400"}>쿠팡 {conn.coupang ? "연결됨" : "연결 필요"}</span>
-            <span className="text-muted-foreground">·</span>
-            <span className={conn.naver ? "text-emerald-400" : "text-amber-400"}>네이버 {conn.naver ? "연결됨" : "연결 필요"}</span>
+            {conn.naver_enabled && (
+              <>
+                <span className="text-muted-foreground">·</span>
+                <span className={conn.naver ? "text-emerald-400" : "text-amber-400"}>네이버 {conn.naver ? "연결됨" : "연결 필요"}</span>
+              </>
+            )}
           </span>
         )}
         <button onClick={pick} disabled={running || !!none}
@@ -114,6 +118,7 @@ export function PicksPanel() {
                 <ExternalLink className="h-3 w-3" /> 참고한 영상
               </a>
             )}
+            {look.cost_krw != null && <span className="shrink-0 text-[11px] text-muted-foreground">고르는 비용 약 {look.cost_krw.toLocaleString("ko-KR")}원</span>}
             {look.status === "picking" && <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />}
           </div>
           {look.status === "failed" && <p className="text-xs text-red-400">{look.error ?? "상품을 고르지 못했어요"}</p>}

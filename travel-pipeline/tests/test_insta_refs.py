@@ -1,4 +1,5 @@
-"""A2-1 — 캐릭터 치수 · 유튜브 레퍼런스 수집(쿼터 상한·중복 금지·검색어) · 룩 분석 정규화 · 하루 1회 실행."""
+"""A2-1 — 캐릭터 치수 · 유튜브 레퍼런스 수집(쿼터 상한·중복 금지·검색어) · 룩 분석 정규화 · 하루 1회 실행.
+A2-3a — 레퍼런스 필터(남성·명품 제외, 참고 안 함 저장) · 스크린샷 레퍼런스."""
 
 from __future__ import annotations
 
@@ -102,7 +103,7 @@ class _FakeYT:
     def __call__(self, url, params):
         self.calls.append((url.rsplit("/", 1)[1], params))
         if url.endswith("/search"):
-            return {"items": [{"id": {"videoId": i}} for i in self.ids_by_query.get(params["q"], [])]}
+            return {"items": [{"id": {"videoId": i}} for i in self.ids_by_query.get(params["q"].split(" -")[0], [])]}
         ids = params["id"].split(",")
         return {"items": [{"id": i, "snippet": {"title": f"{i} 가을 코디", "channelTitle": "ch", "description": "상의: 베이지 니트\n하의 - 와이드 슬랙스",
                                                  "publishedAt": "2026-10-20T00:00:00Z",
@@ -137,6 +138,8 @@ def test_collect_saves_dedupes_and_counts_units(refs_env):
     # 첫 검색: 조회수 상위 4개(a2~a5)만 저장 → a1 은 두 번째 검색에서 새 영상으로 저장
     assert {r["video_id"] for r in rows} == {"a1", "a2", "a3", "a4", "a5", "b1"} and out["dupes"] == 0
     assert rows[0]["thumb_key"] == f"insta/refs/{rows[0]['video_id']}.jpg"
+    q = next(p for name, p in yt.calls if name == "search")["q"]
+    assert q.endswith(R.QUERY_EXCLUDE) and "-남자" in q and "-명품" in q                  # 남성·명품 영상은 검색에서 뺀다
     assert refs_env.s3.objs[rows[0]["thumb_key"]][0][:3] == b"\xff\xd8\xff"
     search = [p for k, p in yt.calls if k == "search"][0]
     assert search["order"] == "viewCount" and search["publishedAfter"].startswith("2026-09-26")
@@ -233,3 +236,45 @@ def test_api_refs(refs_env):
     assert got["thumb_url"] == "https://img.test/insta/refs/z1.jpg" and got["video_url"].endswith("v=z1")
     u = c.get("/insta/usage").json()
     assert u["youtube"]["cap"] == R.YT_DAILY_UNIT_CAP and u["has_youtube_key"] is True
+
+
+# ── A2-3a: 레퍼런스 필터 · 스크린샷 ─────────────────────────────────────
+def test_normalize_unusable_ref():
+    spec = R.normalize_analysis({"usable": False, "usable_reason": "남성 코디 영상", "looks": [
+        {"concept": "남친룩", "items": [{"kind": "top", "queries": ["남자 니트"]}]}]})
+    assert spec["usable"] is False and spec["usable_reason"] == "남성 코디 영상" and spec["looks"] == []
+    assert R.normalize_analysis({"looks": []})["usable"] is True                       # 판정 없으면 쓸 수 있음(이전 행 호환)
+
+
+@needs_ffmpeg
+def test_analyze_unusable_is_saved_not_failed(refs_env):
+    refs_env.tables.t["ig_refs"].append({"video_id": "m1", "title": "명품 하울 토크", "thumb_key": "insta/refs/m1.jpg", "status": "new"})
+    spec = R.analyze(refs_env.tables.t["ig_refs"][0], download=_download,
+                     vision=lambda *a, **k: {"usable": False, "usable_reason": "명품 토크 영상"})
+    row = refs_env.tables.t["ig_refs"][0]
+    assert spec["usable"] is False and row["status"] == "analyzed" and row["analysis"]["usable_reason"] == "명품 토크 영상"
+
+
+@needs_ffmpeg
+def test_screenshot_ref(refs_env, tmp_path):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from api.routes import insta as routes
+
+    png = tmp_path / "s.png"
+    _download("x", png)
+    spec = {"looks": [{"concept": "가을 데이트룩", "items": [{"kind": "dress", "queries": ["여성 브라운 니트 원피스"]}]}]}
+    out = R.add_screenshot(png.read_bytes(), "s.png", vision=lambda *a, **k: spec, download=_download)
+    row = refs_env.tables.t["ig_refs"][0]
+    assert row["source"] == "screenshot" and row["status"] == "analyzed" and row["video_id"].startswith("ss-")
+    assert row["thumb_key"].startswith("insta/refs/screenshots/") and refs_env.s3.objs[row["thumb_key"]][0][:3] == b"\xff\xd8\xff"
+    assert out["analysis"]["looks"][0]["concept"] == "가을 데이트룩"
+    with pytest.raises(R.RefsError, match="png"):
+        R.add_screenshot(b"x", "a.gif")
+    app = FastAPI()
+    app.include_router(routes.router, prefix="/insta")
+    c = TestClient(app)
+    assert c.post("/insta/refs/screenshot", files={"file": ("a.gif", b"x", "image/gif")}).status_code == 400
+    listed = {r["video_id"]: r for r in c.get("/insta/refs").json()["refs"]}
+    assert listed[row["video_id"]]["video_url"] is None and listed[row["video_id"]]["usable"] is True   # 스크린샷은 영상 링크 없음
