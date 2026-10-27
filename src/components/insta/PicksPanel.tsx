@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
-import { ExternalLink, Loader2, ShoppingBag } from "lucide-react"
+import { ChevronDown, ExternalLink, Loader2, ShoppingBag } from "lucide-react"
 import { jsonOrThrow } from "@/components/studio/studio-lib"
+import { useFold } from "@/components/insta/useFold"
 
 // 상품 픽(A2-2) — 레퍼런스 룩 → 쿠팡에서(네이버는 약관상 꺼 둠, A2-3a) 아이템마다 1등 + 예비 2개. 예비 사진을 누르면 교체.
 // 초보자 화면: 사진·이름·가격·몰만. 점수·검색어는 숨김. (A2-3 에서 "오늘의 코디 찾기" 한 번에 흐름으로 합친다)
@@ -82,13 +83,16 @@ export function PicksPanel() {
   }
 
   const look = looks[0]
+  const [open, toggle] = useFold("insta-picks", true)
   const conn = status?.connected
   const none = conn && !conn.coupang && !(conn.naver_enabled && conn.naver)
 
   return (
     <section className="flex min-w-0 flex-col gap-3 rounded-xl border border-border bg-card p-4">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <h2 className="text-sm font-semibold text-foreground">상품 고르기</h2>
+        <button onClick={toggle} className="flex items-center gap-1 text-sm font-semibold text-foreground">
+          상품 고르기 <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
+        </button>
         {conn && (
           <span className="flex gap-1.5 text-[11px]">
             <span className={conn.coupang ? "text-emerald-400" : "text-amber-400"}>쿠팡 {conn.coupang ? "연결됨" : "연결 필요"}</span>
@@ -106,7 +110,7 @@ export function PicksPanel() {
         </button>
       </div>
 
-      {!look ? (
+      {!open ? null : !look ? (
         <p className="text-xs text-muted-foreground">레퍼런스를 모은 뒤 상품 고르기를 눌러 주세요.</p>
       ) : (
         <div className="flex min-w-0 flex-col gap-3">
@@ -122,10 +126,10 @@ export function PicksPanel() {
             {look.status === "picking" && <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />}
           </div>
           {look.status === "failed" && <p className="text-xs text-red-400">{look.error ?? "상품을 고르지 못했어요"}</p>}
-          <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid min-w-0 grid-cols-3 gap-2 lg:grid-cols-4">
             {(look.items ?? []).map((it) => (
-              <div key={it.index} className="flex min-w-0 flex-col gap-2 rounded-lg border border-border bg-background p-2">
-                <p className="text-xs font-medium text-muted-foreground">{KIND_KO[it.kind] ?? it.kind}</p>
+              <div key={it.index} className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-border bg-background p-1.5">
+                <p className="text-[11px] font-medium text-muted-foreground">{KIND_KO[it.kind] ?? it.kind}</p>
                 {it.pick ? (
                   <a href={it.pick.affiliate_link || it.pick.link || "#"} target="_blank" rel="noreferrer" className="flex min-w-0 flex-col gap-1">
                     <div className="aspect-square overflow-hidden rounded-md bg-secondary/30">
@@ -134,19 +138,19 @@ export function PicksPanel() {
                         <img src={it.pick.image} alt={it.pick.name} className="h-full w-full object-contain" />
                       )}
                     </div>
-                    <span className="line-clamp-2 text-xs text-foreground">{it.pick.name}</span>
-                    <span className="text-xs font-semibold text-foreground">{won(it.pick.price)} <span className="font-normal text-muted-foreground">· {it.pick.mall}</span></span>
+                    <span className="line-clamp-2 text-[11px] text-foreground">{it.pick.name}</span>
+                    <span className="truncate text-[11px] font-semibold text-foreground">{won(it.pick.price)} <span className="hidden font-normal text-muted-foreground sm:inline">· {it.pick.mall}</span></span>
                   </a>
                 ) : (
                   <p className="text-xs text-amber-400">{it.notes?.at(-1) ?? "맞는 상품을 못 찾았어요"}</p>
                 )}
                 {it.backups.length > 0 && (
                   <div className="flex min-w-0 flex-col gap-1">
-                    <p className="text-[11px] text-muted-foreground">다른 후보 — 누르면 바꿔요</p>
-                    <div className="flex gap-1.5">
+                    <p className="text-[10px] text-muted-foreground">다른 후보</p>
+                    <div className="grid grid-cols-3 gap-1">
                       {it.backups.map((b) => (
                         <button key={`${b.channel}-${b.id}`} onClick={() => swap(look, it, b)} disabled={swapping !== null} title={`${b.name} · ${won(b.price)}`}
-                          className="relative h-14 w-14 shrink-0 overflow-hidden rounded-md border border-border bg-secondary/30 hover:border-primary/60 disabled:opacity-50">
+                          className="relative aspect-square w-full overflow-hidden rounded-md border border-border bg-secondary/30 hover:border-primary/60 disabled:opacity-50">
                           {b.image && (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img src={b.image} alt="" className="h-full w-full object-contain" />

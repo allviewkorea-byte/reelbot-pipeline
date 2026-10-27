@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
-import { ExternalLink, ImagePlus, Loader2, Search } from "lucide-react"
+import { ChevronDown, ExternalLink, ImagePlus, Loader2, Search } from "lucide-react"
 import { prepareFile } from "@/components/shorts/FamilyCastPanel"
 import { jsonOrThrow } from "@/components/studio/studio-lib"
+import { useFold } from "@/components/insta/useFold"
 
 // 오늘의 레퍼런스(A2-1) — 유튜브 코디 영상 썸네일 + AI 가 읽은 컨셉 이름. 참고용(결과물에 그대로 쓰지 않음).
 // "레퍼런스 모으기" = 오늘 검색어로 수집(하루 1회, 이미 했으면 분석만) → 백그라운드, 5초마다 다시 읽는다.
@@ -22,6 +23,7 @@ interface Usage { youtube: { units: number; cap: number }; has_youtube_key: bool
 export function RefsPanel() {
   const [refs, setRefs] = useState<RefRow[]>([])
   const [running, setRunning] = useState(false)
+  const [open, toggle] = useFold("insta-refs", false)
   const [usage, setUsage] = useState<Usage | null>(null)
   const [uploading, setUploading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -79,8 +81,11 @@ export function RefsPanel() {
   return (
     <section className="flex min-w-0 flex-col gap-3 rounded-xl border border-border bg-card p-4">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <h2 className="text-sm font-semibold text-foreground">오늘의 레퍼런스</h2>
-        {usage && (
+        <button onClick={toggle} className="flex items-center gap-1 text-sm font-semibold text-foreground">
+          오늘의 레퍼런스 <span className="font-normal text-muted-foreground">{refs.length}</span>
+          <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
+        </button>
+        {open && usage && (
           <span className="text-[11px] text-muted-foreground">
             {usage.has_youtube_key ? `유튜브 사용량 ${usage.youtube.units}/${usage.youtube.cap}` : "유튜브 연결 필요"}
           </span>
@@ -101,10 +106,10 @@ export function RefsPanel() {
           {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />} {running ? "찾는 중…" : "레퍼런스 모으기"}
         </button>
       </div>
-      {refs.length === 0 ? (
+      {!open ? null : refs.length === 0 ? (
         <p className="text-xs text-muted-foreground">아직 모은 레퍼런스가 없어요.</p>
       ) : (
-        <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
+        <div className="grid min-w-0 grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-6">
           {refs.map((r) => {
             const looks = r.analysis?.looks ?? []
             const skip = r.usable === false
