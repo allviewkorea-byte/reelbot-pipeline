@@ -201,15 +201,14 @@ POSES: dict[str, dict] = {
 }
 
 # 자유분방(대표 2026-10-27 "좀 더 자유분방했으면") — 컷마다 하나 섞는 순간·연출(70%).
+# 흔들림·초점 나간 연출은 뺐다(대표 2026-10-27: 팔·다리가 흐려 옷이 안 보임).
 # face: 얼굴(입술 포함)이 보일 때만 쓰는 표정.
 MOODS = [
     {"en": "caught mid-laugh in a spontaneous moment"},
     {"en": "making a playful peace sign with her free hand"},
     {"en": "her hair blowing across the frame in the wind"},
-    {"en": "a slight motion blur because she was moving, charmingly imperfect"},
     {"en": "shot with the on-camera flash at night, a little overexposed, Y2K party-snapshot feel"},
     {"en": "a tilted, carefree angle like she snapped it in a hurry"},
-    {"en": "slightly out of focus in a charming, unbothered way"},
     {"en": "a cute pouty lips expression", "face": True},
     {"en": "biting her lip with a cheeky half smile", "face": True},
     {"en": "a big carefree smile", "face": True},

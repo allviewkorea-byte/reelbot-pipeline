@@ -29,6 +29,7 @@ from typing import Callable
 
 from adapters import r2_storage
 from adapters.shopping import CoupangClient, NaverClient, QuotaExceeded, ShoppingError
+from services import insta_brands as BR
 from services import insta_outfit as io
 from services import insta_outfit_plan as P
 from services import insta_refs as refs
@@ -48,9 +49,10 @@ COUPANG_MARGIN = 5         # 1등이 네이버여도 쿠팡이 이 점수 안이
 
 # 종류별 가격대(원) — 성인 여성 데일리 기준
 # 2026-10-27 대표 피드백("옷 선택이 후줄근") — 하한을 올려 너무 싼 기본템을 걸러낸다.
+# 대표 2026-10-27: 5만~50만 원(상의·하의는 5만 이상이 쿠팡에 드물어 3만부터). 소품은 그대로.
 PRICE_RANGE: dict[str, tuple[int, int]] = {
-    "top": (19_000, 180_000), "bottoms": (22_000, 180_000), "dress": (29_000, 250_000),
-    "outerwear": (49_000, 450_000), "shoes": (29_000, 280_000), "bag": (25_000, 350_000),
+    "top": (30_000, 500_000), "bottoms": (30_000, 500_000), "dress": (50_000, 500_000),
+    "outerwear": (50_000, 500_000), "shoes": (50_000, 500_000), "bag": (50_000, 500_000),
     "accessory": (9_000, 150_000),
 }
 _EXCLUDE = re.compile(r"(키즈|아동|주니어|유아|남아|여아|베이비|토들러|남자|남성|맨즈|남자친구|신사|"
@@ -67,10 +69,13 @@ def code_filter(cands: list[dict], kind: str) -> tuple[list[dict], dict]:
     """가격·제외어·카테고리·중복. → (남은 후보, 제외 사유별 개수)."""
     lo, hi = PRICE_RANGE.get(kind, (3_000, 500_000))
     seen_img, seen_title = set(), set()
-    out, why = [], {"price": 0, "excluded": 0, "duplicate": 0}
+    out, why = [], {"price": 0, "excluded": 0, "duplicate": 0, "brand": 0}
     for c in cands:
         if not (lo <= int(c.get("price") or 0) <= hi):
             why["price"] += 1
+            continue
+        if BR.excluded(c.get("name", "")) or BR.too_cheap_for_brand(c.get("name", ""), c.get("price"), kind):
+            why["brand"] += 1   # 노티·명품 / A급 브랜드인데 너무 쌈(가품 의심)
             continue
         if _EXCLUDE.search(c.get("name", "")) or _EXCLUDE_CAT.search(c.get("category", "")):
             why["excluded"] += 1

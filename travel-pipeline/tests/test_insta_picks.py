@@ -77,7 +77,7 @@ def test_naver_parse():
 
 
 # ── 필터·조합 ────────────────────────────────────────────────────────────
-def _c(pid, name, price=30000, img=None, cat="여성의류", ch="naver"):
+def _c(pid, name, price=60000, img=None, cat="여성의류", ch="naver"):
     return {"channel": ch, "product_id": pid, "name": name, "price": price, "image_url": img or f"https://i/{pid}.jpg", "category": cat}
 
 
@@ -87,7 +87,7 @@ def test_code_filter():
              _c("9", "고가 니트", price=900000), _c("10", "아주 싼 니트", price=1000)]
     kept, why = K.code_filter(cands, "top")
     assert [c["product_id"] for c in kept] == ["1"]
-    assert why == {"price": 2, "excluded": 5, "duplicate": 2}
+    assert why == {"price": 2, "excluded": 5, "duplicate": 2, "brand": 0}
 
 
 def test_color_family_and_combo():
