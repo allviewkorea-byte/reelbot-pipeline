@@ -1,17 +1,18 @@
-"""인스타 쇼핑 A3 — 컬렉션 릴스(대표 승인 2026-10-27: 롤모델 @yxyxeon 포맷).
+"""인스타 쇼핑 A3 — 컬렉션 릴스(대표 승인 2026-10-27).
 
-"같은 자세·같은 배경에 옷만 바꾼 Look 1~N" 릴스 1개를 끝까지 자동으로 만든다.
-  1) 테마: AI가 계절·생활·스타일 가이드로 카테고리 1개(예: 퍼 아우터) + 표지 카피(영문 소제목·한글 2줄·.zip 박스)
-  2) 상품: 테마 종류 N개(색이 겹치지 않게) + 고정 베이스(하의·신발 등)를 쿠팡 공식 API로 픽
-  3) Look 1: A1 착장 파이프라인(턱 아래로 자른 착장 중심 컷 — 롤모델 스타일)
-  4) Look 2~N: Look 1 결과를 참조로 "같은 사람·자세·배경, 그 옷만 교체"(Muse edit) + 검수 1회 재생성
-  5) 영상: ffmpeg — 표지 1.2초 + 컷마다 1.8초, 가운데 세리프 "Look N". 무음(음악은 올릴 때 인스타에서)
-  6) 저장: R2 insta/collections/{id}/ + ig_collections. 쿠팡 이미지 사본은 끝나면 삭제(약관 제5조)
+"테마 하나(예: 가디건)로 01~05, 컷마다 다른 포즈·장소·코디" 릴스 1개를 끝까지 자동으로 만든다.
+(2026-10-27 대표 변경: 같은 포즈에 옷만 바꾸던 방식 → 매번 다른 포즈·배경·코디. 같은 포즈 방식은 없앰)
+  1) 테마: AI가 계절·생활·스타일 가이드로 카테고리 1개 + 표지 카피(영문 소제목·"○○ 모음.zip")
+  2) 상품: 테마 종류 N개(색·소재가 겹치지 않게) + 함께 입는 종류(하의·신발 등)는 종류마다 후보 여러 개를 골라
+     룩마다 다른 것을 짝지음(쿠팡 검색은 종류당 1회 — 시간당 한도)
+  3) 장면: 룩마다 A1 장면 기획(plan_scene)으로 서로 다른 포즈·장소·얼굴 컷 — 미리보기에서 보여 준다
+  4) 생성: 룩마다 A1 착장 파이프라인(기준 얼굴·체형 검수 포함)
+  5) 영상: ffmpeg — 표지 1.2초 + 컷마다 1.8초, 번호 스티커 01~05. 무음(음악은 올릴 때 인스타에서)
+  6) 저장: R2 + ig_collections. 쿠팡 이미지 사본은 끝나면 삭제(약관 제5조)
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
@@ -26,8 +27,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from adapters import r2_storage
-from adapters.base import ImageGenerationRequest
 
+from services import character_studio as cs
 from services import character_studio_gen as gen
 from services import insta_brands as BR
 from services import insta_coordi as coordi
@@ -41,9 +42,8 @@ logger = logging.getLogger(__name__)
 N_LOOKS = 5
 COVER_SEC = 1.2
 LOOK_SEC = 1.8
-SWAP_RETRY = 1
 W, H = 1080, 1920
-LOOK1_POSES = ["mirror_lean", "wall_knee_camera"]   # 롤모델처럼 전신·착장 중심, 얼굴은 턱 아래로
+SCENE_TRIES = 3   # 앞 룩과 포즈·장소가 겹치면 다시 기획하는 횟수
 
 # AI 실패 시 계절별 기본 테마
 FALLBACK_THEMES: dict[str, list[dict]] = {
@@ -80,7 +80,8 @@ FALLBACK_THEMES: dict[str, list[dict]] = {
 
 _THEME_SYSTEM = (
     "You plan ONE Instagram 'collection reel' for a hip Korean virtual fashion influencer in her early 20s "
-    "(꾸안꾸, Seoul street vibe). The reel shows the same pose N times while ONLY one garment category changes. "
+    "(꾸안꾸, Seoul street vibe). The reel shows N different everyday outfits, each built around one item of the "
+    "theme category, in different places and poses. "
     "Follow the style_guide. Return ONE JSON object: "
     '{"kind": "outerwear|top|bottoms|dress|shoes|bag", "concept": "<짧은 한글 테마, 8자 이내>", '
     '"title_en": "<UPPERCASE english subtitle like FUR OUTER COLLECTION>", '
@@ -88,7 +89,7 @@ _THEME_SYSTEM = (
     '"queries": ["<쿠팡 검색어 — 여성 + 종류 + 특징>", "...", "..."], '
     '"base": [{"kind": "...", "queries": ["<고정으로 함께 입을 아이템 검색어>"]}], '
     '"styling_en": "<optional non-product styling like sheer black tights, or empty>"} — base has 1-2 items, '
-    "different kinds from the theme kind, plain and versatile so every variant looks good with them. "
+    "different kinds from the theme kind, plain and versatile (we pick several of each, one per look). "
     "The 3 queries MUST differ in material or color (e.g. leather / suede / wool, or black / brown / cream) so the "
     "looks are clearly different from each other — never 3 queries for the same material."
 )
@@ -205,20 +206,28 @@ def pick_variants(theme: dict, d: picks.Deps, usage: dict, n: int = N_LOOKS,
     return out[:n]
 
 
-def pick_base(theme: dict, d: picks.Deps, usage: dict) -> list[dict]:
-    """고정 베이스 아이템(종류마다 1등)."""
-    items = []
+def pick_base(theme: dict, d: picks.Deps, usage: dict, n: int = N_LOOKS) -> list[dict]:
+    """함께 입는 종류마다 후보 n개(색이 고르게) → [{kind, picks:[…]}]. 룩 i 는 picks[i % len] 을 입는다."""
+    pools = []
     with tempfile.TemporaryDirectory() as td:
         for b in theme.get("base") or []:
             spec = {"kind": b["kind"], "queries": b["queries"], "color_name": "", "hex": None, "fit": "", "length": "",
                     "material": "", "details": ""}
-            cands, _ = picks.gather(spec, d, usage)
+            cands, notes = picks.gather(spec, d, usage)
+            usage.setdefault("notes", []).extend(notes)
             kept, _ = picks.code_filter(cands, spec["kind"])
             scored, _ = picks.judge(spec, {"seasons": [_season()]}, kept, d, usage, Path(td)) if kept else ([], [])
-            pick, _, _ = picks.choose(scored)
-            if pick:
-                items.append({"kind": b["kind"], "pick": pick})
-    return items
+            scored = [c for c in scored if c.get("score", 0) >= picks.MIN_SCORE]
+            out, fams = [], set()
+            for c in scored:
+                fam = picks.color_family((c.get("scores") or {}).get("hex"))[0]
+                if fam not in fams or fam == "unknown":
+                    out.append(c)
+                    fams.add(fam)
+            out += [c for c in scored if c not in out]
+            if out:
+                pools.append({"kind": b["kind"], "picks": out[:n]})
+    return pools
 
 
 def _saved(cands: list[dict], d: picks.Deps) -> list[dict]:
@@ -231,56 +240,6 @@ def _saved(cands: list[dict], d: picks.Deps) -> list[dict]:
     return out
 
 
-# ── 옷 교체(Look 2~N) ─────────────────────────────────────────────────────
-_SWAP_REVIEW = (
-    "You check one frame of an Instagram 'same pose, different outfit' reel. Image 1 is the base photo, image 2 is "
-    "the new frame, image 3 is the product photo of the garment that must now be worn. Fail if ANY:\n"
-    "1. different: the person, hair, pose, hand position, background, lighting or framing clearly changed from image 1.\n"
-    "2. product_mismatch: the swapped garment is noticeably different from image 3 (color, pattern, key details, length).\n"
-    "3. anatomy: wrong fingers/limbs, melted hands.\n"
-    "4. text: captions, watermarks, or AI-made logos on clothing.\n"
-    'Return ONE JSON object only: {"pass": true|false, "violations": [{"type": "<key>", "detail": "짧은 한국어"}], '
-    '"fix_en": "<one short English fix or empty>"}.'
-)
-
-
-def swap_prompt(kind: str, fix: str | None = None) -> str:
-    noun = P.PRODUCT_KINDS.get(kind, ("", "the garment"))[1]
-    prompt = (f"Same photo as image 1 — exactly the same woman, same face, same hair, same pose, same hand position, "
-              f"same background, same lighting and the same framing. Replace ONLY {noun} with {noun} from image 2 — "
-              f"take only the clothing from image 2 and ignore any model wearing it; {P._DETAIL}. Everything else in "
-              f"the photo stays exactly as it is.")
-    if fix:
-        prompt += f" Important fix from the last attempt: {fix.strip().rstrip('.')}."
-    return gen.strip_unsafe(prompt)
-
-
-def swap_look(base_url: str, base_path: Path, product: dict, product_path: Path, out: Path) -> dict:
-    """Look 1 → 옷만 교체. 검수 실패면 1회 재생성. → {cost, attempts, review}."""
-    adapter = io.get_muse_adapter()
-    cost, fix, review = 0.0, None, None
-    for attempt in range(1 + SWAP_RETRY):
-        prompt = swap_prompt(product["kind"], fix)
-        res = asyncio.run(adapter.generate(ImageGenerationRequest(
-            prompt=prompt, reference_images=[base_url, product["url"]], aspect_ratio="9:16", output_path=str(out))))
-        cost += res.cost_usd
-        try:
-            with tempfile.TemporaryDirectory() as td:
-                t = Path(td)
-                imgs = [gen._small_jpeg(base_path, t / "a.jpg"), gen._small_jpeg(out, t / "b.jpg"),
-                        gen._small_jpeg(product_path, t / "c.jpg")]
-                data = io._vision_json(_SWAP_REVIEW, imgs, "기준대로 검수하고 JSON 만 출력해.", "insta_swap_review")
-            vio = [v for v in (data.get("violations") or []) if isinstance(v, dict)][:4]
-            review = {"pass": bool(data.get("pass")) and not vio, "violations": vio}
-            fix = str(data.get("fix_en") or "") or "; ".join(str(v.get("detail", "")) for v in vio) or None
-        except Exception as e:  # noqa: BLE001 - 검수 실패는 통과(반자동 기간)
-            review = {"pass": True, "skipped": str(e)[:120], "violations": []}
-        if review["pass"]:
-            return {"cost": cost, "attempts": attempt + 1, "review": review}
-    return {"cost": cost, "attempts": 1 + SWAP_RETRY, "review": review}
-
-
-# ── 영상 ─────────────────────────────────────────────────────────────────
 _SERIF = ["/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc", "/usr/share/fonts/truetype/nanum/NanumMyeongjo.ttf"]
 _BOLD = ["/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf", "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
          "/usr/share/fonts/truetype/nanum/NanumGothic.ttf"]
@@ -382,11 +341,6 @@ def _recent_concepts(d: picks.Deps, limit: int = 6) -> list[str]:
         return []
 
 
-# 장면 후보(Look 1 포즈 → 어울리는 장소) — 미리보기에서 보여 주고 그대로 만든다
-LOOK1_SCENES: dict[str, list[str]] = {
-    "mirror_lean": ["elevator_mirror", "entry_mirror", "fitting_room"],
-    "wall_knee_camera": ["entry_mirror", "fitting_room", "elevator_mirror"],
-}
 
 
 def _guard(character_id: str, d: picks.Deps) -> None:
@@ -462,36 +416,74 @@ def _keep(c: dict) -> dict:
     return {k: c.get(k) for k in _KEEP}
 
 
+def _scenes(character_id: str, looks_products: list[list[dict]], rng: random.Random, llm=None) -> list[dict]:
+    """룩마다 A1 장면 기획 — 앞 룩들을 history 로 넘기고, 포즈·장소가 겹치면 다시(최대 SCENE_TRIES)."""
+    refs = cs.confirmed_refs(character_id)
+    hair_roles = sorted(r for r in refs if cs.role_category(r) == "hair")
+    history = [h for h in io.list_outfits(character_id, io.HISTORY_N, include_hidden=True) if h.get("plan")]
+    plans: list[dict] = []
+    for prods in looks_products:
+        summary = [{"kind": p.get("kind"), "desc": p.get("name") or ""} for p in prods]
+        hist = [{"plan": x} for x in reversed(plans)] + history
+
+        def fresh(pl: dict) -> bool:
+            return all(pl["pose"] != x["pose"] and pl["location"] != x["location"] for x in plans)
+
+        plan = None
+        for _ in range(SCENE_TRIES):
+            plan = P.plan_scene(character_id=character_id, products=summary, hair_roles=hair_roles,
+                                history=hist, rng=rng, llm=llm)
+            if fresh(plan):
+                break
+        else:  # 그래도 겹치면 규칙 후보 중 안 쓴 포즈·장소 조합으로 지정
+            cand = P.candidates(weekday=datetime.now(P.KST).weekday(), products=summary, hair_roles=hair_roles,
+                                history=hist, now=datetime.now(P.KST))
+            free = [(loc, pose) for loc, pose in cand["pairs"]
+                    if all(pose != x["pose"] and loc != x["location"] for x in plans)]
+            if free:
+                loc, pose = rng.choice(free)
+                plan = P.plan_scene(character_id=character_id, products=summary, hair_roles=hair_roles, history=hist,
+                                    options={"location": loc, "pose": pose}, rng=rng, llm=llm)
+        plans.append(plan)
+    return plans
+
+
+_SCENE_KEEP = ("pose", "pose_ko", "location", "location_ko", "face", "hair_role", "eyewear", "eyewear_ko", "season")
+
+
 def _plan(job_id: str, d: picks.Deps, cid: str, args: dict, llm, rng: random.Random) -> dict:
-    """테마 → 장면 → 상품 픽 → ig_collections(planned). 쿠팡 이미지 사본은 지운다(만들 때 다시 받음)."""
+    """테마 → 상품(테마 N개 + 함께 입을 후보) → 룩별 코디·장면 → ig_collections(planned). 쿠팡 사본은 지운다."""
     usage: dict = {}
     products: list[dict] = []
     try:
         season, life = _season(), coordi._life_today()
         _set(job_id, step="테마 정하는 중")
         theme = plan_theme(season, life, _recent_concepts(d), llm=llm, rng=rng)
-        pose = rng.choice(LOOK1_POSES)
-        location = rng.choice(LOOK1_SCENES[pose])
-        theme["plan"] = {"pose": pose, "pose_ko": P.POSES[pose]["ko"], "location": location,
-                         "location_ko": P.LOCATIONS[location]["ko"], "face": "chin_crop", "season": season}
+        theme["plan"] = {"mode": "varied", "season": season}
         _set(job_id, step=f"「{theme['concept']}」 상품 고르는 중", theme={k: theme[k] for k in ("concept", "title_ko", "zip")})
         variants = _saved(pick_variants(theme, d, usage, args["n"], rng=rng), d)
-        base = pick_base(theme, d, usage)
-        base_saved = _saved([b["pick"] for b in base], d) if base else []
         for c in variants:
             c["kind"] = theme["kind"]
-        for b, c in zip(base, base_saved):
-            c["kind"] = b["kind"]
-        products = variants + base_saved
+        pools = pick_base(theme, d, usage, len(variants) or args["n"])
+        saved_pools = []
+        for pool in pools:
+            got = _saved(pool["picks"], d)
+            for c in got:
+                c["kind"] = pool["kind"]
+            saved_pools.append(got)
+        products = variants + [c for pool in saved_pools for c in pool]
         if len(variants) < 3:
             if any("한도" in n for n in usage.get("notes") or []):
                 raise CollectionError("쿠팡 검색 한도에 걸렸어요 — 1시간쯤 뒤에 다시 기획해 주세요.")
             raise CollectionError(f"「{theme['concept']}」 상품을 {len(variants)}개밖에 못 찾았어요 — '다른 기획 보기'로 다시 해 주세요.")
-        looks = [{"n": i + 1, "product": _keep(v)} for i, v in enumerate(variants)]
-        _patch(d, cid, {"theme": theme, "looks": looks, "base_items": [_keep(c) for c in base_saved],
-                        "status": "planned", "usage": usage,
+        outfits = [[v] + [pool[i % len(pool)] for pool in saved_pools] for i, v in enumerate(variants)]
+        _set(job_id, step="룩마다 포즈·장소 정하는 중")
+        plans = _scenes(args["character_id"], outfits, rng, llm=args.get("scene_llm"))
+        looks = [{"n": i + 1, "product": _keep(o[0]), "items": [_keep(c) for c in o[1:]],
+                  "scene": {k: pl.get(k) for k in _SCENE_KEEP}} for i, (o, pl) in enumerate(zip(outfits, plans))]
+        _patch(d, cid, {"theme": theme, "looks": looks, "base_items": [], "status": "planned", "usage": usage,
                         "cost_usd": round(picks.vision_cost_usd(d.meter), 4)})
-        return {"theme": theme, "looks": looks, "base": base_saved}
+        return {"theme": theme, "looks": looks}
     finally:
         picks.delete_images(products, d)
         for c in products:
@@ -499,55 +491,43 @@ def _plan(job_id: str, d: picks.Deps, cid: str, args: dict, llm, rng: random.Ran
 
 
 def _make(job_id: str, d: picks.Deps, cid: str, character_id: str, rng: random.Random) -> None:
-    """기획(ig_collections) 그대로: Look 1 → 옷 교체 Look 2~N → 영상."""
+    """기획(ig_collections) 그대로: 룩마다 A1 착장(그 룩의 코디·포즈·장소) → 영상."""
     row = d.rest("ig_collections", "GET", params={"select": "*", "id": f"eq.{cid}"})[0]
-    theme, plan = row["theme"], row["theme"]["plan"]
-    variants = [dict(lk["product"]) for lk in row.get("looks") or []]
-    base = [dict(b) for b in row.get("base_items") or []]
-    for c in variants + base:
-        c["image_key"] = None   # 기획 때 지웠으므로 원본 URL 에서 다시 받는다
+    theme = row["theme"]
+    plan_looks = row.get("looks") or []
+    all_items = []
     tmp = Path(tempfile.mkdtemp(prefix="insta_coll_"))
     cost = float(row.get("cost_usd") or 0)
     meter0 = picks.vision_cost_usd(d.meter)
     try:
-        items = [{"kind": theme["kind"], "pick": variants[0], "source": "coupang"}] + \
-                [{"kind": c.get("kind"), "pick": c, "source": "coupang"} for c in base]
-        _set(job_id, step="Look 1 만드는 중", n=len(variants))
-        coordi.ensure_images(items, d)
-        opts = {"pose": plan["pose"], "location": plan["location"], "face": plan.get("face", "chin_crop")}
-        if theme.get("styling_en"):
-            opts["styling_en"] = theme["styling_en"]
-        oj = io.start(character_id, coordi._cap_products(coordi._outfit_products(items)), opts,
-                      remake_of=f"{cid}:{secrets.token_hex(2)}")
-        io.run(oj["id"], rng=rng)
-        oj = io.get_job(oj["id"])
-        cost += oj.get("cost_usd") or 0.0
-        if oj["state"] != "done":
-            raise CollectionError(f"Look 1 생성 실패: {oj.get('error') or ''}")
-        out1 = io.get_outfit(oj["outfit_id"])
-        base_key = out1["image_key"]
-        base_url = io.public_url(base_key)
-        base_path = io._download(base_url, tmp / "look1.png")
-        looks = [{"n": 1, "outfit_id": oj["outfit_id"], "image_key": base_key, "processed_key": out1.get("processed_key"),
-                  "product": _keep(variants[0]), "review": out1.get("review")}]
-        _set(job_id, done_looks=1)
-        imgs = [str(io.postprocess(base_path, tmp / "p1.jpg").name)]
-        for i, v in enumerate(variants[1:], start=2):
-            _set(job_id, step=f"Look {i} 만드는 중")
-            coordi.ensure_images([{"kind": theme["kind"], "pick": v}], d)
-            prod = {"kind": theme["kind"], "url": io.public_url(v["image_key"])}
-            prod_path = io._download(prod["url"], tmp / f"prod{i}.jpg")
-            out = tmp / f"look{i}.png"
-            got = swap_look(base_url, base_path, prod, prod_path, out)
-            cost += got["cost"]
-            key = f"insta/collections/{cid}/look{i}.png"
-            r2_storage.upload_image(str(out), key, bucket=r2_storage._character_bucket(),
-                                    public_base_url=r2_storage._character_public_base(), content_type="image/png")
-            imgs.append(str(io.postprocess(out, tmp / f"p{i}.jpg").name))
-            looks.append({"n": i, "image_key": key, "review": got["review"], "attempts": got["attempts"],
-                          "product": _keep(v)})
-            _set(job_id, done_looks=i)
-            _patch(d, cid, {"looks": looks + [{"n": k + 1, "product": _keep(x)} for k, x in enumerate(variants) if k >= i]})
+        looks, imgs = [], []
+        _set(job_id, n=len(plan_looks))
+        for lk in plan_looks:
+            i = lk["n"]
+            _set(job_id, step=f"{i:02d} 만드는 중")
+            outfit = [dict(lk["product"])] + [dict(c) for c in lk.get("items") or []]
+            for c in outfit:
+                c["image_key"] = None   # 기획 때 지웠으므로 원본 URL 에서 다시 받는다
+            all_items += outfit
+            items = [{"kind": c.get("kind"), "pick": c, "source": "coupang"} for c in outfit]
+            coordi.ensure_images(items, d)
+            sc = lk.get("scene") or {}
+            opts = {k: v for k, v in {"pose": sc.get("pose"), "location": sc.get("location"), "face": sc.get("face"),
+                                      "hair": sc.get("hair_role"), "styling_en": theme.get("styling_en")}.items() if v}
+            oj = io.start(character_id, coordi._cap_products(coordi._outfit_products(items)), opts,
+                          remake_of=f"{cid}:{i}:{secrets.token_hex(2)}")
+            io.run(oj["id"], rng=rng)
+            oj = io.get_job(oj["id"])
+            cost += oj.get("cost_usd") or 0.0
+            if oj["state"] != "done":
+                raise CollectionError(f"{i:02d} 생성 실패: {oj.get('error') or ''}")
+            out = io.get_outfit(oj["outfit_id"])
+            path = io._download(io.public_url(out["image_key"]), tmp / f"look{i}.png")
+            imgs.append(str(io.postprocess(path, tmp / f"p{i}.jpg").name))
+            looks.append({**lk, "outfit_id": oj["outfit_id"], "image_key": out["image_key"],
+                          "processed_key": out.get("processed_key"), "review": out.get("review")})
+            _set(job_id, done_looks=len(looks))
+            _patch(d, cid, {"looks": looks + plan_looks[len(looks):]})
         _set(job_id, step="릴스 영상 만드는 중")
         video, cover = render_reel(tmp, imgs, theme)
         vkey, ckey = f"insta/collections/{cid}/reel.mp4", f"insta/collections/{cid}/cover.jpg"
@@ -558,7 +538,7 @@ def _make(job_id: str, d: picks.Deps, cid: str, character_id: str, rng: random.R
         _patch(d, cid, {"looks": looks, "video_key": vkey, "cover_key": ckey, "status": "ok", "cost_usd": total})
         _set(job_id, cost_usd=total)
     finally:
-        picks.delete_images(variants + base, d)
+        picks.delete_images(all_items, d)
         shutil.rmtree(tmp, ignore_errors=True)
 
 

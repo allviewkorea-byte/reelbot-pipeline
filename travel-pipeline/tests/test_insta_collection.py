@@ -47,11 +47,6 @@ def test_plan_theme_ai_and_fallback():
     assert f["source"] == "fallback" and f["concept"] == "앙고라 가디건"
 
 
-def test_swap_prompt_keeps_everything_but_garment():
-    p = CL.swap_prompt("outerwear", fix="buttons should be gold")
-    assert "same pose" in p and "Replace ONLY" in p and "image 2" in p and "buttons should be gold" in p
-
-
 @needs_ffmpeg
 def test_render_reel(tmp_path, monkeypatch):
     if not all(Path(f).exists() for f in DEJAVU):
@@ -97,9 +92,11 @@ def test_collection_end_to_end(coordi, monkeypatch):  # noqa: F811
     assert row["status"] == "ok" and len(row["looks"]) == 4 and row["video_key"].endswith("reel.mp4")
     assert [lk["n"] for lk in row["looks"]] == [1, 2, 3, 4]
     assert len({lk["product"]["id"] for lk in row["looks"]}) == 4                         # 룩마다 다른 상품
-    swap_calls = coordi.muse.calls[1:]
-    assert len(swap_calls) >= 3 and all("Replace ONLY" in c.prompt for c in swap_calls)
-    assert all(len(c.reference_images) == 2 for c in swap_calls)                         # Look 1 + 상품
+    calls = coordi.muse.calls
+    assert len(calls) >= 4 and all("reference image 1" in c.prompt for c in calls)        # 룩마다 새로 생성(얼굴·체형 참조)
+    scenes = [(lk["scene"]["pose"], lk["scene"]["location"]) for lk in row["looks"]]
+    assert len({p for p, _ in scenes}) == 4 and len({loc for _, loc in scenes}) == 4       # 포즈·장소 모두 다름
+    assert all(lk["items"] for lk in row["looks"])                                         # 함께 입는 옷도 룩마다
     assert row["video_key"] in coordi.s3.objs and row["cover_key"] in coordi.s3.objs
     assert not [k for k in coordi.s3.objs if k.startswith("insta/products/coupang/")]   # 쿠팡 사본 삭제
     shown = CL.list_collections(d=d)[0]
@@ -127,9 +124,9 @@ def test_plan_then_make(coordi, monkeypatch):  # noqa: F811
     CL.run(j["id"], rng=random.Random(1))
     assert CL.get_job(j["id"])["state"] == "done"
     row = t.t["ig_collections"][0]
-    assert row["status"] == "planned" and len(row["looks"]) == 3 and row["theme"]["plan"]["pose"] in CL.LOOK1_POSES
-    assert row["theme"]["plan"]["location"] in CL.LOOK1_SCENES[row["theme"]["plan"]["pose"]]
-    assert all(lk["product"]["image_url"] for lk in row["looks"]) and len(row["base_items"]) == 2
+    assert row["status"] == "planned" and len(row["looks"]) == 3 and row["theme"]["plan"]["mode"] == "varied"
+    assert all(lk["scene"]["pose_ko"] and lk["scene"]["location_ko"] for lk in row["looks"])   # 미리보기에 장면
+    assert all(lk["product"]["image_url"] for lk in row["looks"]) and all(len(lk["items"]) == 2 for lk in row["looks"])
     assert not coordi.muse.calls                                                          # 미리보기는 이미지 생성 없음
     assert not [k for k in coordi.s3.objs if k.startswith("insta/products/coupang/")]   # 사본 삭제
     shown = CL.list_collections(d=d)[0]
@@ -142,8 +139,7 @@ def test_plan_then_make(coordi, monkeypatch):  # noqa: F811
     assert CL.get_job(m["id"])["state"] == "done", CL.get_job(m["id"])
     row = next(r for r in t.t["ig_collections"] if r["id"] == row["id"])
     assert row["status"] == "ok" and row["video_key"] and len(row["looks"]) == 3
-    first = coordi.muse.calls[0].prompt
-    assert row["theme"]["plan"]["location"] and "mirror" in first.lower() or "wall" in first.lower()
+    assert len(coordi.muse.calls) >= 3 and all(lk.get("outfit_id") for lk in row["looks"])
 
 
 def test_pick_variants_uses_all_queries(coordi):  # noqa: F811
