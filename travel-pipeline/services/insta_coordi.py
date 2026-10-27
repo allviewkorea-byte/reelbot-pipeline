@@ -401,6 +401,94 @@ def run_remake(job_id: str, *, rng=None) -> None:
         picks.delete_images([c for it in items for c in ([it["pick"]] if it.get("pick") else []) + it.get("backups", [])], d)
 
 
+# ── 오늘의 코디 찾기(완전 자동, 2026-10-27 대표: "반자동 아님") ──────────────
+# 유튜브 레퍼런스(분석 완료·참고 가능, 조회수 순) → 룩 1벌 쿠팡 픽(A2-2) → 착장(A1) → 쿠팡 이미지 삭제.
+# 대표 입력 없음. 스케줄 자동 실행(가동 토글)은 이 함수를 그대로 부르면 된다.
+_AUTO_KIND_ORDER = ["dress", "top", "bottoms", "outerwear", "shoes", "bag", "accessory"]
+
+
+def _cap_products(products: list[dict]) -> list[dict]:
+    """착장 입력은 최대 4개(A1) — 옷(원피스·상의·하의·아우터) → 신발 → 가방 → 소품 순으로 남긴다."""
+    rank = {k: i for i, k in enumerate(_AUTO_KIND_ORDER)}
+    return sorted(products, key=lambda p: rank.get(p.get("kind"), len(rank)))[: io.MAX_PRODUCTS]
+
+
+def start_auto(character_id: str = "chaei", d: picks.Deps | None = None) -> dict:
+    """다음 레퍼런스 룩으로 자동 코디 잡 등록(실행은 run_auto). 같은 캐릭터 자동 잡이 돌고 있으면 그 잡."""
+    d = d or picks.Deps()
+    char = _ready(character_id)
+    if not d.coupang.is_available():
+        raise CoordiError("쿠팡 연결이 필요해요(키 없음).")
+    with _LOCK:
+        for j in _JOBS.values():
+            if j.get("mode") == "auto" and j["state"] in ("queued", "running") and j["_args"]["character_id"] == char["id"]:
+                return public_job(j)
+    picks.sweep_images(d)
+    ref = picks.next_ref(d)
+    looks = ((ref or {}).get("analysis") or {}).get("looks") or []
+    if not ref or not looks:
+        raise CoordiError("고를 레퍼런스가 없어요 — '레퍼런스 모으기'를 먼저 눌러 주세요.")
+    look_id = f"lk-{datetime.now(timezone.utc):%Y%m%d}-{secrets.token_hex(3)}"
+    d.rest("ig_looks", "POST", json_body=[{"id": look_id, "ref_video_id": ref["video_id"], "look_index": 0,
+                                            "concept": looks[0].get("concept"), "spec": looks[0], "source": "reference",
+                                            "status": "picking"}], prefer="return=minimal")
+    job_id = f"cj_{secrets.token_hex(5)}"
+    with _LOCK:
+        _JOBS[job_id] = {"id": job_id, "look_id": look_id, "outfit_id": None, "mode": "auto", "state": "queued",
+                         "step": "준비", "error": None, "cost": None, "concept": looks[0].get("concept"),
+                         "ref": ref["video_id"], "_deps": d,
+                         "_args": {"character_id": char["id"], "ref": ref}}
+    return public_job(_JOBS[job_id])
+
+
+def run_auto(job_id: str, *, rng=None) -> None:
+    """BackgroundTasks 진입점: 쿠팡 픽 → 착장 → 쿠팡 이미지 삭제(성공·실패 모두)."""
+    with _LOCK:
+        j = _JOBS[job_id]
+        j["state"] = "running"
+        d, look_id, args = j["_deps"], j["look_id"], dict(j["_args"])
+    items: list[dict] = []
+    try:
+        _set(job_id, step="레퍼런스 룩에 맞는 쿠팡 상품 고르는 중")
+        look = picks.pick_look(look_id, args["ref"], 0, d)
+        items = look.get("items") or []
+        for it in items:
+            it["source"] = "coupang"
+        notes = [f"{P.PRODUCT_KINDS.get(it['kind'], [it['kind']])[0]}: 맞는 쿠팡 상품을 못 찾았어요"
+                 for it in items if not it.get("pick")]
+        if look.get("status") != "picked":
+            raise CoordiError("맞는 쿠팡 상품을 하나도 못 찾았어요 — 다시 누르면 다음 레퍼런스로 해요.")
+        d.rest("ig_looks", "PATCH", params={"id": f"eq.{look_id}"}, prefer="return=minimal", json_body={"items": items})
+        _set(job_id, step="입히는 중")
+        ensure_images(items, d)
+        products = _outfit_products(items)
+        capped = _cap_products(products)
+        if len(capped) < len(products):
+            notes.append(f"착장엔 {len(capped)}개까지만 입혀요({len(products) - len(capped)}개 제외)")
+        oj = io.start(args["character_id"], capped, {}, look_id=look_id, remake_of=f"{look_id}:{secrets.token_hex(2)}")
+        _set(job_id, outfit_id=oj["outfit_id"])
+        io.run(oj["id"], rng=rng)
+        oj = io.get_job(oj["id"])
+        _set(job_id, state="done" if oj["state"] == "done" else "failed", step="완료" if oj["state"] == "done" else "실패",
+             error=oj.get("error"), cost=cost_summary(d, oj.get("cost_usd") or 0.0), notes=notes)
+    except Exception as e:  # noqa: BLE001
+        msg = str(e)[:300]
+        logger.warning("[insta-coordi] 자동 %s 실패: %s", look_id, msg)
+        _set(job_id, state="failed", step="실패", error=msg, cost=cost_summary(d, 0.0))
+        try:
+            d.rest("ig_looks", "PATCH", params={"id": f"eq.{look_id}"}, prefer="return=minimal",
+                   json_body={"status": "failed", "error": msg})
+        except Exception:  # noqa: BLE001
+            pass
+    finally:
+        gone = picks.delete_images([c for it in items for c in ([it["pick"]] if it.get("pick") else []) + it.get("backups", [])], d)
+        if gone:
+            try:
+                d.rest("ig_looks", "PATCH", params={"id": f"eq.{look_id}"}, prefer="return=minimal", json_body={"items": items})
+            except Exception:  # noqa: BLE001
+                pass
+
+
 # ── 승인·반려·내리기 ─────────────────────────────────────────────────────
 def decide(outfit_id: str, decision: str, reason: str | None = None, d: picks.Deps | None = None) -> dict:
     """대표 승인(이 코디 좋아요)/반려(다른 코디). 착장·룩 상태 + ig_feedback."""

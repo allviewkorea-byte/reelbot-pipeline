@@ -260,3 +260,47 @@ def test_api_coordi_routes(coordi, monkeypatch):
     assert c.get("/insta/outfits", params={"character_id": "chaei"}).json()["outfits"] == []
     assert c.get("/insta/coordi/jobs/cj_nope").status_code == 404
     assert c.post("/insta/coordi", json={"products": BOSE, "mode": "fill"}).status_code == 400   # 쿠팡 키 없음
+
+
+# ── 오늘의 코디 찾기(완전 자동) ─────────────────────────────────────────────
+AUTO_LOOK = {"concept": "가을 출근룩", "seasons": ["autumn"], "items": [
+    {"kind": "bottoms", "color_name": "차콜", "hex": "#36454F", "fit": "regular", "queries": ["차콜 슬랙스 여성"]},
+    {"kind": "shoes", "color_name": "블랙", "hex": "#111111", "queries": ["블랙 로퍼 여성"]},
+]}
+
+
+@needs_ffmpeg
+def test_auto_ref_to_outfit_without_input(coordi):
+    t = coordi.t
+    t.t["ig_refs"] += [{"video_id": "m", "status": "analyzed", "views": 99, "analysis": {"usable": False, "looks": [AUTO_LOOK]}},
+                       {"video_id": "v1", "status": "analyzed", "views": 10, "analysis": {"looks": [AUTO_LOOK]}}]
+    d = _deps(t)
+    job = C.start_auto("chaei", d=d)
+    assert C.start_auto("chaei", d=d)["id"] == job["id"]                                   # 도는 중이면 같은 잡
+    assert job["ref"] == "v1" and job["concept"] == "가을 출근룩"                          # '참고 안 함'은 건너뜀
+    C.run_auto(job["id"], rng=random.Random(2))
+    j = C.get_job(job["id"])
+    assert j["state"] == "done" and j["outfit_id"], j
+    look = t.t["ig_looks"][0]
+    assert look["source"] == "reference" and look["status"] == "picked"
+    assert [(it["kind"], it["source"]) for it in look["items"]] == [("bottoms", "coupang"), ("shoes", "coupang")]
+    row = next(r for r in coordi.rest_out.rows if r["id"] == j["outfit_id"])
+    assert row["look_id"] == look["id"] and [p["kind"] for p in row["product_images"]] == ["bottoms", "shoes"]
+    assert t.t["ig_refs"][1]["status"] == "used"
+    assert not [k for k in coordi.s3.objs if k.startswith("insta/products/coupang/")]      # 쿠팡 사본 삭제
+
+
+def test_auto_needs_refs_and_coupang(coordi):
+    with pytest.raises(C.CoordiError, match="레퍼런스"):
+        C.start_auto("chaei", d=_deps(coordi.t))
+
+    class _Off:
+        def is_available(self):
+            return False
+    with pytest.raises(C.CoordiError, match="쿠팡"):
+        C.start_auto("chaei", d=K.Deps(coupang=_Off(), vision=_vision(SCORES), download=_dl, rest=coordi.t))
+
+
+def test_cap_products_keeps_clothes_first():
+    ps = [{"kind": k} for k in ("bag", "accessory", "shoes", "outerwear", "top", "bottoms")]
+    assert [p["kind"] for p in C._cap_products(ps)] == ["top", "bottoms", "outerwear", "shoes"]

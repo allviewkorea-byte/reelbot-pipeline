@@ -232,6 +232,20 @@ function InstaOutfitPage() {
     }
   }
 
+  // 오늘의 코디 찾기(완전 자동, 대표 입력 없음): 레퍼런스 → 쿠팡 픽 → 착장. 같은 잡 폴링(/insta/coordi/jobs).
+  async function auto() {
+    try {
+      const j = await jsonOrThrow(await fetch("/api/insta/coordi/auto", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ character_id: CHARACTER }),
+      }))
+      setJob({ ...j, kind: "coordi" })
+      setSwapped(null)
+      toast.message(j.concept ? `「${j.concept}」 코디를 찾는 중 — 3~5분 걸려요` : "오늘의 코디를 찾는 중 — 3~5분 걸려요")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "시작 실패")
+    }
+  }
+
   async function remake(o: Outfit) {
     try {
       const coordi = !!o.look_id
@@ -288,6 +302,21 @@ function InstaOutfitPage() {
         </div>
         <p className="text-xs text-muted-foreground">내 상품 사진과 링크를 넣고 버튼만 누르세요. 장소·포즈·헤어·아이웨어는 AI가 정해요.</p>
       </div>
+
+      {/* 오늘의 코디 찾기 — 완전 자동(2026-10-27 대표: 반자동 아님). 아래 "내 상품으로 코디"는 선택 기능. */}
+      <section className="flex min-w-0 flex-col gap-2 rounded-xl border border-primary/30 bg-card p-4 sm:flex-row sm:items-center">
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <h2 className="text-sm font-semibold text-foreground">오늘의 코디 찾기</h2>
+          <p className="text-xs text-muted-foreground">
+            {running ? job?.step || "진행 중…" : "레퍼런스 룩을 골라 쿠팡에서 비슷한 옷을 찾고, 채이에게 입혀요. 누르기만 하면 돼요."}
+          </p>
+        </div>
+        <button onClick={auto} disabled={!ready || running}
+          className="flex min-h-[44px] shrink-0 items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+          {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+          {running ? "만드는 중…" : "오늘의 코디 찾기"}
+        </button>
+      </section>
 
       <RefsPanel />
       <PicksPanel />
