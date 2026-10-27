@@ -376,6 +376,8 @@ _TAIL = ("Candid iPhone photo, not a professional shoot: slightly uneven exposur
          "wrinkles, a little everyday clutter, slight wide-angle phone lens distortion, natural color, no retouching.")
 _SELF_TAIL = ("She took this photo herself with her own phone for her Instagram — a casual, unposed self-shot, not a "
               "photographer's or model shoot: natural relaxed stance, slightly tilted, imperfect off-center framing.")
+_YOUTH = ("She looks like a hip Korean woman in her early 20s with a youthful Seoul street vibe (Seongsu, Hongdae) — "
+          "fresh and young, never mature or matronly; casual, slightly undone natural hair styling.")
 _MAKEUP = "Natural everyday makeup: light dewy base and a soft rosy lip tint — nothing heavy."
 _EFFORTLESS = ("Effortless, not overdressed (꾸안꾸): the clothes sit naturally on her with her own silhouette, minimal "
                "accessories — at most a thin necklace or small earrings, no pearls or brooches.")
@@ -428,7 +430,8 @@ def build(plan: dict, *, face_url: str, body_url: str, hair_url: str | None, pro
         parts = [
             f"Same woman as reference images 1 and 2 — same face shape, black hair color and the same body shape as the "
             f"reference, {hair_part}. Take only the clothing from the product images — ignore the body and face of any "
-            f"model wearing them. She is wearing exactly {wear} — {_DETAIL}."
+            f"model wearing them. She is wearing exactly {wear} — {_DETAIL}.",
+            _YOUTH,
         ]
         if any(p.get("revealing") for p in use):
             parts.append("She wears a plain fitted top underneath.")

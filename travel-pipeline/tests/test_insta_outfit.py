@@ -358,6 +358,7 @@ def test_kkuankku_plan_face_eyewear_and_prompt():
     assert plan["face"] == "sunglasses" and plan["eyewear"]["style"] == "wear" and P.EYEWEAR[plan["eyewear"]["item"]]["sun"]
     prompt, _ = P.build(plan, face_url="f", body_url="b", hair_url=None, products=[{"url": "u", "kind": "top"}])
     assert "rosy lip tint" in prompt and "꾸안꾸" in prompt and "no pearls" in prompt
+    assert "early 20s" in prompt and "never mature" in prompt                          # 노티 금지(2026-10-27)
     crop = {**plan, "pose": "arm_selfie_high", "face": "chin_crop", "eyewear": None, "prop": "holding an iced americano"}
     prompt, _ = P.build(crop, face_url="f", body_url="b", hair_url=None, products=[{"url": "u", "kind": "top"}])
     assert "just below the eyes" in prompt and "iced americano" in prompt and "took this photo herself" in prompt
