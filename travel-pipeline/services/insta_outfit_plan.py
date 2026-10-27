@@ -332,6 +332,9 @@ def choose_eyewear(history: list[dict], rng: random.Random, override: str | None
     return {"item": item, "style": style}
 
 
+FACE_MODES = {"phone", "chin_crop", "sunglasses", "full", "mirror_full", "profile", "out_of_frame"}
+
+
 def choose_face(pose_key: str, rng: random.Random) -> str:
     """얼굴 처리(대표 2026-10-27: 가리는 건 20%, 나머지는 얼굴 보여도 됨).
     발·디테일·플랫레이처럼 원래 얼굴이 없는 컷은 그대로, 캔디드는 옆모습, 선글라스 클로즈업은 선글라스."""
@@ -469,7 +472,7 @@ def plan_scene(*, character_id: str, products: list[dict], hair_roles: list[str]
     if hair_role is None and hairs:
         hair_role = rng.choice(hairs)
     loc, pose = pick
-    face = choose_face(pose, rng)
+    face = options.get("face") if options.get("face") in FACE_MODES else choose_face(pose, rng)
     if POSES[pose].get("force_eyewear") == "sun" or face == "sunglasses":
         if not (eyewear and EYEWEAR[eyewear["item"]]["sun"] and eyewear["style"] == "wear"):
             eyewear = {"item": rng.choice([k for k, v in EYEWEAR.items() if v["sun"]]), "style": "wear"}

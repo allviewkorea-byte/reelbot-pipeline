@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from adapters.shopping import ShoppingError
 from services import character_studio as cs
 from services import insta_coordi as coordi
+from services import insta_collection as coll
 from services import insta_outfit as io
 from services import insta_outfit_plan as P
 from services import insta_picks as picks
@@ -220,6 +221,30 @@ def start_auto_coordi(req: AutoReq, bg: BackgroundTasks):
     if job["state"] == "queued":
         bg.add_task(coordi.run_auto, job["id"])
     return job
+
+
+class CollectionReq(BaseModel):
+    character_id: str = "chaei"
+    n: int = 5
+
+
+@router.post("/collections")
+def start_collection(req: CollectionReq, bg: BackgroundTasks):
+    """컬렉션 릴스(A3): 테마 → 쿠팡 픽 → Look 1 → 옷만 교체 Look 2~N → 영상. 백그라운드."""
+    job = _call(coll.start, req.character_id, req.n)
+    if job["state"] == "queued":
+        bg.add_task(coll.run, job["id"])
+    return job
+
+
+@router.get("/collections/jobs/{job_id}")
+def collection_job(job_id: str):
+    return _call(coll.get_job, job_id)
+
+
+@router.get("/collections")
+def list_collections(limit: int = 10):
+    return {"collections": _call(coll.list_collections, max(1, min(30, limit)))}
 
 
 @router.get("/coordi/jobs/{job_id}")
