@@ -40,6 +40,8 @@ from services import insta_style_guide as SG
 logger = logging.getLogger(__name__)
 
 N_LOOKS = 5
+MIN_LOOKS = 4     # 대표 2026-10-28: 최소 4룩은 나와야 함
+SPARE_LOOKS = 1   # 예비 룩 — 만들다 실패하면 대신 만든다(미리보기엔 숨김)
 COVER_SEC = 1.2
 LOOK_SEC = 1.8
 W, H = 1080, 1920
@@ -424,7 +426,7 @@ def start_plan(character_id: str = "chaei", n: int = N_LOOKS, d: picks.Deps | No
     _guard(character_id, d)
     if (j := _busy(character_id)):
         return j
-    n = max(3, min(7, int(n or N_LOOKS)))
+    n = max(MIN_LOOKS, min(7, int(n or N_LOOKS)))
     cid = f"cl-{datetime.now(timezone.utc):%Y%m%d}-{secrets.token_hex(3)}"
     d.rest("ig_collections", "POST", json_body=[{"id": cid, "character_id": character_id, "status": "planned"}],
            prefer="return=minimal")
@@ -551,18 +553,18 @@ def _plan(job_id: str, d: picks.Deps, cid: str, args: dict, llm, rng: random.Ran
             tried.append(theme["concept"])
             _set(job_id, step=f"「{theme['concept']}」 상품 고르는 중",
                  theme={k: theme[k] for k in ("concept", "title_ko", "zip")})
-            raw = _variants_for(theme, d, usage, args["n"], rng)
+            raw = _variants_for(theme, d, usage, args["n"] + SPARE_LOOKS, rng)
             got = _saved(raw, d)
             products += got
             for c, src in zip(got, raw):
                 c["scores"] = src.get("scores")
                 c["kind"] = theme["kind"]
-            if len(got) >= 3:
+            if len(got) >= MIN_LOOKS:
                 variants = got
                 break
             if any("한도" in x for x in usage.get("notes") or []):
                 raise CollectionError("쿠팡 검색 한도에 걸렸어요 — 1분쯤 뒤에 다시 기획해 주세요.")
-        if len(variants) < 3:
+        if len(variants) < MIN_LOOKS:
             raise CollectionError(f"테마 {len(tried)}개({', '.join(tried)})를 시도했지만 상품이 모자라요 — 잠시 뒤 다시 해 주세요.")
         usage["themes_tried"] = tried
         _set(job_id, step=f"「{theme['concept']}」에 어울리는 상의·아우터·신발 고르는 중")
@@ -578,8 +580,10 @@ def _plan(job_id: str, d: picks.Deps, cid: str, args: dict, llm, rng: random.Ran
         outfits = pair_outfits(variants, saved_pools)
         _set(job_id, step="룩마다 포즈·장소 정하는 중")
         plans = _scenes(args["character_id"], outfits, rng, llm=args.get("scene_llm"))
+        main_n = min(args["n"], len(outfits))
         looks = [{"n": i + 1, "product": _keep(o[0]), "items": [_keep(c) for c in o[1:]],
-                  "scene": {k: pl.get(k) for k in _SCENE_KEEP}} for i, (o, pl) in enumerate(zip(outfits, plans))]
+                  "scene": {k: pl.get(k) for k in _SCENE_KEEP}, **({"spare": True} if i >= main_n else {})}
+                 for i, (o, pl) in enumerate(zip(outfits, plans))]
         _patch(d, cid, {"theme": theme, "looks": looks, "base_items": [], "status": "planned", "usage": usage,
                         "cost_usd": round(picks.vision_cost_usd(d.meter), 4)})
         return {"theme": theme, "looks": looks}
@@ -600,8 +604,13 @@ def _make(job_id: str, d: picks.Deps, cid: str, character_id: str, rng: random.R
     meter0 = picks.vision_cost_usd(d.meter)
     try:
         looks, imgs, skipped = [], [], []
-        _set(job_id, n=len(plan_looks))
-        for lk in plan_looks:
+        main = [x for x in plan_looks if not x.get("spare")]
+        spares = [x for x in plan_looks if x.get("spare")]
+        target = len(main)
+        _set(job_id, n=target)
+        queue = list(main)
+        while queue and len(looks) < target:
+            lk = queue.pop(0)
             i = lk["n"]
             _set(job_id, step=f"{i:02d} 만드는 중")
             outfit = [dict(lk["product"])] + [dict(c) for c in lk.get("items") or []]
@@ -613,7 +622,7 @@ def _make(job_id: str, d: picks.Deps, cid: str, character_id: str, rng: random.R
             sc = lk.get("scene") or {}
             opts = {k: v for k, v in {"pose": sc.get("pose"), "location": sc.get("location"), "face": sc.get("face"),
                                       "hair": sc.get("hair_role"), "styling_en": theme.get("styling_en")}.items() if v}
-            try:   # 한 룩이 실패해도 나머지로 계속(대표 2026-10-27: 실패하면 스스로) — 3룩 이상이면 완성
+            try:   # 한 룩이 실패해도 나머지로 계속(대표 2026-10-27: 실패하면 스스로) — 4룩 이상이면 완성
                 for scene_try in range(2):   # 1회 실패하면 장면(포즈·장소)을 AI에 맡겨 한 번 더
                     o = opts if scene_try == 0 else {k: v for k, v in opts.items() if k in ("hair", "styling_en")}
                     oj = io.start(character_id, coordi._cap_products(coordi._outfit_products(items)), o,
@@ -633,13 +642,15 @@ def _make(job_id: str, d: picks.Deps, cid: str, character_id: str, rng: random.R
             except Exception as e:  # noqa: BLE001
                 logger.warning("[insta-collection] %s %02d 실패 → 건너뜀: %s", cid, i, str(e)[:200])
                 skipped.append({"n": i, "error": str(e)[:160]})
+                if spares:   # 예비 룩으로 대신
+                    queue.append(spares.pop(0))
                 continue
             looks.append({**lk, "n": len(looks) + 1, "plan_n": i, "outfit_id": oj["outfit_id"],
                           "image_key": out["image_key"], "processed_key": out.get("processed_key"),
                           "review": out.get("review")})
             _set(job_id, done_looks=len(looks))
-            _patch(d, cid, {"looks": looks + [x for x in plan_looks if x["n"] > i]})
-        if len(looks) < 3:
+            _patch(d, cid, {"looks": looks + queue})
+        if len(looks) < min(MIN_LOOKS, target):
             raise CollectionError(f"룩 {len(plan_looks)}개 중 {len(looks)}개만 만들어졌어요 — " +
                                   "; ".join(f"{x['n']:02d}: {x['error']}" for x in skipped))
         _set(job_id, step="릴스 영상 만드는 중")

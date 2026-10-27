@@ -11,7 +11,7 @@ import { jsonOrThrow } from "@/components/studio/studio-lib"
 
 interface Prod { name?: string | null; mall?: string | null; price?: number | null; image_url?: string | null; kind?: string | null }
 interface Scene { pose_ko?: string; location_ko?: string; face?: string }
-interface LookRow { n: number; image_url: string | null; product_image?: string | null; product?: Prod; items?: Prod[]; scene?: Scene }
+interface LookRow { n: number; image_url: string | null; product_image?: string | null; product?: Prod; items?: Prod[]; scene?: Scene; spare?: boolean }
 interface Collection {
   id: string; status: "planned" | "making" | "ok" | "failed" | "hidden"; error: string | null; cost_usd: number | null
   theme: { concept?: string; title_ko?: string[]; zip?: string; title_en?: string }
@@ -102,10 +102,10 @@ export function CollectionPanel({ character, ready }: { character: string; ready
           <div className="flex min-w-0 flex-col gap-0.5">
             <div className="text-sm font-semibold text-foreground">{planned.theme?.concept || planned.theme?.zip}</div>
             {planned.theme?.title_ko && <p className="text-xs text-muted-foreground">표지: 코디 저장소 · {planned.theme.zip} — 캡션: {planned.theme.title_ko.join(" ")}</p>}
-            <p className="text-xs text-muted-foreground">룩마다 다른 포즈·장소·코디예요.</p>
+            <p className="text-xs text-muted-foreground">룩마다 다른 포즈·장소·코디예요. 하나가 실패하면 예비 코디로 대신 만들어 최소 4룩을 채워요.</p>
           </div>
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-            {planned.looks.map((lk) => (
+            {planned.looks.filter((lk) => !lk.spare).map((lk) => (
               <div key={lk.n} className="flex min-w-0 flex-col gap-1">
                 {lk.product_image ? (
                   // eslint-disable-next-line @next/next/no-img-element
