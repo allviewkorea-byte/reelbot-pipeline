@@ -5,15 +5,16 @@ import { toast } from "sonner"
 import { Clapperboard, Eye, Loader2, RefreshCw } from "lucide-react"
 import { jsonOrThrow } from "@/components/studio/studio-lib"
 
-// 컬렉션 릴스(A3) — 롤모델 포맷: 같은 자세·배경에 옷만 바꾼 Look 1~N + 표지 카피 + 슬로건 "코디 저장소".
+// 컬렉션 릴스(A3) — 테마 하나로 01~05, 룩마다 다른 포즈·장소·코디 + 표지(슬로건 "코디 저장소").
 // 1) "기획 미리보기": 테마·장면(자세·장소)·상품만 먼저 보여 준다(이미지 생성 없음, 저렴).
 // 2) "이대로 릴스 만들기": 확인한 기획 그대로 Look 1 → 옷 교체 → 영상. 결과: 영상 · 표지 · 룩별 사진·상품.
 
 interface Prod { name?: string | null; mall?: string | null; price?: number | null; image_url?: string | null; kind?: string | null }
-interface LookRow { n: number; image_url: string | null; product_image?: string | null; product?: Prod }
+interface Scene { pose_ko?: string; location_ko?: string; face?: string }
+interface LookRow { n: number; image_url: string | null; product_image?: string | null; product?: Prod; items?: Prod[]; scene?: Scene }
 interface Collection {
   id: string; status: "planned" | "making" | "ok" | "failed" | "hidden"; error: string | null; cost_usd: number | null
-  theme: { concept?: string; title_ko?: string[]; zip?: string; title_en?: string; plan?: { pose_ko?: string; location_ko?: string } }
+  theme: { concept?: string; title_ko?: string[]; zip?: string; title_en?: string }
   base_items?: Prod[]
   video_url: string | null; cover_url: string | null; looks: LookRow[]; created_at: string
 }
@@ -69,7 +70,7 @@ export function CollectionPanel({ character, ready }: { character: string; ready
     try {
       const j = await jsonOrThrow(await fetch(`/api/insta/collections/${encodeURIComponent(c.id)}/make`, { method: "POST" }))
       setJob(j)
-      toast.message("릴스를 만드는 중 — 7~10분 걸려요")
+      toast.message("릴스를 만드는 중 — 10~15분 걸려요")
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "시작 실패")
     }
@@ -100,9 +101,7 @@ export function CollectionPanel({ character, ready }: { character: string; ready
           <div className="flex min-w-0 flex-col gap-0.5">
             <div className="text-sm font-semibold text-foreground">{planned.theme?.concept || planned.theme?.zip}</div>
             {planned.theme?.title_ko && <p className="text-xs text-muted-foreground">표지: 코디 저장소 · {planned.theme.zip} — 캡션: {planned.theme.title_ko.join(" ")}</p>}
-            {planned.theme?.plan && (
-              <p className="text-xs text-muted-foreground">자세: {planned.theme.plan.pose_ko} · 장소: {planned.theme.plan.location_ko} · 얼굴은 턱 아래로</p>
-            )}
+            <p className="text-xs text-muted-foreground">룩마다 다른 포즈·장소·코디예요.</p>
           </div>
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
             {planned.looks.map((lk) => (
@@ -112,8 +111,12 @@ export function CollectionPanel({ character, ready }: { character: string; ready
                   <img src={lk.product_image} alt={lk.product?.name ?? ""} className="aspect-square w-full rounded-md bg-secondary object-cover" />
                 ) : <div className="aspect-square w-full rounded-md bg-secondary" />}
                 <span className="text-[11px] font-medium text-foreground">{String(lk.n).padStart(2, "0")}</span>
+                {lk.scene && <span className="line-clamp-2 text-[11px] text-primary">{lk.scene.location_ko} · {lk.scene.pose_ko}</span>}
                 <span className="line-clamp-2 text-[11px] text-muted-foreground">{lk.product?.name ?? ""}</span>
                 {lk.product?.price ? <span className="text-[11px] text-muted-foreground">{lk.product.price.toLocaleString("ko-KR")}원</span> : null}
+                {(lk.items?.length ?? 0) > 0 && (
+                  <span className="line-clamp-2 text-[10px] text-muted-foreground">+ {lk.items!.map((b) => b.name).filter(Boolean).join(" · ")}</span>
+                )}
               </div>
             ))}
           </div>
@@ -122,7 +125,7 @@ export function CollectionPanel({ character, ready }: { character: string; ready
           )}
           <button onClick={() => make(planned)} disabled={!ready || running}
             className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
-            <Clapperboard className="h-4 w-4" /> 이대로 릴스 만들기 · 약 300~500원
+            <Clapperboard className="h-4 w-4" /> 이대로 릴스 만들기 · 약 400~700원 · 10~15분
           </button>
         </div>
       )}
