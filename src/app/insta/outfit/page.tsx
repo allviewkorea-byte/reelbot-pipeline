@@ -10,6 +10,7 @@ import { CollectionPanel } from "@/components/insta/CollectionPanel"
 import { CoordiProducts, HideButton, type CoordiLook } from "@/components/insta/CoordiProducts"
 import { PicksPanel } from "@/components/insta/PicksPanel"
 import { RefsPanel } from "@/components/insta/RefsPanel"
+import { useFold } from "@/components/insta/useFold"
 import { jsonOrThrow, usd, type View } from "@/components/studio/studio-lib"
 
 // 착장 1장 만들기(테스트 화면, A1 — A4 에서 /insta 로 합침). 대표는 상품 사진 넣기 + 버튼만:
@@ -108,6 +109,7 @@ function InstaOutfitPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [choice, setChoice] = useState<Record<string, string>>({})
   const [showOpts, setShowOpts] = useState(false)
+  const [mineOpen, toggleMine] = useFold("insta-mine", false)
   const [job, setJob] = useState<Job | null>(null)
   const [outfits, setOutfits] = useState<Outfit[]>([])
   const [selected, setSelected] = useState<string | null>(null)
@@ -333,11 +335,15 @@ function InstaOutfitPage() {
 
       <div className="flex min-w-0 flex-col gap-3 rounded-xl border border-border bg-card p-3">
         <div className="flex min-w-0 items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold text-foreground">내 상품으로 코디 <span className="font-normal text-muted-foreground">(1~{MAX_PRODUCTS}개)</span></h2>
-          {products.length > 0 && (
+          <button onClick={toggleMine} className="flex items-center gap-1 text-sm font-semibold text-foreground">
+            내 상품으로 코디 <span className="font-normal text-muted-foreground">(선택 · 1~{MAX_PRODUCTS}개)</span>
+            <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${mineOpen ? "rotate-180" : ""}`} />
+          </button>
+          {mineOpen && products.length > 0 && (
             <button onClick={reset} disabled={running} className="text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50">비우기</button>
           )}
         </div>
+        {mineOpen && (<>
         {products.length < MAX_PRODUCTS && (
           <div
             role="button"
@@ -448,6 +454,7 @@ function InstaOutfitPage() {
             </>
           )}
         </div>
+        </>)}
       </div>
 
       {current && (
