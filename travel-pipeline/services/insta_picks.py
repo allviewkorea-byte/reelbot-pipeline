@@ -199,9 +199,9 @@ _SCORE_SYSTEM = (
     "You compare shopping-mall product photos against a target item spec for a Korean women's outfit. "
     "Score EACH candidate 0-10 on: kind (same garment type), color (same color/tone as spec color/hex), fit "
     "(slim/regular/over silhouette), length, details (buttons, collar, pockets, pattern), and style (does it look "
-    "like a quality, on-trend item a stylish Korean woman in her 20s would actually wear now — good fabric, refined "
-    "silhouette, well photographed; cheap-looking plain basics, shiny polyester, dated or costume-like items score "
-    "low). Also give the "
+    "like a hip, youthful, on-trend item a Korean woman in her early 20s would actually wear now — Seoul street / "
+    "꾸안꾸 vibe, decent fabric, well photographed; matronly or classic office-lady pieces, cheap-looking basics, "
+    "shiny polyester, dated or costume-like items score low). Also give the "
     "garment's main color as hex and whether it suits the given seasons. Be strict: a different color or type "
     "must score low. "
     'Return ONE JSON object: {"results": [{"n": <number>, "kind": 0-10, "color": 0-10, "fit": 0-10, "length": 0-10, '

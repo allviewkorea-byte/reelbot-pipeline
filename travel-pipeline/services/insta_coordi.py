@@ -105,7 +105,8 @@ _FILL_SYSTEM = (
     "You style a Korean woman's everyday outfit. Given the items she already chose (kind + short description) and "
     "the season, design the MISSING items so the whole outfit is coherent: max 3 colors with at most 1 accent, "
     "matching the season and a daily situation. Follow the given style_guide strictly — quality, on-trend pieces a "
-    "stylish Korean woman in her 20s would really post; never the items in its avoid list. Return ONE JSON object: "
+    "hip Korean woman in her early 20s would really post (youthful Seoul street vibe, never matronly); never the "
+    "items in its avoid list. Return ONE JSON object: "
     '{"concept": "<짧은 한글 컨셉, 12자 이내>", "items": [{"kind": "...", "color_name": "<한글>", "hex": "#RRGGBB", '
     '"fit": "slim|regular|over", "length": "...", "material": "<한글>", "details": "<short English>", '
     '"queries": ["<쿠팡에서 찾을 한국어 검색어 — 여성, 색, 종류 포함>", "...", "..."]}]} — only the requested kinds.'
