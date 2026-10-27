@@ -219,7 +219,8 @@ _REVIEW_SYSTEM = (
     "4. product_mismatch: a product is noticeably different — color, pattern, or a key detail (buttons, logo "
     "position, length).\n"
     "5. anatomy: wrong number of fingers/arms/legs, twisted limbs, melted hands.\n"
-    "6. text: visible text, captions, logos added by AI, or watermarks.\n"
+    "6. text: captions, overlaid text, watermarks, or AI-made logos on the clothing. Natural background shop signs "
+    "(e.g. Korean street signage) are fine.\n"
     'Return ONE JSON object only: {"pass": true|false, "violations": [{"type": "<one of the keys above>", '
     '"detail": "짧은 한국어 설명"}], "fix_en": "<one short English instruction to fix it in the next attempt, '
     'or empty>"}.'
@@ -230,7 +231,7 @@ def review(result_path: Path, product_paths: list[Path], plan: dict, tmp: Path) 
     """결과 + 상품 사진 비전 검수 → {pass, violations, fix_en, model}. 호출 실패면 예외."""
     small = [gen._small_jpeg(result_path, tmp / "rv0.jpg")]
     small += [gen._small_jpeg(p, tmp / f"rv{i + 1}.jpg") for i, p in enumerate(product_paths[:4])]
-    face_note = " · 얼굴 공개 컷(눈 보여도 됨)" if plan.get("face") == "full" else ""
+    face_note = " · 얼굴 공개 컷(눈 보여도 됨)" if plan.get("face") in ("full", "profile", "mirror_full") else ""
     ask = (f"장면: {plan.get('location_ko')} · {plan.get('pose_ko')} · {plan.get('season_ko')}{face_note}. "
            "기준대로 검수하고 JSON 만 출력해.")
     data = _vision_json(_REVIEW_SYSTEM, small, ask, "insta_review")

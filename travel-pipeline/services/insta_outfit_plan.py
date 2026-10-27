@@ -83,6 +83,14 @@ LOCATIONS: dict[str, dict] = {
                       "en": "at a mountain trail viewpoint overlooking the city"},
     "autumn_foliage": {"ko": "단풍길", "kind": "outdoor", "mirror": False, "seasons": ["autumn"],
                        "en": "on a path lined with red and yellow autumn leaves"},
+    # 한국다운 거리 감성(대표 레퍼런스 2026-10-27: 셔터 내려간 상가에 등 기대고 앞을 보는 컷)
+    "shutter_street": {"ko": "셔터 내린 상가 골목", "kind": "outdoor", "mirror": False,
+                       "en": "on a Seoul shopping street with closed colorful metal roller shutters, vertical Korean shop "
+                             "signs and neon in the background, a few blurred passers-by"},
+    "euljiro_alley": {"ko": "을지로 노포 골목", "kind": "outdoor", "mirror": False,
+                      "en": "in an old Euljiro alley with retro printing shops, plastic stools and dim warm lights"},
+    "market_alley": {"ko": "시장 골목", "kind": "outdoor", "mirror": False,
+                     "en": "in a lively traditional Korean market alley with stalls and hanging lights"},
     "snowy_street": {"ko": "눈 내린 거리", "kind": "outdoor", "mirror": False, "seasons": ["winter"],
                      "en": "on a street covered with fresh snow"},
 }
@@ -90,13 +98,16 @@ LOCATIONS: dict[str, dict] = {
 # 요일(0=월) → 생활 · 장소 후보
 WEEKDAYS: dict[int, dict] = {
     0: {"ko": "월", "life": "출근", "locations": ["elevator_mirror", "office_lobby", "subway_stairs", "entry_mirror", "subway_car"]},
-    1: {"ko": "화", "life": "출근 + 퇴근 후 약속", "locations": ["elevator_mirror", "evening_alley", "restaurant_front", "campus", "convenience_store"]},
+    1: {"ko": "화", "life": "출근 + 퇴근 후 약속", "locations": ["elevator_mirror", "evening_alley", "restaurant_front", "campus", "convenience_store", "euljiro_alley"]},
     2: {"ko": "수", "life": "출근", "locations": ["elevator_mirror", "office_lobby", "subway_stairs", "entry_mirror", "library", "subway_car"]},
-    3: {"ko": "목", "life": "출근 + 쇼핑", "locations": ["fitting_room", "street", "seongsu_street", "bookstore", "lecture_hall"]},
+    3: {"ko": "목", "life": "출근 + 쇼핑", "locations": ["fitting_room", "street", "seongsu_street", "bookstore", "lecture_hall", "shutter_street"]},
     4: {"ko": "금", "life": "퇴근 후 데이트", "locations": ["crosswalk", "rooftop", "bar_front", "han_river", "amusement_park"]},
     5: {"ko": "토", "life": "카페·전시 · 나들이", "locations": ["cafe", "gallery_stairs", "park_bench", "beach", "mountain_view", "car", "autumn_foliage", "train_window", "airport", "snowy_street"]},
-    6: {"ko": "일", "life": "집·동네 산책", "locations": ["room", "neighborhood_alley", "bakery_front", "han_river", "car", "campus"]},
+    6: {"ko": "일", "life": "집·동네 산책", "locations": ["room", "neighborhood_alley", "bakery_front", "han_river", "car", "campus", "shutter_street", "market_alley"]},
 }
+
+# 가게·간판이 있는 도심 장소(유리창 반사 셀카·캔디드 스트릿 컷)
+URBAN = ["street", "evening_alley", "restaurant_front", "neighborhood_alley", "bakery_front", "bar_front", "seongsu_street", "convenience_store", "crosswalk", "shutter_street", "euljiro_alley", "market_alley"]
 
 # ── 포즈(17) ─────────────────────────────────────────────────────────────
 # feet: shoes(신발 보임) / socks(양말·맨발, 방 전용) / none(발 안 보임).
@@ -142,8 +153,7 @@ POSES: dict[str, dict] = {
                       "en": "a first-person shot from her own eyes while seated, looking down at her lap, legs and shoes, "
                             "her hand holding a coffee cup or phone at the edge of the frame"},
     "glass_reflection": {"self": True, "faces": ["phone", "chin_crop"], "ko": "가게 유리창에 비친 셀카", "cut": "서기", "feet": "shoes", "face": "phone",
-                         "where": ["street", "evening_alley", "restaurant_front", "neighborhood_alley", "bakery_front",
-                                   "bar_front", "seongsu_street", "convenience_store", "crosswalk"],
+                         "where": URBAN,
                          "en": "taking a selfie of her reflection in a shop's glass window, phone held up in front of "
                                "her face, the street faintly visible through the glass"},
     "mirror_crouch": {"self": True, "faces": ["phone", "chin_crop"], "ko": "거울 앞 쪼그려 미러셀카", "cut": "쪼그려", "feet": "shoes", "mirror": True, "face": "phone",
@@ -162,7 +172,7 @@ POSES: dict[str, dict] = {
                          "en": "standing against a plain wall with one knee bent up playfully, holding a compact silver "
                                "digital camera at chest height, shot on a phone timer from waist level"},
     "cafe_terrace": {"self": True, "ko": "카페 테라스에 앉아 아아 들고", "cut": "앉기", "feet": "none", "face": "sunglasses",
-                     "force_eyewear": "sun", "where": ["cafe", "street", "bakery_front", "restaurant_front"],
+                     "where": ["cafe", "street", "bakery_front", "restaurant_front"],
                      "tail": "A casual phone snapshot a friend took across the table — not a photoshoot, unposed.",
                      "en": "sitting at an outdoor cafe table holding an iced americano, looking away down the street"},
     # 얼굴 셀카(대표 2026-10-27 "가끔은 이쁜 얼굴도, 셀카는 얼굴만 가까이도 찍잖아") — 가끔만(FACE_SHOT_RATE)
@@ -170,6 +180,19 @@ POSES: dict[str, dict] = {
                     "kinds": ["room", "indoor", "outdoor", "elevator", "entry", "fitting", "vehicle"],
                     "en": "a close-up front-camera selfie of her face and shoulders, phone held at arm's length slightly "
                           "above eye level, head tilted a little, soft natural light on her face"},
+    # 캔디드·파파라치(대표 2026-10-27 "가끔은 누가 도촬하듯, 스트릿 파파라치") — group=candid, 가끔만
+    "candid_shutter_lean": {"self": True, "group": "candid", "ko": "셔터에 등 기대고 앞 보기(캔디드)", "cut": "기대기",
+                            "feet": "shoes", "face": "profile", "where": URBAN,
+                            "en": "leaning her back against a closed metal roller shutter, looking ahead down the street, "
+                                  "not at the camera"},
+    "candid_curb_sit": {"self": True, "group": "candid", "ko": "길가 턱에 앉아 앞 보기(캔디드)", "cut": "앉기",
+                        "feet": "shoes", "face": "profile", "where": URBAN,
+                        "en": "sitting on a low step at the edge of the street, looking ahead at something, unaware of "
+                              "the camera"},
+    "paparazzi_walk": {"self": True, "group": "candid", "ko": "길 건너에서 찍힌 파파라치 워킹", "cut": "걷기",
+                       "feet": "shoes", "face": "profile", "where": URBAN + ["campus", "han_river", "crosswalk"],
+                       "en": "walking mid-stride and glancing to the side, captured from across the street with a "
+                             "telephoto lens, passers-by softly blurred in the foreground"},
     "toe_down": {"self": True, "ko": "발끝 내려다보기", "cut": "디테일", "feet": "shoes", "face": "out_of_frame",
                  "kinds": ["outdoor", "entry", "elevator"],
                  "en": "a shot looking down at her feet, showing the shoes and the hem of the bottoms"},
@@ -195,6 +218,10 @@ MOOD_RATE = 0.7
 
 # 얼굴 공개 셀카 비율 — 4~5장에 1장, 연속 금지(대표 2026-10-27). 나머지 컷은 눈을 가린다.
 FACE_SHOT_RATE = 0.22
+# 얼굴을 가리는 비율(대표 2026-10-27) — 20%만 가리고(폰·눈 아래 크롭·선글라스) 나머지는 얼굴이 보인다.
+FACE_HIDE_RATE = 0.2
+# 캔디드·파파라치 비율(대표 2026-10-27) — 5장에 1장꼴, 연속 금지. 장소가 도심이 아니면 셀카로.
+CANDID_RATE = 0.2
 
 # 소품(절반 확률, 디테일·플랫레이 제외) — 대표 레퍼런스의 아아·디카 느낌
 PROPS = ["holding an iced americano", "holding a compact silver digital camera", "earphones in, phone in one hand"]
@@ -305,6 +332,22 @@ def choose_eyewear(history: list[dict], rng: random.Random, override: str | None
     return {"item": item, "style": style}
 
 
+def choose_face(pose_key: str, rng: random.Random) -> str:
+    """얼굴 처리(대표 2026-10-27: 가리는 건 20%, 나머지는 얼굴 보여도 됨).
+    발·디테일·플랫레이처럼 원래 얼굴이 없는 컷은 그대로, 캔디드는 옆모습, 선글라스 클로즈업은 선글라스."""
+    pose = POSES[pose_key]
+    base = pose["face"]
+    if base in ("out_of_frame", "none") or pose.get("person") is False:
+        return base
+    if pose.get("group") == "candid":
+        return "profile"
+    if base == "full" or pose.get("force_eyewear") == "sun":
+        return "full" if base == "full" else "sunglasses"
+    if rng.random() < FACE_HIDE_RATE:
+        return rng.choice(pose.get("faces") or [base])
+    return "mirror_full" if (pose.get("mirror") or pose_key == "glass_reflection") else "full"
+
+
 def candidates(*, weekday: int, products: list[dict], hair_roles: list[str], history: list[dict],
                now: datetime, location: str | None = None, pose: str | None = None,
                cut: str | None = None, hair: str | None = None) -> dict:
@@ -384,11 +427,16 @@ def plan_scene(*, character_id: str, products: list[dict], hair_roles: list[str]
         raise ValueError("장면 규칙을 만족하는 장소·포즈 조합이 없어요.")
     # 얼굴 셀카는 가끔만: 이번에 넣을지 먼저 정하고(직전이 얼굴 셀카면 안 넣음), 아니면 후보에서 뺀다.
     if not options.get("pose"):
-        last_full = bool(history) and (history[0].get("plan") or {}).get("face") == "full"
-        want_face = not last_full and rng.random() < FACE_SHOT_RATE
-        face_pairs = [pr for pr in pairs if POSES[pr[1]].get("face") == "full"]
-        rest = [pr for pr in pairs if POSES[pr[1]].get("face") != "full"]
-        pairs = face_pairs if (want_face and face_pairs) else (rest or pairs)
+        # 컷 종류를 먼저 정한다: 얼굴 셀카(가끔) / 캔디드·파파라치(가끔) / 셀카(기본). 같은 특별 컷 연속 금지.
+        def group(pk):
+            return "face" if POSES[pk].get("face") == "full" else POSES[pk].get("group", "self")
+        last = group(history[0]["plan"]["pose"]) if history and (history[0].get("plan") or {}).get("pose") in POSES else None
+        r = rng.random()
+        want = "face" if r < FACE_SHOT_RATE else ("candid" if r < FACE_SHOT_RATE + CANDID_RATE else "self")
+        if want == last and want != "self":
+            want = "self"
+        chosen = [pr for pr in pairs if group(pr[1]) == want]
+        pairs = chosen or [pr for pr in pairs if group(pr[1]) == "self"] or pairs
 
     pick, hair_role, weather, reason, source = None, None, None, "", "random"
     if llm is None:
@@ -421,7 +469,7 @@ def plan_scene(*, character_id: str, products: list[dict], hair_roles: list[str]
     if hair_role is None and hairs:
         hair_role = rng.choice(hairs)
     loc, pose = pick
-    face = rng.choice(POSES[pose].get("faces") or [POSES[pose]["face"]])
+    face = choose_face(pose, rng)
     if POSES[pose].get("force_eyewear") == "sun" or face == "sunglasses":
         if not (eyewear and EYEWEAR[eyewear["item"]]["sun"] and eyewear["style"] == "wear"):
             eyewear = {"item": rng.choice([k for k, v in EYEWEAR.items() if v["sun"]]), "style": "wear"}
@@ -430,7 +478,7 @@ def plan_scene(*, character_id: str, products: list[dict], hair_roles: list[str]
         rng.choice(PROPS) if rng.random() < 0.5 else None)
     mood = None
     if POSES[pose].get("person") is not False and rng.random() < MOOD_RATE:
-        lips = face in ("full", "chin_crop", "sunglasses")
+        lips = face in ("full", "chin_crop", "sunglasses", "profile", "mirror_full")
         mood = rng.choice([m for m in MOODS if lips or not m.get("face")])["en"]
     return {
         "face": face, "prop": prop, "mood": mood,
@@ -449,6 +497,8 @@ _TAIL = ("Candid iPhone photo, not a professional shoot: slightly uneven exposur
 _SELF_TAIL = ("She took this photo herself with her own phone for her Instagram — a casual, unposed self-shot, not a "
               "photographer's or model shoot: natural relaxed stance, slightly tilted, imperfect off-center framing. "
               "It feels like a page from her everyday photo diary.")
+_CANDID_TAIL = ("A candid street shot, as if a friend or a street-style photographer caught her without her noticing — "
+                "documentary feel, natural light, shallow depth of field, real Seoul street atmosphere.")
 _YOUTH = ("She looks like a hip Korean woman in her early 20s with a youthful Seoul street vibe (Seongsu, Hongdae) — "
           "fresh and young, never mature or matronly; casual, slightly undone natural hair styling.")
 _MAKEUP = "Natural everyday makeup: light dewy base and a soft rosy lip tint — nothing heavy."
@@ -470,6 +520,11 @@ def _face_line(plan: dict) -> str:
         return "phone held up covering her face"
     if face == "out_of_frame":
         return "her face is not in the frame"
+    if face == "mirror_full":
+        return ("holding the phone low at chest height so her whole face is visible in the mirror — it must look exactly "
+                "like reference image 1 (same eyes, nose, lips, face shape and moles)")
+    if face == "profile":
+        return "seen in side profile, looking off ahead and not at the camera"
     if face == "full":
         return ("her whole face is visible and pretty — it must look exactly like reference image 1 (same eyes, nose, "
                 "lips, face shape and moles)")
@@ -521,10 +576,12 @@ def build(plan: dict, *, face_url: str, body_url: str, hair_url: str | None, pro
         if plan.get("mood"):
             parts.append(f"Free-spirited mood: {plan['mood']}.")
         parts.append(f"{pose['en'][:1].upper()}{pose['en'][1:]}, {loc['en']}, {_face_line(plan)}, {weather}.")
-        if (plan.get("face") or pose["face"]) in ("chin_crop", "sunglasses", "full"):
+        if (plan.get("face") or pose["face"]) in ("chin_crop", "sunglasses", "full", "profile", "mirror_full"):
             parts.append(_MAKEUP)
         parts.append(_EFFORTLESS)
-        if pose.get("tail"):
+        if pose.get("group") == "candid":
+            parts.append(_CANDID_TAIL)
+        elif pose.get("tail"):
             parts.append(pose["tail"])
         elif pose.get("self"):
             parts.append(_SELF_TAIL)
