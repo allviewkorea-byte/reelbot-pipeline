@@ -501,8 +501,18 @@ _SELF_TAIL = ("She took this photo herself with her own phone for her Instagram 
               "It feels like a page from her everyday photo diary.")
 _CANDID_TAIL = ("A candid street shot, as if a friend or a street-style photographer caught her without her noticing — "
                 "documentary feel, natural light, shallow depth of field, real Seoul street atmosphere.")
-_YOUTH = ("She looks like a hip Korean woman in her early 20s with a youthful Seoul street vibe (Seongsu, Hongdae) — "
-          "fresh and young, never mature or matronly; casual, slightly undone natural hair styling.")
+# 분위기는 옷·스타일링에만 — 얼굴을 '평균 20대 얼굴'로 끌고 가지 않게(대표 2026-10-27: 기준 얼굴과 다르게 나옴)
+_YOUTH = ("Her styling has a hip early-20s Seoul street vibe (Seongsu, Hongdae) — fresh, never mature or matronly; "
+          "casual, slightly undone hair styling. Her face itself stays exactly as in reference image 1.")
+
+
+def body_line(m: dict | None) -> str:
+    """체형 — 금지어 없이 참조 2 비율 + 실측 숫자(필터에 안 걸림). 대표 2026-10-27: 옷맵시·체형이 기준과 다름."""
+    nums = ""
+    if m and all(m.get(k) for k in ("height", "chest", "waist", "hip")):
+        nums = (f" ({m['height']:g} cm tall, body measurements {m['chest']:g}-{m['waist']:g}-{m['hip']:g} cm)")
+    return (f"Her figure matches reference image 2 exactly — the same proportions and silhouette{nums}; fitted pieces "
+            "follow her shape naturally and never look shapeless or flattened.")
 _MAKEUP = "Natural everyday makeup: light dewy base and a soft rosy lip tint — nothing heavy."
 _EFFORTLESS = ("Effortless, not overdressed (꾸안꾸): the clothes sit naturally on her with her own silhouette, minimal "
                "accessories — at most a thin necklace or small earrings, no pearls or brooches.")
@@ -539,7 +549,7 @@ def _face_line(plan: dict) -> str:
 
 
 def build(plan: dict, *, face_url: str, body_url: str, hair_url: str | None, products: list[dict],
-          fix_hint: str | None = None) -> tuple[str, list[str]]:
+          fix_hint: str | None = None, measurements: dict | None = None) -> tuple[str, list[str]]:
     """(prompt, refs). 참조 순서 고정 ① face ② body ③ hair ④~ 상품. 방(양말) 컷은 신발 상품을 뺀다."""
     loc = LOCATIONS[plan["location"]]
     pose = POSES[plan["pose"]]
@@ -561,9 +571,11 @@ def build(plan: dict, *, face_url: str, body_url: str, hair_url: str | None, pro
         hair_part = "with the hairstyle from image 3" if hair_url else "with her usual long black hair"
         wear = ", ".join(_product_phrase(p.get("kind", ""), start + i) for i, p in enumerate(use))
         parts = [
-            f"Same woman as reference images 1 and 2 — same face shape, black hair color and the same body shape as the "
-            f"reference, {hair_part}. Take only the clothing from the product images — ignore the body and face of any "
-            f"model wearing them. She is wearing exactly {wear} — {_DETAIL}.",
+            "Her face is exactly the woman in reference image 1 — same eyes, nose, lips, jawline, face shape and moles, "
+            f"clearly recognisable as the same person; only the hairstyle may differ ({hair_part}, black hair color).",
+            body_line(measurements),
+            "Take only the clothing from the product images — ignore the body and face of any model wearing them. "
+            f"She is wearing exactly {wear} — {_DETAIL}.",
             _YOUTH,
         ]
         if plan.get("styling_en"):

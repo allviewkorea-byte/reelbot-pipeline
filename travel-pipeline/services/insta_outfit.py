@@ -210,7 +210,8 @@ def save_product(batch: str, n: int, data: bytes, filename: str) -> dict:
 # ── 검수 ─────────────────────────────────────────────────────────────────
 _REVIEW_SYSTEM = (
     "You review an AI-generated everyday outfit photo for a Korean Instagram fashion account. Image 1 is the "
-    "generated photo; the following images are the product photos it must reproduce. Fail it if ANY of these:\n"
+    "generated photo. When labeled, 'face reference' is the model's real face and 'body reference' is her real figure; "
+    "the remaining images are the product photos it must reproduce. Fail it if ANY of these:\n"
     "1. indoor_shoes: it is a living room or bedroom and outdoor shoes are visible on her feet.\n"
     "2. face_visible: her EYES are visible. Her eyes must be hidden — by a phone, by the frame cropping just below "
     "the eyes, or by sunglasses. Lips, chin and the lower face may show. SKIP this check when the scene note says "
@@ -221,18 +222,33 @@ _REVIEW_SYSTEM = (
     "5. anatomy: wrong number of fingers/arms/legs, twisted limbs, melted hands.\n"
     "6. text: captions, overlaid text, watermarks, or AI-made logos on the clothing. Natural background shop signs "
     "(e.g. Korean street signage) are fine.\n"
+    "7. identity: (only if a face reference is given) the visible part of her face — whole face, or lips, chin and "
+    "jawline when the eyes are hidden — looks like a clearly different person from the face reference. Hairstyle "
+    "differences are fine.\n"
+    "8. body: (only if a body reference is given) her figure is noticeably different from the body reference — "
+    "clearly slimmer or flatter chest, narrower hips, a smaller or boxier frame, or shorter legs.\n"
     'Return ONE JSON object only: {"pass": true|false, "violations": [{"type": "<one of the keys above>", '
     '"detail": "짧은 한국어 설명"}], "fix_en": "<one short English instruction to fix it in the next attempt, '
     'or empty>"}.'
 )
 
 
-def review(result_path: Path, product_paths: list[Path], plan: dict, tmp: Path) -> dict:
-    """결과 + 상품 사진 비전 검수 → {pass, violations, fix_en, model}. 호출 실패면 예외."""
+def review(result_path: Path, product_paths: list[Path], plan: dict, tmp: Path,
+           face_path: Path | None = None, body_path: Path | None = None) -> dict:
+    """결과 + (기준 얼굴·체형) + 상품 사진 비전 검수 → {pass, violations, fix_en, model}. 호출 실패면 예외.
+
+    기준 얼굴·체형을 같이 보여 줘야 '다른 사람 얼굴 / 밋밋해진 체형'을 잡는다(대표 2026-10-27).
+    """
     small = [gen._small_jpeg(result_path, tmp / "rv0.jpg")]
+    labels = []
+    for tag, p in (("face reference", face_path), ("body reference", body_path)):
+        if p and p.exists():
+            small.append(gen._small_jpeg(p, tmp / f"rv_{tag[:4]}.jpg"))
+            labels.append(f"{len(small)}번 이미지 = {tag}")
     small += [gen._small_jpeg(p, tmp / f"rv{i + 1}.jpg") for i, p in enumerate(product_paths[:4])]
     face_note = " · 얼굴 공개 컷(눈 보여도 됨)" if plan.get("face") in ("full", "profile", "mirror_full") else ""
-    ask = (f"장면: {plan.get('location_ko')} · {plan.get('pose_ko')} · {plan.get('season_ko')}{face_note}. "
+    ref_note = f" · {', '.join(labels)}, 나머지는 상품 사진" if labels else ""
+    ask = (f"장면: {plan.get('location_ko')} · {plan.get('pose_ko')} · {plan.get('season_ko')}{face_note}{ref_note}. "
            "기준대로 검수하고 JSON 만 출력해.")
     data = _vision_json(_REVIEW_SYSTEM, small, ask, "insta_review")
     passed = data.get("pass")
@@ -384,13 +400,23 @@ def run(job_id: str, *, rng: random.Random | None = None) -> None:
         _patch(outfit_id, {"plan": plan})
 
         product_paths = [_download(p["url"], tmp / f"prod{i}.png") for i, p in enumerate(prods)]
+        face_path = body_path = None
+        try:  # 검수용 기준 얼굴·체형(실패해도 생성은 계속)
+            face_path = _download(refs[gen.FACE_ROLE]["url"], tmp / "ref_face.png")
+            body_path = _download(refs[gen.BODY_ROLE]["url"], tmp / "ref_body.png")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[insta-outfit] 기준 사진 받기 실패(검수는 상품만): %s", str(e)[:160])
+        try:
+            measurements = cm.get(cid).get("values") or None
+        except Exception:  # noqa: BLE001
+            measurements = None
         hair_url = refs[plan["hair_role"]]["url"] if plan.get("hair_role") in refs else None
         adapter = get_muse_adapter()
         fix, last_review, reviews = None, None, []
         out = tmp / "result.png"
         for attempt in range(1 + MAX_REGEN):
             prompt, ref_urls = P.build(plan, face_url=refs[gen.FACE_ROLE]["url"], body_url=refs[gen.BODY_ROLE]["url"],
-                                       hair_url=hair_url, products=prods, fix_hint=fix)
+                                       hair_url=hair_url, products=prods, fix_hint=fix, measurements=measurements)
             prompt = gen.strip_unsafe(prompt)
             _job(job_id, step=f"생성 {attempt + 1}회차")
             try:
@@ -405,7 +431,7 @@ def run(job_id: str, *, rng: random.Random | None = None) -> None:
             _job(job_id, attempts=attempts, cost_usd=round(cost, 4), step=f"검수 {attempts}회차")
             _patch(outfit_id, {"prompt": prompt, "refs": ref_urls, "attempts": attempts, "cost_usd": round(cost, 4)})
             try:
-                last_review = review(out, product_paths, plan, tmp)
+                last_review = review(out, product_paths, plan, tmp, face_path, body_path)
             except Exception as e:  # noqa: BLE001 - 검수 호출 실패는 통과 처리(이미지는 보여 주고 표시)
                 logger.warning("[insta-outfit] 검수 실패 %s: %s", outfit_id, str(e)[:200])
                 last_review = {"pass": True, "skipped": f"검수 호출 실패 — {str(e)[:120]}", "violations": []}

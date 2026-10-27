@@ -138,8 +138,8 @@ def test_build_prompt_and_refs():
              {"kind": "bag", "url": "g", "revealing": False}]
     prompt, refs = P.build(_plan(), face_url="F", body_url="B", hair_url="H", products=prods)
     assert refs == ["F", "B", "H", "t", "b", "s", "g"]
-    assert prompt.startswith("Same woman as reference images 1 and 2 — same face shape, black hair color and the same "
-                             "body shape as the reference, with the hairstyle from image 3. Take only the clothing")
+    assert prompt.startswith("Her face is exactly the woman in reference image 1")          # 얼굴 먼저(2026-10-27)
+    assert "with the hairstyle from image 3" in prompt and "matches reference image 2 exactly" in prompt
     assert ("She is wearing exactly the top from image 4, the bottoms from image 5, the shoes from image 6, carrying "
             "the bag from image 7 — keep every garment detail identical") in prompt
     assert "phone held up covering her face" in prompt and prompt.endswith("no retouching.")
@@ -358,7 +358,7 @@ def test_kkuankku_plan_face_eyewear_and_prompt():
     assert plan["face"] == "sunglasses" and plan["eyewear"]["style"] == "wear" and P.EYEWEAR[plan["eyewear"]["item"]]["sun"]
     prompt, _ = P.build(plan, face_url="f", body_url="b", hair_url=None, products=[{"url": "u", "kind": "top"}])
     assert "rosy lip tint" in prompt and "꾸안꾸" in prompt and "no pearls" in prompt
-    assert "early 20s" in prompt and "never mature" in prompt                          # 노티 금지(2026-10-27)
+    assert "early-20s" in prompt and "never mature" in prompt                          # 노티 금지(2026-10-27)
     crop = {**plan, "pose": "arm_selfie_high", "face": "chin_crop", "eyewear": None, "prop": "holding an iced americano"}
     prompt, _ = P.build(crop, face_url="f", body_url="b", hair_url=None, products=[{"url": "u", "kind": "top"}])
     assert "just below the eyes" in prompt and "iced americano" in prompt and "took this photo herself" in prompt
@@ -436,3 +436,12 @@ def test_styling_en_passthrough():
                         llm=lambda s, u: "{}", options={"styling_en": "sheer black tights"})
     prompt, _ = P.build(plan, face_url="f", body_url="b", hair_url=None, products=[{"url": "u", "kind": "bottoms"}])
     assert plan["styling_en"] == "sheer black tights" and "She also wears sheer black tights." in prompt
+
+
+def test_body_line_and_identity_review_refs(tmp_path):
+    """체형은 금지어 없이 참조 2 + 실측 숫자, 검수는 기준 얼굴·체형을 같이 본다(대표 2026-10-27)."""
+    line = P.body_line({"height": 172, "chest": 90, "waist": 63, "hip": 92})
+    from services import character_studio_gen as gen
+    assert "172 cm tall" in line and "90-63-92" in line and gen.strip_unsafe(line) == line
+    assert "(" not in P.body_line(None)
+    assert "identity" in io._REVIEW_SYSTEM and "body reference" in io._REVIEW_SYSTEM
