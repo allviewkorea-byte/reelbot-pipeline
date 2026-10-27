@@ -335,7 +335,7 @@ def test_api_routes(flow, monkeypatch):
     app.include_router(routes.router, prefix="/insta")
     c = TestClient(app)
     opts = c.get("/insta/outfit-options").json()
-    assert len(opts["poses"]) == 14 and len(P.POSES) == 24 and opts["estimate"]["max"] == 0.033
+    assert len(opts["poses"]) == 15 and len(P.POSES) == 25 and opts["estimate"]["max"] == 0.033
     r = c.post("/insta/outfits", json={"character_id": "chaei", "products": PRODS})
     assert r.status_code == 200
     j = c.get(f"/insta/outfit-jobs/{r.json()['id']}").json()
@@ -365,3 +365,20 @@ def test_kkuankku_plan_face_eyewear_and_prompt():
     terrace = {**plan, "pose": "cafe_terrace"}
     prompt, _ = P.build(terrace, face_url="f", body_url="b", hair_url=None, products=[{"url": "u", "kind": "top"}])
     assert "a friend took" in prompt and "took this photo herself" not in prompt
+
+
+def test_face_selfie_is_occasional_and_mood():
+    rng = random.Random(7)
+    faces, moods, prev = 0, 0, []
+    for _ in range(60):
+        plan = P.plan_scene(character_id="chaei", products=PRODS, hair_roles=[], history=prev, now=NOW, rng=rng,
+                            llm=lambda s, u: "{}")
+        if plan["face"] == "full":
+            faces += 1
+            assert not (prev and prev[0]["plan"].get("face") == "full")                  # 얼굴 셀카 연속 금지
+        moods += bool(plan.get("mood"))
+        prev = [{"plan": plan, "created_at": NOW.isoformat()}] + prev[:4]
+    assert 3 <= faces <= 25 and moods >= 25
+    plan = {**plan, "pose": "face_selfie", "face": "full", "mood": "a big carefree smile", "prop": None, "eyewear": None}
+    prompt, _ = P.build(plan, face_url="f", body_url="b", hair_url=None, products=[{"url": "u", "kind": "top"}])
+    assert "exactly like reference image 1" in prompt and "Free-spirited mood" in prompt and "photo diary" in prompt

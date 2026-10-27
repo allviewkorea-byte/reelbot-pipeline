@@ -131,12 +131,36 @@ POSES: dict[str, dict] = {
                      "force_eyewear": "sun", "where": ["cafe", "street", "bakery_front", "restaurant_front"],
                      "tail": "A casual phone snapshot a friend took across the table — not a photoshoot, unposed.",
                      "en": "sitting at an outdoor cafe table holding an iced americano, looking away down the street"},
+    # 얼굴 셀카(대표 2026-10-27 "가끔은 이쁜 얼굴도, 셀카는 얼굴만 가까이도 찍잖아") — 가끔만(FACE_SHOT_RATE)
+    "face_selfie": {"self": True, "ko": "얼굴 가까이 셀카", "cut": "얼굴", "feet": "none", "face": "full",
+                    "kinds": ["room", "indoor", "outdoor", "elevator", "entry", "fitting"],
+                    "en": "a close-up front-camera selfie of her face and shoulders, phone held at arm's length slightly "
+                          "above eye level, head tilted a little, soft natural light on her face"},
     "toe_down": {"self": True, "ko": "발끝 내려다보기", "cut": "디테일", "feet": "shoes", "face": "out_of_frame",
                  "kinds": ["outdoor", "entry", "elevator"],
                  "en": "a shot looking down at her feet, showing the shoes and the hem of the bottoms"},
     "flatlay": {"self": True, "ko": "플랫레이(사람 없음)", "cut": "디테일", "feet": "none", "face": "none", "person": False,
                 "kinds": ["room", "entry"], "en": "a flat lay of the outfit items arranged neatly"},
 }
+
+# 자유분방(대표 2026-10-27 "좀 더 자유분방했으면") — 컷마다 하나 섞는 순간·연출(70%).
+# face: 얼굴(입술 포함)이 보일 때만 쓰는 표정.
+MOODS = [
+    {"en": "caught mid-laugh in a spontaneous moment"},
+    {"en": "making a playful peace sign with her free hand"},
+    {"en": "her hair blowing across the frame in the wind"},
+    {"en": "a slight motion blur because she was moving, charmingly imperfect"},
+    {"en": "shot with the on-camera flash at night, a little overexposed, Y2K party-snapshot feel"},
+    {"en": "a tilted, carefree angle like she snapped it in a hurry"},
+    {"en": "slightly out of focus in a charming, unbothered way"},
+    {"en": "a cute pouty lips expression", "face": True},
+    {"en": "biting her lip with a cheeky half smile", "face": True},
+    {"en": "a big carefree smile", "face": True},
+]
+MOOD_RATE = 0.7
+
+# 얼굴 공개 셀카 비율 — 4~5장에 1장, 연속 금지(대표 2026-10-27). 나머지 컷은 눈을 가린다.
+FACE_SHOT_RATE = 0.22
 
 # 소품(절반 확률, 디테일·플랫레이 제외) — 대표 레퍼런스의 아아·디카 느낌
 PROPS = ["holding an iced americano", "holding a compact silver digital camera", "earphones in, phone in one hand"]
@@ -321,6 +345,13 @@ def plan_scene(*, character_id: str, products: list[dict], hair_roles: list[str]
     pairs, hairs = cand["pairs"], cand["hairs"]
     if not pairs:
         raise ValueError("장면 규칙을 만족하는 장소·포즈 조합이 없어요.")
+    # 얼굴 셀카는 가끔만: 이번에 넣을지 먼저 정하고(직전이 얼굴 셀카면 안 넣음), 아니면 후보에서 뺀다.
+    if not options.get("pose"):
+        last_full = bool(history) and (history[0].get("plan") or {}).get("face") == "full"
+        want_face = not last_full and rng.random() < FACE_SHOT_RATE
+        face_pairs = [pr for pr in pairs if POSES[pr[1]].get("face") == "full"]
+        rest = [pr for pr in pairs if POSES[pr[1]].get("face") != "full"]
+        pairs = face_pairs if (want_face and face_pairs) else (rest or pairs)
 
     pick, hair_role, weather, reason, source = None, None, None, "", "random"
     if llm is None:
@@ -360,8 +391,12 @@ def plan_scene(*, character_id: str, products: list[dict], hair_roles: list[str]
         face = "sunglasses"
     prop = None if POSES[pose].get("person") is False or POSES[pose]["cut"] == "디테일" else (
         rng.choice(PROPS) if rng.random() < 0.5 else None)
+    mood = None
+    if POSES[pose].get("person") is not False and rng.random() < MOOD_RATE:
+        lips = face in ("full", "chin_crop", "sunglasses")
+        mood = rng.choice([m for m in MOODS if lips or not m.get("face")])["en"]
     return {
-        "face": face, "prop": prop,
+        "face": face, "prop": prop, "mood": mood,
         "weekday": weekday, "weekday_ko": WEEKDAYS[weekday]["ko"], "life": WEEKDAYS[weekday]["life"],
         "location": loc, "location_ko": LOCATIONS[loc]["ko"], "pose": pose, "pose_ko": POSES[pose]["ko"],
         "cut": POSES[pose]["cut"], "hair_role": hair_role, "eyewear": eyewear,
@@ -375,7 +410,8 @@ def plan_scene(*, character_id: str, products: list[dict], hair_roles: list[str]
 _TAIL = ("Candid iPhone photo, not a professional shoot: slightly uneven exposure, natural skin texture, real fabric "
          "wrinkles, a little everyday clutter, slight wide-angle phone lens distortion, natural color, no retouching.")
 _SELF_TAIL = ("She took this photo herself with her own phone for her Instagram — a casual, unposed self-shot, not a "
-              "photographer's or model shoot: natural relaxed stance, slightly tilted, imperfect off-center framing.")
+              "photographer's or model shoot: natural relaxed stance, slightly tilted, imperfect off-center framing. "
+              "It feels like a page from her everyday photo diary.")
 _YOUTH = ("She looks like a hip Korean woman in her early 20s with a youthful Seoul street vibe (Seongsu, Hongdae) — "
           "fresh and young, never mature or matronly; casual, slightly undone natural hair styling.")
 _MAKEUP = "Natural everyday makeup: light dewy base and a soft rosy lip tint — nothing heavy."
@@ -397,6 +433,9 @@ def _face_line(plan: dict) -> str:
         return "phone held up covering her face"
     if face == "out_of_frame":
         return "her face is not in the frame"
+    if face == "full":
+        return ("her whole face is visible and pretty — it must look exactly like reference image 1 (same eyes, nose, "
+                "lips, face shape and moles)")
     if face == "chin_crop":
         return ("the top edge of the frame cuts across her face just below the eyes, so only the tip of her nose, her "
                 "lips and chin show — her eyes are never visible")
@@ -442,8 +481,10 @@ def build(plan: dict, *, face_url: str, body_url: str, hair_url: str | None, pro
             parts.append(EYEWEAR_STYLES[ew["style"]]["en"].format(item=EYEWEAR[ew["item"]]["en"]))
         if plan.get("prop"):
             parts.append(f"She is {plan['prop']}.")
+        if plan.get("mood"):
+            parts.append(f"Free-spirited mood: {plan['mood']}.")
         parts.append(f"{pose['en'][:1].upper()}{pose['en'][1:]}, {loc['en']}, {_face_line(plan)}, {weather}.")
-        if (plan.get("face") or pose["face"]) in ("chin_crop", "sunglasses"):
+        if (plan.get("face") or pose["face"]) in ("chin_crop", "sunglasses", "full"):
             parts.append(_MAKEUP)
         parts.append(_EFFORTLESS)
         if pose.get("tail"):

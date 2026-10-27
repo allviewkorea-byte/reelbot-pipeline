@@ -213,7 +213,8 @@ _REVIEW_SYSTEM = (
     "generated photo; the following images are the product photos it must reproduce. Fail it if ANY of these:\n"
     "1. indoor_shoes: it is a living room or bedroom and outdoor shoes are visible on her feet.\n"
     "2. face_visible: her EYES are visible. Her eyes must be hidden — by a phone, by the frame cropping just below "
-    "the eyes, or by sunglasses. Lips, chin and the lower face may show.\n"
+    "the eyes, or by sunglasses. Lips, chin and the lower face may show. SKIP this check when the scene note says "
+    "'얼굴 공개' (a face selfie) — then instead fail as face_visible only if the face looks distorted or unnatural.\n"
     "3. season: clothing and background season/weather clearly contradict (heavy coat on a summer street, etc.).\n"
     "4. product_mismatch: a product is noticeably different — color, pattern, or a key detail (buttons, logo "
     "position, length).\n"
@@ -229,7 +230,8 @@ def review(result_path: Path, product_paths: list[Path], plan: dict, tmp: Path) 
     """결과 + 상품 사진 비전 검수 → {pass, violations, fix_en, model}. 호출 실패면 예외."""
     small = [gen._small_jpeg(result_path, tmp / "rv0.jpg")]
     small += [gen._small_jpeg(p, tmp / f"rv{i + 1}.jpg") for i, p in enumerate(product_paths[:4])]
-    ask = (f"장면: {plan.get('location_ko')} · {plan.get('pose_ko')} · {plan.get('season_ko')}. "
+    face_note = " · 얼굴 공개 컷(눈 보여도 됨)" if plan.get("face") == "full" else ""
+    ask = (f"장면: {plan.get('location_ko')} · {plan.get('pose_ko')} · {plan.get('season_ko')}{face_note}. "
            "기준대로 검수하고 JSON 만 출력해.")
     data = _vision_json(_REVIEW_SYSTEM, small, ask, "insta_review")
     passed = data.get("pass")
