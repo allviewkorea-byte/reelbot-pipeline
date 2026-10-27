@@ -139,7 +139,8 @@ _KIND_SYSTEM = (
 )
 
 
-def _vision_json(system: str, images: list[Path], ask: str, task: str, max_tokens: int = 400) -> dict:
+def _vision_json(system: str, images: list[Path], ask: str, task: str, max_tokens: int = 400,
+                 model: str | None = None) -> dict:
     """Claude 비전(여러 장) → JSON. Claude API 오류면 OpenAI 비전 1회 대체(첫 장만)."""
     from services import music_lyrics
     from services import music_llm_fallback as fb
@@ -147,12 +148,19 @@ def _vision_json(system: str, images: list[Path], ask: str, task: str, max_token
     from services.music_auto_image import review_model
 
     b64s = [base64.b64encode(p.read_bytes()).decode("ascii") for p in images]
-    model = review_model()
+    model = model or review_model()
     try:
-        client = music_lyrics._client().with_options(timeout=60.0, max_retries=0)
+        client = music_lyrics._client().with_options(timeout=120.0, max_retries=0)
         content = [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b}} for b in b64s]
-        msg = client.messages.create(model=model, max_tokens=max_tokens, system=system,
-                                     messages=[{"role": "user", "content": [*content, {"type": "text", "text": ask}]}])
+        messages = [{"role": "user", "content": [*content, {"type": "text", "text": ask}]}]
+        try:
+            msg = client.messages.create(model=model, max_tokens=max_tokens, system=system, messages=messages)
+        except Exception as e:  # noqa: BLE001 - 지정 모델 실패면 기본 모델로 1회
+            if model == review_model():
+                raise
+            logger.warning("[insta-outfit] %s 실패 → 기본 모델: %s", model, str(e)[:160])
+            model = review_model()
+            msg = client.messages.create(model=model, max_tokens=max_tokens, system=system, messages=messages)
         text = "".join(getattr(b, "text", "") for b in (msg.content or []))
         music_ops_log.add_usage_from(msg, model)
     except Exception as e:  # noqa: BLE001
@@ -251,7 +259,8 @@ def review(result_path: Path, product_paths: list[Path], plan: dict, tmp: Path,
     ref_note = f" · {', '.join(labels)}, 나머지는 상품 사진" if labels else ""
     ask = (f"장면: {plan.get('location_ko')} · {plan.get('pose_ko')} · {plan.get('season_ko')}{face_note}{ref_note}. "
            "기준대로 검수하고 JSON 만 출력해.")
-    data = _vision_json(_REVIEW_SYSTEM, small, ask, "insta_review")
+    from services.insta_picks import strong_model   # 순환 import 피함
+    data = _vision_json(_REVIEW_SYSTEM, small, ask, "insta_review", max_tokens=600, model=strong_model())
     passed = data.get("pass")
     if not isinstance(passed, bool):
         raise ValueError("검수 응답의 pass 가 bool 이 아님")

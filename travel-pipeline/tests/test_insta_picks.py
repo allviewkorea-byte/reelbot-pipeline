@@ -327,8 +327,11 @@ def test_judge_two_stage_models_and_cost(tmp_path):
     d = K.Deps(coupang=_Shop("c", {}), vision=vision, download=_dl, rest=_Tables())
     scored, _ = K.judge({"kind": "top", "queries": []}, {"seasons": []}, [_c("1", "여성 니트", ch="coupang")], d, {}, tmp_path)
     assert scored and seen[0] == ("insta_pick_usable", K.SCREEN_MODEL, "coupang_1_s.jpg")    # 1단계: 싼 모델 · 256px
-    assert seen[1][0] == "insta_pick_score" and seen[1][1] is None and seen[1][2] == "coupang_1_m.jpg"  # 2단계: 기본 · 512px
+    assert seen[1] == ("insta_pick_score", K.strong_model(), "coupang_1_m.jpg")  # 2단계: 중요한 판단 모델 · 512px
+    assert K.strong_model() == "claude-opus-5-5"                                          # 대표 2026-10-27 테스트
     assert K.vision_cost_usd(d.meter) > 0
+    from services.music_dashboard_summary import _claude_price
+    assert _claude_price("claude-opus-5-5") == (4.0, 20.0)
 
 
 def _delete_env(monkeypatch):

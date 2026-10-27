@@ -216,3 +216,32 @@ def test_pair_outfits_prefers_color_harmony_and_variety():
     out = CL.pair_outfits(variants, [tops])
     assert out[0][1]["id"] in ("t_ivory", "t_grey")                       # 빨강+초록(포인트 2개)은 피함
     assert out[0][1]["id"] != out[1][1]["id"]                           # 룩마다 다른 상의
+
+
+def test_plan_retries_with_new_theme_when_products_short(coordi, monkeypatch):  # noqa: F811
+    """첫 테마 상품이 모자라면 테마를 바꿔 다시(대표 2026-10-27: 실패하면 스스로)."""
+    t = coordi.t
+    t.t["ig_collections"] = []
+    themes = iter([{**CL.FALLBACK_THEMES["autumn"][0], "concept": "없는테마", "queries": ["없음1", "없음2", "없음3"]},
+                   dict(CL.FALLBACK_THEMES["autumn"][0])])
+    seen_avoid = []
+
+    def fake_theme(season, life, recent=None, **k):
+        seen_avoid.append(list(recent or []))
+        return {**next(themes), "source": "fallback"}
+    monkeypatch.setattr(CL, "plan_theme", fake_theme)
+    furs = [_c(f"f{i}", f"여성 퍼 자켓 {i}", price=69000, ch="coupang") for i in range(4)]
+    hexes = ["#F2EDE3", "#3B2A20", "#808080", "#111111"]
+    shop = _Shop("coupang", {"여성 퍼 자켓": furs})
+    d = K.Deps(coupang=shop, vision=_vision({f"coupang_f{i}": (9, hexes[i]) for i in range(4)}), download=_dl, rest=t)
+    j = CL.start_plan("chaei", n=3, d=d)
+    CL.run(j["id"], rng=random.Random(2))
+    assert CL.get_job(j["id"])["state"] == "done", CL.get_job(j["id"])
+    row = t.t["ig_collections"][0]
+    assert row["status"] == "planned" and row["usage"]["themes_tried"] == ["없는테마", "퍼 아우터"]
+    assert "없는테마" in seen_avoid[1]                                       # 실패한 테마는 다시 안 고름
+    assert "여성 없는테마" in shop.calls                                     # 넓은 검색어로도 한 번 더 찾음
+
+
+def test_broaden_queries():
+    assert CL.broaden_queries({"kind": "bottoms", "concept": "미니스커트 모음", "queries": []}) == ["여성 미니스커트", "여성 하의"]

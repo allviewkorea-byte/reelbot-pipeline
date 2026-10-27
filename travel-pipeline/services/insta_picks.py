@@ -40,6 +40,12 @@ logger = logging.getLogger(__name__)
 NAVER_ENABLED = False
 # 2차 필터(합성 가능 사진인지)는 작은 썸네일 + 저렴한 모델, 3차 심사만 기본 검수 모델(결정 2026-10-27, 픽 비용↓)
 SCREEN_MODEL = "claude-haiku-4-5-20251001"
+
+
+def strong_model() -> str:
+    """인스타 '중요한 판단'(코디 설계·상품 3차 점수·착장 검수) 모델 — 대표 2026-10-27 테스트로 Opus 5.5.
+    INSTA_CLAUDE_MODEL 로 바꿀 수 있고(음악 채널 설정과 분리), 단순 작업(2차 사진 검사·장면 기획)은 그대로 Haiku."""
+    return (os.getenv("INSTA_CLAUDE_MODEL") or "claude-opus-5-5").strip()
 SCREEN_PX, SCORE_PX = 256, 512
 MAX_CANDIDATES = 40
 USABLE_BATCH = 12          # 2차 필터 한 번에 보는 사진 수
@@ -178,9 +184,17 @@ def vision_labeled(system: str, labeled: list[tuple[str, Path]], ask: str, task:
                                                     "data": base64.b64encode(p.read_bytes()).decode("ascii")}})
     content.append({"type": "text", "text": ask})
     model = model or review_model()
-    client = music_lyrics._client().with_options(timeout=90.0, max_retries=0)
-    msg = client.messages.create(model=model, max_tokens=max_tokens, system=system,
-                                 messages=[{"role": "user", "content": content}])
+    client = music_lyrics._client().with_options(timeout=120.0, max_retries=0)
+    try:
+        msg = client.messages.create(model=model, max_tokens=max_tokens, system=system,
+                                     messages=[{"role": "user", "content": content}])
+    except Exception as e:  # noqa: BLE001 - 지정 모델 실패(없는 모델·과부하)면 기본 모델로 1회
+        if model == review_model():
+            raise
+        logger.warning("[insta-picks] %s 실패 → 기본 모델: %s", model, str(e)[:160])
+        model = review_model()
+        msg = client.messages.create(model=model, max_tokens=max_tokens, system=system,
+                                     messages=[{"role": "user", "content": content}])
     music_ops_log.add_usage_from(msg, model)
     if meter is not None and getattr(msg, "usage", None) is not None:
         m = meter.setdefault(model, {"in": 0, "out": 0})
@@ -356,7 +370,7 @@ def judge(item: dict, look: dict, cands: list[dict], d: Deps, usage: dict, tmp: 
     try:
         res = d.vision(_SCORE_SYSTEM, [(f"후보 {n + 1}", mid[id(c)]) for n, (c, _) in enumerate(top)],
                        f"목표 아이템: {spec_line}. 계절: {look.get('seasons') or []}. 후보마다 점수 JSON 만.",
-                       "insta_pick_score", 1500, meter=d.meter)
+                       "insta_pick_score", 2000, model=strong_model(), meter=d.meter)
         usage["vision"] = usage.get("vision", 0) + 1
         by_n = {int(r.get("n", 0)): r for r in res.get("results") or []}
         scored = []

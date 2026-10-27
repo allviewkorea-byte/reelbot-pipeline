@@ -32,6 +32,7 @@ COUPANG_SEARCH = "/v2/providers/affiliate_open_api/apis/openapi/v1/products/sear
 COUPANG_DEEPLINK = "/v2/providers/affiliate_open_api/apis/openapi/v1/deeplink"
 COUPANG_SEARCH_PER_MIN = 40      # 공식 50/분 — 여유 10
 COUPANG_SEARCH_WINDOW_SEC = 60
+RETRY_SLEEP_SEC = 3              # 일시 오류 재시도 전 대기
 SEARCH_CACHE_SEC = 3600   # 같은 검색어 결과 1시간 메모리 캐시(저장 아님) — 한도 아끼기
 _SEARCH_CACHE: dict[tuple[str, int], tuple[float, list[dict]]] = {}
 _CALLS: list[float] = []  # 분당 상한(프로세스 공용 — 픽마다 클라이언트를 새로 만들어도 같이 센다)
@@ -101,7 +102,13 @@ class CoupangClient:
                 raise QuotaExceeded("쿠팡 검색 분당 상한")
             _CALLS.append(now)
         self.cached = False
-        data = self._request("GET", COUPANG_SEARCH, {"keyword": keyword, "limit": limit})
+        try:
+            data = self._request("GET", COUPANG_SEARCH, {"keyword": keyword, "limit": limit})
+        except QuotaExceeded:
+            raise
+        except Exception:  # noqa: BLE001 - 일시 오류(타임아웃·5xx)는 잠깐 뒤 1회 재시도
+            time.sleep(RETRY_SLEEP_SEC)
+            data = self._request("GET", COUPANG_SEARCH, {"keyword": keyword, "limit": limit})
         items = ((data.get("data") or {}).get("productData")) or []
         out = [{
             "channel": "coupang", "product_id": str(it.get("productId")), "name": _clean(it.get("productName", "")),

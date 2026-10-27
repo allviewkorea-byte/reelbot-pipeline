@@ -108,7 +108,8 @@ def plan_theme(season: str, life: str, recent: list[str] | None = None, llm=None
     """테마 1개(AI, 실패 시 계절 기본). 최근 쓴 컨셉은 피한다."""
     r = rng or random
     from services import music_lyrics
-    llm = llm or (lambda s, u: music_lyrics._call(s, u, max_tokens=700, task="insta_collection_theme"))
+    llm = llm or (lambda s, u: music_lyrics._call(s, u, max_tokens=700, task="insta_collection_theme",
+                                                  model=picks.strong_model()))
     try:
         data = music_lyrics._extract_json(llm(_THEME_SYSTEM, json.dumps({
             "season": season, "life": life, "avoid_recent_concepts": recent or [],
@@ -231,11 +232,18 @@ def pick_base(theme: dict, d: picks.Deps, usage: dict, n: int = N_LOOKS, season:
     pools = []
     with tempfile.TemporaryDirectory() as td:
         for spec in base_specs(theme, season or _season(), llm=llm):
-            cands, notes = picks.gather(spec, d, usage)
-            usage.setdefault("notes", []).extend(notes)
-            kept, _ = picks.code_filter(cands, spec["kind"])
-            scored, _ = picks.judge(spec, {"seasons": [season or _season()]}, kept, d, usage, Path(td)) if kept else ([], [])
-            scored = [c for c in scored if c.get("score", 0) >= picks.MIN_SCORE]
+            scored = []
+            fallback = coordi._FALLBACK.get(spec["kind"], (None, None, None))[2]
+            for qs in (spec["queries"], [fallback] if fallback and fallback not in spec["queries"] else []):
+                if not qs:
+                    continue   # 못 찾으면 기본 검색어(예: 여성 블랙 로퍼)로 한 번 더
+                cands, notes = picks.gather({**spec, "queries": qs}, d, usage)
+                usage.setdefault("notes", []).extend(notes)
+                kept, _ = picks.code_filter(cands, spec["kind"])
+                scored, _ = picks.judge(spec, {"seasons": [season or _season()]}, kept, d, usage, Path(td)) if kept else ([], [])
+                scored = [c for c in scored if c.get("score", 0) >= picks.MIN_SCORE]
+                if scored:
+                    break
             out, fams = [], set()
             for c in scored:
                 fam = picks.color_family((c.get("scores") or {}).get("hex"))[0]
@@ -494,36 +502,75 @@ def _scenes(character_id: str, looks_products: list[list[dict]], rng: random.Ran
 _SCENE_KEEP = ("pose", "pose_ko", "location", "location_ko", "face", "hair_role", "eyewear", "eyewear_ko", "season")
 
 
+THEME_TRIES = 3   # 테마 상품이 모자라면 테마를 바꿔 다시(대표 2026-10-27: 실패하면 스스로 다시)
+
+
+def broaden_queries(theme: dict) -> list[str]:
+    """테마 상품이 모자랄 때 더 넓은 검색어 — 컨셉 그대로 / 종류 일반명. 브랜드는 안 붙인다."""
+    noun = P.PRODUCT_KINDS.get(theme["kind"], ("", ""))[0]
+    concept = str(theme.get("concept") or "").replace("모음", "").strip()
+    out = []
+    for q in (f"여성 {concept}", f"여성 {noun}" if noun else ""):
+        q = q.strip()
+        if q and q != "여성" and q not in theme.get("queries", []) and q not in out:
+            out.append(q)
+    return out
+
+
+def _variants_for(theme: dict, d: picks.Deps, usage: dict, n: int, rng: random.Random) -> list[dict]:
+    """테마 상품 n개 — 모자라면 넓은 검색어로 한 번 더(브랜드 없이) 찾아 합친다."""
+    raw = pick_variants(theme, d, usage, n, rng=rng)
+    if len(raw) < n and not any("한도" in x for x in usage.get("notes") or []):
+        extra = broaden_queries(theme)
+        if extra:
+            more = pick_variants({**theme, "queries": extra}, d, usage, n)
+            seen = {(c["channel"], c["product_id"]) for c in raw}
+            raw += [c for c in more if (c["channel"], c["product_id"]) not in seen][: n - len(raw)]
+    return raw
+
+
 def _plan(job_id: str, d: picks.Deps, cid: str, args: dict, llm, rng: random.Random) -> dict:
-    """테마 → 상품(테마 N개 + 함께 입을 후보) → 룩별 코디·장면 → ig_collections(planned). 쿠팡 사본은 지운다."""
+    """테마 → 상품(테마 N개 + 함께 입을 후보) → 룩별 코디·장면 → ig_collections(planned). 쿠팡 사본은 지운다.
+
+    테마 상품이 3개 미만이면 넓은 검색어로 더 찾고, 그래도 모자라면 테마를 바꿔 최대 THEME_TRIES 번.
+    """
     usage: dict = {}
     products: list[dict] = []
     try:
         season, life = _season(), coordi._life_today()
-        _set(job_id, step="테마 정하는 중")
-        theme = plan_theme(season, life, _recent_concepts(d), llm=llm, rng=rng)
-        theme["plan"] = {"mode": "varied", "season": season}
-        _set(job_id, step=f"「{theme['concept']}」 상품 고르는 중", theme={k: theme[k] for k in ("concept", "title_ko", "zip")})
-        raw = pick_variants(theme, d, usage, args["n"], rng=rng)
-        variants = _saved(raw, d)
-        for c, src in zip(variants, raw):
-            c["scores"] = src.get("scores")
-        for c in variants:
-            c["kind"] = theme["kind"]
+        avoid = _recent_concepts(d)
+        theme, variants, tried = None, [], []
+        for attempt in range(THEME_TRIES):
+            _set(job_id, step="테마 정하는 중" if not attempt else f"상품이 부족해 다른 테마로 다시({attempt + 1}/{THEME_TRIES})")
+            theme = plan_theme(season, life, avoid + tried, llm=llm, rng=rng)
+            theme["plan"] = {"mode": "varied", "season": season}
+            tried.append(theme["concept"])
+            _set(job_id, step=f"「{theme['concept']}」 상품 고르는 중",
+                 theme={k: theme[k] for k in ("concept", "title_ko", "zip")})
+            raw = _variants_for(theme, d, usage, args["n"], rng)
+            got = _saved(raw, d)
+            products += got
+            for c, src in zip(got, raw):
+                c["scores"] = src.get("scores")
+                c["kind"] = theme["kind"]
+            if len(got) >= 3:
+                variants = got
+                break
+            if any("한도" in x for x in usage.get("notes") or []):
+                raise CollectionError("쿠팡 검색 한도에 걸렸어요 — 1분쯤 뒤에 다시 기획해 주세요.")
+        if len(variants) < 3:
+            raise CollectionError(f"테마 {len(tried)}개({', '.join(tried)})를 시도했지만 상품이 모자라요 — 잠시 뒤 다시 해 주세요.")
+        usage["themes_tried"] = tried
         _set(job_id, step=f"「{theme['concept']}」에 어울리는 상의·아우터·신발 고르는 중")
-        pools = pick_base(theme, d, usage, len(variants) or args["n"], season=season, llm=args.get("fill_llm"))
+        pools = pick_base(theme, d, usage, len(variants), season=season, llm=args.get("fill_llm"))
         saved_pools = []
         for pool in pools:
             got = _saved(pool["picks"], d)
+            products += got
             for c, src in zip(got, pool["picks"]):
                 c["kind"] = pool["kind"]
                 c["scores"] = src.get("scores")   # 색 조합 짝짓기용(저장은 _keep 에서 빠짐)
             saved_pools.append(got)
-        products = variants + [c for pool in saved_pools for c in pool]
-        if len(variants) < 3:
-            if any("한도" in n for n in usage.get("notes") or []):
-                raise CollectionError("쿠팡 검색 한도에 걸렸어요 — 1분쯤 뒤에 다시 기획해 주세요.")
-            raise CollectionError(f"「{theme['concept']}」 상품을 {len(variants)}개밖에 못 찾았어요 — '다른 기획 보기'로 다시 해 주세요.")
         outfits = pair_outfits(variants, saved_pools)
         _set(job_id, step="룩마다 포즈·장소 정하는 중")
         plans = _scenes(args["character_id"], outfits, rng, llm=args.get("scene_llm"))
@@ -548,7 +595,7 @@ def _make(job_id: str, d: picks.Deps, cid: str, character_id: str, rng: random.R
     cost = float(row.get("cost_usd") or 0)
     meter0 = picks.vision_cost_usd(d.meter)
     try:
-        looks, imgs = [], []
+        looks, imgs, skipped = [], [], []
         _set(job_id, n=len(plan_looks))
         for lk in plan_looks:
             i = lk["n"]
@@ -562,20 +609,29 @@ def _make(job_id: str, d: picks.Deps, cid: str, character_id: str, rng: random.R
             sc = lk.get("scene") or {}
             opts = {k: v for k, v in {"pose": sc.get("pose"), "location": sc.get("location"), "face": sc.get("face"),
                                       "hair": sc.get("hair_role"), "styling_en": theme.get("styling_en")}.items() if v}
-            oj = io.start(character_id, coordi._cap_products(coordi._outfit_products(items)), opts,
-                          remake_of=f"{cid}:{i}:{secrets.token_hex(2)}")
-            io.run(oj["id"], rng=rng)
-            oj = io.get_job(oj["id"])
-            cost += oj.get("cost_usd") or 0.0
-            if oj["state"] != "done":
-                raise CollectionError(f"{i:02d} 생성 실패: {oj.get('error') or ''}")
-            out = io.get_outfit(oj["outfit_id"])
-            path = io._download(io.public_url(out["image_key"]), tmp / f"look{i}.png")
-            imgs.append(str(io.postprocess(path, tmp / f"p{i}.jpg").name))
-            looks.append({**lk, "outfit_id": oj["outfit_id"], "image_key": out["image_key"],
-                          "processed_key": out.get("processed_key"), "review": out.get("review")})
+            try:   # 한 룩이 실패해도 나머지로 계속(대표 2026-10-27: 실패하면 스스로) — 3룩 이상이면 완성
+                oj = io.start(character_id, coordi._cap_products(coordi._outfit_products(items)), opts,
+                              remake_of=f"{cid}:{i}:{secrets.token_hex(2)}")
+                io.run(oj["id"], rng=rng)
+                oj = io.get_job(oj["id"])
+                cost += oj.get("cost_usd") or 0.0
+                if oj["state"] != "done":
+                    raise CollectionError(oj.get("error") or "생성 실패")
+                out = io.get_outfit(oj["outfit_id"])
+                path = io._download(io.public_url(out["image_key"]), tmp / f"look{i}.png")
+                imgs.append(str(io.postprocess(path, tmp / f"p{i}.jpg").name))
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[insta-collection] %s %02d 실패 → 건너뜀: %s", cid, i, str(e)[:200])
+                skipped.append({"n": i, "error": str(e)[:160]})
+                continue
+            looks.append({**lk, "n": len(looks) + 1, "plan_n": i, "outfit_id": oj["outfit_id"],
+                          "image_key": out["image_key"], "processed_key": out.get("processed_key"),
+                          "review": out.get("review")})
             _set(job_id, done_looks=len(looks))
-            _patch(d, cid, {"looks": looks + plan_looks[len(looks):]})
+            _patch(d, cid, {"looks": looks + [x for x in plan_looks if x["n"] > i]})
+        if len(looks) < 3:
+            raise CollectionError(f"룩 {len(plan_looks)}개 중 {len(looks)}개만 만들어졌어요 — " +
+                                  "; ".join(f"{x['n']:02d}: {x['error']}" for x in skipped))
         _set(job_id, step="릴스 영상 만드는 중")
         video, cover = render_reel(tmp, imgs, theme)
         vkey, ckey = f"insta/collections/{cid}/reel.mp4", f"insta/collections/{cid}/cover.jpg"
@@ -583,7 +639,8 @@ def _make(job_id: str, d: picks.Deps, cid: str, character_id: str, rng: random.R
         r2_storage.upload_image(str(tmp / video), vkey, bucket=bucket, public_base_url=pub, content_type="video/mp4")
         r2_storage.upload_image(str(tmp / cover), ckey, bucket=bucket, public_base_url=pub, content_type="image/jpeg")
         total = round(cost + picks.vision_cost_usd(d.meter) - meter0, 4)
-        _patch(d, cid, {"looks": looks, "video_key": vkey, "cover_key": ckey, "status": "ok", "cost_usd": total})
+        _patch(d, cid, {"looks": looks, "video_key": vkey, "cover_key": ckey, "status": "ok", "cost_usd": total,
+                        **({"error": f"{len(skipped)}개 룩 건너뜀"} if skipped else {})})
         _set(job_id, cost_usd=total)
     finally:
         picks.delete_images(all_items, d)

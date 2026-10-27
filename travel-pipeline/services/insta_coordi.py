@@ -127,7 +127,7 @@ def fill_specs(bose: list[dict], need: list[str], season: str, llm: Callable | N
     """빈 종류의 아이템 명세(검색어 포함). → (컨셉, items). AI 실패·누락 종류는 기본 명세로.
     guide: 스타일 가이드(없으면 계절·오늘 생활 기준 기본 가이드)."""
     from services import music_lyrics
-    llm = llm or (lambda s, u: music_lyrics._call(s, u, max_tokens=900, task="insta_fill"))
+    llm = llm or (lambda s, u: music_lyrics._call(s, u, max_tokens=900, task="insta_fill", model=picks.strong_model()))
     concept, items = "내 상품 코디", []
     try:
         data = music_lyrics._extract_json(llm(_FILL_SYSTEM, json.dumps({
