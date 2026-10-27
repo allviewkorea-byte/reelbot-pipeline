@@ -206,17 +206,35 @@ def pick_variants(theme: dict, d: picks.Deps, usage: dict, n: int = N_LOOKS,
     return out[:n]
 
 
-def pick_base(theme: dict, d: picks.Deps, usage: dict, n: int = N_LOOKS) -> list[dict]:
-    """함께 입는 종류마다 후보 n개(색이 고르게) → [{kind, picks:[…]}]. 룩 i 는 picks[i % len] 을 입는다."""
+def base_specs(theme: dict, season: str, llm=None) -> list[dict]:
+    """테마 아이템에 어울리는 '나머지 코디' 명세 — 코디 찾기의 빈칸 채우기와 같은 규칙·AI(대표 2026-10-27:
+    미니스커트 테마인데 롱부츠만 붙고 상의·아우터가 없었음).
+
+    필요한 종류: 원피스가 아니면 상·하의, 가을·겨울은 아우터, 그다음 신발·가방(착장 참조 상한 안에서).
+    명세(색·핏·검색어)는 테마 아이템을 기준으로 AI가 어울리게 설계(fill_specs) — 테마 AI가 준 base 검색어가
+    같은 종류면 앞에 붙인다.
+    """
+    need = coordi._auto_need([theme["kind"]], season)
+    if not need:
+        return []
+    hint = [{"kind": theme["kind"], "desc": f"{theme.get('concept', '')} ({theme['queries'][0] if theme.get('queries') else ''})"}]
+    _, specs = coordi.fill_specs(hint, need, season, llm=llm)
+    by_kind = {b.get("kind"): b.get("queries") or [] for b in theme.get("base") or []}
+    for sp in specs:
+        sp["queries"] = (by_kind.get(sp["kind"]) or [])[:1] + [q for q in sp.get("queries") or [] if q][:2]
+    return specs
+
+
+def pick_base(theme: dict, d: picks.Deps, usage: dict, n: int = N_LOOKS, season: str | None = None,
+              llm=None) -> list[dict]:
+    """나머지 코디 종류마다 후보 n개(점수순, 색 계열 고르게) → [{kind, picks:[…]}]. 쿠팡 검색은 종류당 1회."""
     pools = []
     with tempfile.TemporaryDirectory() as td:
-        for b in theme.get("base") or []:
-            spec = {"kind": b["kind"], "queries": b["queries"], "color_name": "", "hex": None, "fit": "", "length": "",
-                    "material": "", "details": ""}
+        for spec in base_specs(theme, season or _season(), llm=llm):
             cands, notes = picks.gather(spec, d, usage)
             usage.setdefault("notes", []).extend(notes)
             kept, _ = picks.code_filter(cands, spec["kind"])
-            scored, _ = picks.judge(spec, {"seasons": [_season()]}, kept, d, usage, Path(td)) if kept else ([], [])
+            scored, _ = picks.judge(spec, {"seasons": [season or _season()]}, kept, d, usage, Path(td)) if kept else ([], [])
             scored = [c for c in scored if c.get("score", 0) >= picks.MIN_SCORE]
             out, fams = [], set()
             for c in scored:
@@ -226,8 +244,33 @@ def pick_base(theme: dict, d: picks.Deps, usage: dict, n: int = N_LOOKS) -> list
                     fams.add(fam)
             out += [c for c in scored if c not in out]
             if out:
-                pools.append({"kind": b["kind"], "picks": out[:n]})
+                pools.append({"kind": spec["kind"], "picks": out[:n]})
     return pools
+
+
+def _hex(c: dict) -> str | None:
+    return (c.get("scores") or {}).get("hex")
+
+
+def pair_outfits(variants: list[dict], pools: list[list[dict]]) -> list[list[dict]]:
+    """룩마다 [테마 아이템 + 종류별 1개]. 색 조합(3색·포인트 1색)이 맞는 것 우선, 같은 아이템은 되도록 안 겹치게."""
+    used: list[dict] = [dict() for _ in pools]
+    outfits = []
+    for v in variants:
+        chosen = [v]
+        for k, pool in enumerate(pools):
+            if not pool:
+                continue
+
+            def cost(c: dict, k: int = k) -> tuple[int, int, int]:
+                combo = picks.combo_violations([_hex(x) for x in chosen] + [_hex(c)])
+                return (0 if combo["ok"] else 1, used[k].get(id(c), 0), pool.index(c))
+
+            best = min(pool, key=cost)
+            used[k][id(best)] = used[k].get(id(best), 0) + 1
+            chosen.append(best)
+        outfits.append(chosen)
+    return outfits
 
 
 def _saved(cands: list[dict], d: picks.Deps) -> list[dict]:
@@ -461,22 +504,27 @@ def _plan(job_id: str, d: picks.Deps, cid: str, args: dict, llm, rng: random.Ran
         theme = plan_theme(season, life, _recent_concepts(d), llm=llm, rng=rng)
         theme["plan"] = {"mode": "varied", "season": season}
         _set(job_id, step=f"「{theme['concept']}」 상품 고르는 중", theme={k: theme[k] for k in ("concept", "title_ko", "zip")})
-        variants = _saved(pick_variants(theme, d, usage, args["n"], rng=rng), d)
+        raw = pick_variants(theme, d, usage, args["n"], rng=rng)
+        variants = _saved(raw, d)
+        for c, src in zip(variants, raw):
+            c["scores"] = src.get("scores")
         for c in variants:
             c["kind"] = theme["kind"]
-        pools = pick_base(theme, d, usage, len(variants) or args["n"])
+        _set(job_id, step=f"「{theme['concept']}」에 어울리는 상의·아우터·신발 고르는 중")
+        pools = pick_base(theme, d, usage, len(variants) or args["n"], season=season, llm=args.get("fill_llm"))
         saved_pools = []
         for pool in pools:
             got = _saved(pool["picks"], d)
-            for c in got:
+            for c, src in zip(got, pool["picks"]):
                 c["kind"] = pool["kind"]
+                c["scores"] = src.get("scores")   # 색 조합 짝짓기용(저장은 _keep 에서 빠짐)
             saved_pools.append(got)
         products = variants + [c for pool in saved_pools for c in pool]
         if len(variants) < 3:
             if any("한도" in n for n in usage.get("notes") or []):
                 raise CollectionError("쿠팡 검색 한도에 걸렸어요 — 1시간쯤 뒤에 다시 기획해 주세요.")
             raise CollectionError(f"「{theme['concept']}」 상품을 {len(variants)}개밖에 못 찾았어요 — '다른 기획 보기'로 다시 해 주세요.")
-        outfits = [[v] + [pool[i % len(pool)] for pool in saved_pools] for i, v in enumerate(variants)]
+        outfits = pair_outfits(variants, saved_pools)
         _set(job_id, step="룩마다 포즈·장소 정하는 중")
         plans = _scenes(args["character_id"], outfits, rng, llm=args.get("scene_llm"))
         looks = [{"n": i + 1, "product": _keep(o[0]), "items": [_keep(c) for c in o[1:]],

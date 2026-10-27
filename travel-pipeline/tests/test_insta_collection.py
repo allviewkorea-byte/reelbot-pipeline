@@ -189,3 +189,30 @@ def test_pick_variants_avoids_same_color_and_material(coordi):  # noqa: F811
     d = K.Deps(coupang=_Shop("coupang", items), vision=_vision(scores), download=_dl, rest=coordi.t)
     got = CL.pick_variants(theme, d, {}, n=3)
     assert [g["product_id"] for g in got] == ["v0", "v3", "v4"]
+
+
+def test_base_specs_complete_outfit_for_miniskirt():
+    """미니스커트(하의) 테마 가을 → 상의·아우터·신발까지(대표 2026-10-27: 롱부츠만 붙었음)."""
+    theme = {"kind": "bottoms", "concept": "미니스커트", "queries": ["여성 데님 미니스커트"],
+             "base": [{"kind": "shoes", "queries": ["여성 블랙 롱부츠"]}]}
+    seen = {}
+
+    def llm(system, user):
+        seen["user"] = user
+        return json.dumps({"concept": "x", "items": [
+            {"kind": "top", "color_name": "아이보리", "hex": "#F2EDE3", "queries": ["여성 아이보리 크롭 니트"]},
+            {"kind": "outerwear", "color_name": "브라운", "hex": "#5C4033", "queries": ["여성 브라운 스웨이드 자켓"]}]})
+    specs = CL.base_specs(theme, "autumn", llm=llm)
+    assert [s["kind"] for s in specs] == ["top", "outerwear", "shoes"]
+    assert "미니스커트" in seen["user"]
+    assert specs[2]["queries"][0] == "여성 블랙 롱부츠" and specs[0]["queries"][0] == "여성 아이보리 크롭 니트"
+
+
+def test_pair_outfits_prefers_color_harmony_and_variety():
+    def it(pid, hexv):
+        return {"id": pid, "scores": {"hex": hexv}}
+    variants = [it("v1", "#D7263D"), it("v2", "#111111")]                 # 빨강 스커트 / 블랙 스커트
+    tops = [it("t_green", "#1FA84F"), it("t_ivory", "#F2EDE3"), it("t_grey", "#808080")]
+    out = CL.pair_outfits(variants, [tops])
+    assert out[0][1]["id"] in ("t_ivory", "t_grey")                       # 빨강+초록(포인트 2개)은 피함
+    assert out[0][1]["id"] != out[1][1]["id"]                           # 룩마다 다른 상의
