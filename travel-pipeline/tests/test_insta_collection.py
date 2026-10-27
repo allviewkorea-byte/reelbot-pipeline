@@ -245,4 +245,14 @@ def test_plan_retries_with_new_theme_when_products_short(coordi, monkeypatch):  
 
 
 def test_broaden_queries():
-    assert CL.broaden_queries({"kind": "bottoms", "concept": "미니스커트 모음", "queries": []}) == ["여성 미니스커트", "여성 하의"]
+    assert CL.broaden_queries({"kind": "bottoms", "concept": "미니스커트 모음", "queries": []}) == ["여성 미니스커트"]
+    assert CL.broaden_queries({"kind": "outerwear", "concept": "앙고라 가디건", "queries": []}) == ["여성 앙고라 가디건", "여성 가디건"]
+
+
+def test_concept_match_rejects_other_items():
+    """'앙고라 가디건' 테마에 후드 집업·자켓이 섞이던 문제(2026-10-28)."""
+    t = {"concept": "앙고라 가디건", "kind": "outerwear"}
+    assert not CL.concept_match("여 헤어리 후드 집업", t) and not CL.concept_match("키르시 코튼 자켓", t)
+    assert CL.concept_match("여성 앙고라 니트 가디건", t) and CL.concept_match("헤어리 루즈핏 가디건", t)
+    assert CL.concept_match("빈티지 퍼 카라 자켓", {"concept": "퍼 아우터"})          # 아우터 = 자켓 등
+    assert CL.concept_match("카고 미니 스커트", {"concept": "미니스커트"})
