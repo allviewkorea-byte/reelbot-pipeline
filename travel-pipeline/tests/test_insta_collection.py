@@ -1,0 +1,97 @@
+"""A3 — 컬렉션 릴스: 테마(AI·기본) · 옷 교체 프롬프트 · 영상 렌더 · 전체 흐름(가짜 쿠팡·비전·Muse·저장소)."""
+
+from __future__ import annotations
+
+import json
+import random
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from services import insta_collection as CL  # noqa: E402
+from services import insta_picks as K  # noqa: E402
+from test_insta_coordi import coordi  # noqa: E402,F401
+from test_character_studio import studio  # noqa: E402,F401
+from test_insta_outfit import flow  # noqa: E402,F401
+from test_insta_picks import _c, _dl, _Shop, _vision  # noqa: E402
+from test_shorts_cast import env  # noqa: E402,F401
+
+needs_ffmpeg = pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg 필요")
+DEJAVU = ["/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]
+
+
+def test_plan_theme_ai_and_fallback():
+    def llm(s, u):
+        assert "style_guide" in json.loads(u)
+        return json.dumps({"kind": "outerwear", "concept": "레더 자켓", "title_en": "leather collection",
+                           "title_ko": ["가을엔 역시", "레더 자켓"], "zip": "레더 자켓 모음.zip",
+                           "queries": ["여성 레더 자켓", "여성 크롭 레더"], "base": [{"kind": "bottoms", "queries": ["여성 미니스커트"]},
+                                                                               {"kind": "outerwear", "queries": ["x"]}]})
+    t = CL.plan_theme("autumn", "주말", llm=llm)
+    assert t["source"] == "ai" and t["title_en"] == "LEATHER COLLECTION" and [b["kind"] for b in t["base"]] == ["bottoms"]
+    f = CL.plan_theme("autumn", "주말", recent=["퍼 아우터"], llm=lambda s, u: (_ for _ in ()).throw(RuntimeError("x")))
+    assert f["source"] == "fallback" and f["concept"] == "앙고라 가디건"
+
+
+def test_swap_prompt_keeps_everything_but_garment():
+    p = CL.swap_prompt("outerwear", fix="buttons should be gold")
+    assert "same pose" in p and "Replace ONLY" in p and "image 2" in p and "buttons should be gold" in p
+
+
+@needs_ffmpeg
+def test_render_reel(tmp_path, monkeypatch):
+    if not all(Path(f).exists() for f in DEJAVU):
+        pytest.skip("DejaVu 폰트 없음")
+    monkeypatch.setattr(CL, "_SERIF", [DEJAVU[0]])
+    monkeypatch.setattr(CL, "_BOLD", [DEJAVU[1]])
+    for i in range(3):
+        subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=0x{i}0{i}0{i}0:s=720x1280", "-frames:v", "1",
+                        str(tmp_path / f"p{i}.jpg")], capture_output=True, check=True)
+    theme = {"title_en": "FUR OUTER COLLECTION", "title_ko": ["추워지기 전에", "쟁여둘 퍼 아우터"], "zip": "퍼 아우터 모음.zip"}
+    video, cover = CL.render_reel(tmp_path, ["p0.jpg", "p1.jpg", "p2.jpg"], theme)
+    dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+                                str(tmp_path / video)], capture_output=True, text=True).stdout)
+    assert abs(dur - (CL.COVER_SEC + 3 * CL.LOOK_SEC)) < 0.3 and (tmp_path / cover).exists()
+    w, h = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v", "-show_entries", "stream=width,height",
+                           "-of", "csv=p=0", str(tmp_path / video)], capture_output=True, text=True).stdout.strip().split(",")
+    assert (int(w), int(h)) == (CL.W, CL.H)
+
+
+@needs_ffmpeg
+def test_collection_end_to_end(coordi, monkeypatch):  # noqa: F811
+    if not all(Path(f).exists() for f in DEJAVU):
+        pytest.skip("DejaVu 폰트 없음")
+    monkeypatch.setattr(CL, "_SERIF", [DEJAVU[0]])
+    monkeypatch.setattr(CL, "_BOLD", [DEJAVU[1]])
+    t = coordi.t
+    t.t["ig_collections"] = []
+    theme = dict(CL.FALLBACK_THEMES["autumn"][0])
+    monkeypatch.setattr(CL, "plan_theme", lambda *a, **k: {**theme, "source": "fallback"})
+    furs = [_c(f"f{i}", f"여성 퍼 자켓 {i}", price=69000, ch="coupang") for i in range(6)]
+    shop = _Shop("coupang", {"여성 퍼 자켓": furs, "여성 블랙 미니스커트": [_c("sk", "여성 블랙 미니스커트", ch="coupang")],
+                             "여성 블랙 롱부츠": [_c("bt", "여성 블랙 롱부츠", price=59000, ch="coupang")]})
+    hexes = ["#F2EDE3", "#3B2A20", "#808080", "#111111", "#C8A27A", "#F2EDE3"]
+    scores = {f"coupang_f{i}": (9 - i * 0.2, hexes[i]) for i in range(6)} | {"coupang_sk": (9, "#111111"),
+                                                                             "coupang_bt": (9, "#111111")}
+    d = K.Deps(coupang=shop, vision=_vision(scores), download=_dl, rest=t)
+    job = CL.start("chaei", n=4, d=d)
+    assert CL.start("chaei", n=4, d=d)["id"] == job["id"]
+    CL.run(job["id"], rng=random.Random(3))
+    j = CL.get_job(job["id"])
+    assert j["state"] == "done", j
+    row = t.t["ig_collections"][0]
+    assert row["status"] == "ok" and len(row["looks"]) == 4 and row["video_key"].endswith("reel.mp4")
+    assert [lk["n"] for lk in row["looks"]] == [1, 2, 3, 4]
+    assert len({lk["product"]["id"] for lk in row["looks"]}) == 4                         # 룩마다 다른 상품
+    swap_calls = coordi.muse.calls[1:]
+    assert len(swap_calls) >= 3 and all("Replace ONLY" in c.prompt for c in swap_calls)
+    assert all(len(c.reference_images) == 2 for c in swap_calls)                         # Look 1 + 상품
+    assert row["video_key"] in coordi.s3.objs and row["cover_key"] in coordi.s3.objs
+    assert not [k for k in coordi.s3.objs if k.startswith("insta/products/coupang/")]   # 쿠팡 사본 삭제
+    shown = CL.list_collections(d=d)[0]
+    assert shown["video_url"].endswith("reel.mp4") and shown["looks"][0]["image_url"]

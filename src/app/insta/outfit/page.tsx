@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation"
 import { toast } from "sonner"
 import { ChevronDown, ImageIcon, Loader2, RefreshCw, Shirt, Sparkles, ThumbsDown, ThumbsUp, Upload, Wand2, X } from "lucide-react"
 import { prepareFile } from "@/components/shorts/FamilyCastPanel"
+import { CollectionPanel } from "@/components/insta/CollectionPanel"
 import { CoordiProducts, HideButton, type CoordiLook } from "@/components/insta/CoordiProducts"
 import { PicksPanel } from "@/components/insta/PicksPanel"
 import { RefsPanel } from "@/components/insta/RefsPanel"
@@ -302,6 +303,9 @@ function InstaOutfitPage() {
         </div>
         <p className="text-xs text-muted-foreground">내 상품 사진과 링크를 넣고 버튼만 누르세요. 장소·포즈·헤어·아이웨어는 AI가 정해요.</p>
       </div>
+
+      {/* 컬렉션 릴스(A3) — 메인 포맷(롤모델 @yxyxeon) */}
+      <CollectionPanel character={CHARACTER} ready={ready} />
 
       {/* 오늘의 코디 찾기 — 완전 자동(2026-10-27 대표: 반자동 아님). 아래 "내 상품으로 코디"는 선택 기능. */}
       <section className="flex min-w-0 flex-col gap-2 rounded-xl border border-primary/30 bg-card p-4 sm:flex-row sm:items-center">
