@@ -30,6 +30,7 @@ import hashlib
 import json
 import logging
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -46,14 +47,17 @@ _DEFAULT_SIZE = "2048x1152"  # 16:9, 양 변 16의 배수, 2560x1440(실험 구�
 _DEFAULT_QUALITY = "high"
 # 이미지 출력 토큰 단가(USD / 1M) — 비용 추정 로그용. 공식 가격표가 바뀌면 env 로 덮는다.
 _DEFAULT_OUTPUT_USD_PER_M = 30.0
-_MAX_ATTEMPTS = 3  # 1회 + 불합격 시 재생성 최대 2회(1회 ≈ 20초 — 6분 상한 안에 충분)
+_MAX_ATTEMPTS = 3  # 1회 + 불합격 시 재생성 최대 2회(1회 ≈ 20초 — 6분 상한 안에 충분) — where
+# 운동(2026-10-27 대표 승인): 인물 2회 → 불합격이면 인물 없는 장면 2회(총 4회). 옛 배경 재사용은 그 뒤 최후 수단.
+_WORKOUT_PEOPLE_ATTEMPTS = 2
+_WORKOUT_MAX_ATTEMPTS = 4
 
 # 단계 상한(2026-10: 수동 생성이 이미지 단계에서 멈춘 사례). SDK 기본값은 OpenAI·Anthropic 모두
 # read timeout 600초 × 재시도 2회라, 상한 없이는 이미지 단계 하나가 1시간 넘게 잡을 수 있었다.
 # 넘거나 예외면 이미지 없이(bg_path=None) 기존 블랙 배경 렌더로 계속한다. env 로 덮을 수 있다.
 _DEFAULT_IMAGE_TIMEOUT_SEC = 180.0   # OpenAI 이미지 1회(재시도 0)
 _DEFAULT_REVIEW_TIMEOUT_SEC = 60.0   # Claude 검수 1회(재시도 0)
-_DEFAULT_PREPARE_TIMEOUT_SEC = 360.0  # prepare_for_render 전체(생성·검수·재생성 포함) 6분
+_DEFAULT_PREPARE_TIMEOUT_SEC = 480.0  # prepare_for_render 전체(생성·검수·재생성 포함) 8분(운동 4회 시도분)
 _FFMPEG_TIMEOUT_SEC = 60             # PNG 변환·검수용 축소
 
 # 검수용 축소본 — Claude 이미지 입력 한도(장당 5MB) 안에 넉넉히 들게 1024px JPEG 로.
@@ -162,10 +166,25 @@ def _workout_prompt(action: str | None, avoid: list[str] | None, recent_scenes: 
     from services import music_image_prompts as mip
 
     raw, scene = mip.workout_core(action, avoid_recent=recent_scenes)
-    prompt = f"{api_prefix()} {raw.strip()}".strip()
+    outfit = random.choice(mip.WORKOUT_OUTFITS)
+    prompt = (f"{api_prefix()} {raw.strip()} 인물이 있다면 복장은 반드시: {outfit} "
+              "(크롭탑·스포츠브라·민소매 크롭 금지, 복부·허리 노출 없음).").strip()
     if avoid:
         prompt += " 이번엔 반드시 피할 것(직전 시도 검수 불합격 사유): " + "; ".join(avoid) + "."
     return prompt, scene
+
+
+def _workout_no_people_prompt(action: str | None, avoid: list[str] | None) -> tuple[str, str]:
+    """(인물 없는 대체 프롬프트, 장면). 인물 시도가 전부 불합격일 때 쓴다(2026-10-27 대표 승인)."""
+    from services import music_image_prompts as mip
+    from services.music_workout_style import axis_for_action
+
+    scene = random.choice(mip.WORKOUT_NO_PEOPLE_SCENES[axis_for_action(action)])
+    prompt = (f"{api_prefix()} {scene}. 이 장면에는 사람이 한 명도 없다 — 인물·손·발·신체 일부·그림자 속 "
+              "사람 실루엣 모두 금지. 기구·공간·빛만으로 운동하고 싶어지는 분위기.")
+    if avoid:
+        prompt += " 이번엔 반드시 피할 것(직전 시도 검수 불합격 사유): " + "; ".join(avoid) + "."
+    return prompt, f"[인물없음] {scene}"
 
 
 # ── 이미지 생성 ────────────────────────────────────────────────────────
@@ -384,7 +403,12 @@ def _profile(
     def make(avoid):
         prompt, make.scene = _workout_prompt(action, avoid, recent_scenes)
         return prompt
+
+    def no_people(avoid):
+        prompt, make.scene = _workout_no_people_prompt(action, avoid)
+        return prompt
     make.scene = None
+    make.no_people = no_people  # 인물 시도 불합격 후 대체(generate_reviewed 가 사용)
     return make, None, axis_for_action(action)
 
 
@@ -393,7 +417,8 @@ def generate_reviewed(
     channel: str | None = None, genre: str | None = None, recent_scenes: list[str] | None = None,
     style: str | None = None,
 ) -> dict:
-    """생성 → 검수. 불합격이면 재생성 최대 1회. {ok, path, attempts, summary(, scene)}.
+    """생성 → 검수. 불합격이면 재생성. where 최대 3회, 운동은 인물 2회 + 인물 없는 장면 2회.
+    {ok, path, attempts, summary(, scene)}.
 
     API 오류·검수 실패(응답 파싱 불가 포함)도 그 시도의 불합격으로 친다 — 검수를 못 했으면
     쓰지 않는다. 어떤 경우에도 예외를 던지지 않는다(호출부는 ok 만 보면 된다).
@@ -403,7 +428,9 @@ def generate_reviewed(
     attempts: list[dict] = []
     avoid: list[str] = []  # 앞 시도들의 검수 불합격 사유(중복 제거) → 다음 프롬프트에 붙인다
     make_prompt, review_system, _ = _profile(action, channel, genre, recent_scenes, style)
-    for i in range(1, _MAX_ATTEMPTS + 1):
+    no_people = getattr(make_prompt, "no_people", None)   # 운동만 — 인물 2회 불합격 → 인물 없는 장면
+    max_attempts = _WORKOUT_MAX_ATTEMPTS if no_people else _MAX_ATTEMPTS
+    for i in range(1, max_attempts + 1):
         rec: dict = {"attempt": i}
         cand = out.with_name(f"{out.stem}_try{i}.png")
         if i > 1 and deadline is not None and (
@@ -411,12 +438,16 @@ def generate_reviewed(
         ):
             rec.update({"pass": False, "error": "시간 상한 — 재생성 생략"})
             attempts.append(rec)
-            logger.warning("[auto-image] 시도 %d/%d 생략 — 남은 시간 부족", i, _MAX_ATTEMPTS)
+            logger.warning("[auto-image] 시도 %d/%d 생략 — 남은 시간 부족", i, max_attempts)
             break
         t_try = time.monotonic()
-        logger.warning("[auto-image] 시도 %d/%d 시작", i, _MAX_ATTEMPTS)
+        logger.warning("[auto-image] 시도 %d/%d 시작", i, max_attempts)
         try:
-            prompt = make_prompt(avoid)
+            if no_people and i > _WORKOUT_PEOPLE_ATTEMPTS:
+                rec["no_people"] = True
+                prompt = no_people(avoid)
+            else:
+                prompt = make_prompt(avoid)
             rec["prompt"] = prompt[:400]
             if avoid:
                 rec["avoid"] = list(avoid)
@@ -428,7 +459,7 @@ def generate_reviewed(
             rec["review_model"] = review.get("model")
             logger.warning(
                 "[auto-image] 검수 %s (시도 %d/%d, %.1fs) 사유=%s",
-                "합격" if review["pass"] else "불합격", i, _MAX_ATTEMPTS,
+                "합격" if review["pass"] else "불합격", i, max_attempts,
                 time.monotonic() - t_try, review["reasons"],
             )
             if review["pass"]:
@@ -444,7 +475,7 @@ def generate_reviewed(
         except Exception as e:  # noqa: BLE001 - 시도 실패로 기록하고 다음 시도
             rec["pass"] = False
             rec["error"] = str(e)[:300]
-            logger.warning("[auto-image] 시도 %d/%d 실패: %s", i, _MAX_ATTEMPTS, e)
+            logger.warning("[auto-image] 시도 %d/%d 실패: %s", i, max_attempts, e)
         cand.unlink(missing_ok=True)
         attempts.append(rec)
     return {"ok": False, "path": None, "attempts": attempts, "summary": _fail_summary(attempts)}
@@ -468,7 +499,7 @@ def job_summary(res: dict) -> dict:
         "attempts": [
             {k: a.get(k) for k in (
                 "attempt", "pass", "reasons", "error", "model", "review_model",
-                "output_tokens", "est_output_usd", "response_format", "prompt", "avoid",
+                "output_tokens", "est_output_usd", "response_format", "prompt", "avoid", "no_people",
             ) if a.get(k) is not None}
             for a in (res.get("attempts") or [])
         ],

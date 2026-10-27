@@ -107,14 +107,14 @@ def test_three_fails_reuse_same_axis_recent_and_not_last(monkeypatch, tmp_path, 
     s3.add("music-auto-bg/cardio/c.png", b"C", days_ago=1)          # 다른 축 → 제외
     s3.add("music-auto-bg/_last_strength.txt", b"music-auto-bg/strength/a.png")  # 직전 영상 → 제외
     for _ in range(5):
-        _gen_and_review(monkeypatch, [{"pass": False, "reasons": ["글자"]}] * 3)
+        _gen_and_review(monkeypatch, [{"pass": False, "reasons": ["글자"]}] * 4)
         path, summary = mai.prepare_for_render("j1", "workout", str(tmp_path))
         assert Path(path).read_bytes() == b"B"
         s3.add("music-auto-bg/_last_strength.txt", b"music-auto-bg/strength/a.png")
     assert summary["ok"] is True and summary["reused"]["key"] == "music-auto-bg/strength/b.png"
     assert summary["reused"]["avoided_last"] is True
     assert "합격본 재사용" in summary["summary"] and "글자" in summary["summary"]
-    assert len(summary["attempts"]) == 3
+    assert len(summary["attempts"]) == 4  # 인물 2 + 인물 없음 2
     assert s3.meta["auto_image"]["reused"]["key"] == "music-auto-bg/strength/b.png"  # job metadata
 
 
@@ -123,14 +123,14 @@ def test_reuse_alternates_and_writes_last(monkeypatch, tmp_path, s3):
     s3.add("music-auto-bg/warmup/b.png", b"B", days_ago=1)
     seen = []
     for _ in range(4):
-        _gen_and_review(monkeypatch, [{"pass": False, "reasons": ["어두움"]}] * 3)
+        _gen_and_review(monkeypatch, [{"pass": False, "reasons": ["어두움"]}] * 4)
         path, _ = mai.prepare_for_render("j", "yoga", str(tmp_path))
         seen.append(Path(path).read_bytes())
     assert all(x != y for x, y in zip(seen, seen[1:]))  # 직전과 같은 것은 피한다
 
 
 def test_only_last_candidate_is_still_used(monkeypatch, tmp_path, s3):
-    _gen_and_review(monkeypatch, [{"pass": False, "reasons": ["글자"]}] * 3)
+    _gen_and_review(monkeypatch, [{"pass": False, "reasons": ["글자"]}] * 4)
     s3.add("music-auto-bg/strength/a.png", b"A")
     s3.add("music-auto-bg/_last_strength.txt", b"music-auto-bg/strength/a.png")
     path, summary = mai.prepare_for_render("j", None, str(tmp_path))
@@ -138,14 +138,14 @@ def test_only_last_candidate_is_still_used(monkeypatch, tmp_path, s3):
 
 
 def test_no_archive_falls_back_to_black(monkeypatch, tmp_path, s3):
-    _gen_and_review(monkeypatch, [{"pass": False, "reasons": ["글자"]}] * 3)
+    _gen_and_review(monkeypatch, [{"pass": False, "reasons": ["글자"]}] * 4)
     s3.add("music-auto-bg/strength/old.png", b"OLD", days_ago=40)
     path, summary = mai.prepare_for_render("j", "workout", str(tmp_path))
     assert path is None and summary["ok"] is False and "reused" not in summary
 
 
 def test_reuse_false_keeps_failure(monkeypatch, tmp_path, s3):
-    _gen_and_review(monkeypatch, [{"pass": False, "reasons": ["글자"]}] * 3)
+    _gen_and_review(monkeypatch, [{"pass": False, "reasons": ["글자"]}] * 4)
     s3.add("music-auto-bg/strength/a.png", b"A")
     path, summary = mai.prepare_for_render("j", "workout", str(tmp_path), reuse=False)
     assert path is None and summary["ok"] is False
@@ -157,3 +157,28 @@ def test_timeout_also_reuses(monkeypatch, tmp_path, s3):
     monkeypatch.setattr(mai, "generate_reviewed", lambda *a, **k: time.sleep(2))
     path, summary = mai.prepare_for_render("j", "workout", str(tmp_path))
     assert Path(path).read_bytes() == b"A" and "시간 초과" in summary["summary"]
+
+
+def test_people_fail_then_no_people_scene_passes(monkeypatch, tmp_path, s3):
+    """2026-10-27: 인물 2회 불합격(크롭탑) → 3회차는 인물 없는 장면, 합격하면 재사용 없이 새 배경."""
+    prompts = _gen_and_review(monkeypatch, [
+        {"pass": False, "reasons": ["크롭탑"]},
+        {"pass": False, "reasons": ["스포츠브라 단독"]},
+        {"pass": True, "reasons": []},
+    ])
+    path, summary = mai.prepare_for_render("j1", "stretching", str(tmp_path))
+    assert path and summary["ok"] and "reused" not in summary
+    assert "사람이 한 명도 없다" not in prompts[0] and "사람이 한 명도 없다" not in prompts[1]
+    assert "사람이 한 명도 없다" in prompts[2]
+    assert [bool(a.get("no_people")) for a in summary["attempts"]] == [False, False, True]
+    keys = [k for k in s3.objs if k.startswith("music-auto-bg/warmup/") and k.endswith(".png")]
+    assert len(keys) == 1  # 인물 없는 합격본도 축별 보관
+
+
+def test_people_prompt_names_concrete_outfit(monkeypatch, tmp_path):
+    from services import music_image_prompts as mip
+    prompts = _gen_and_review(monkeypatch, [{"pass": True, "reasons": []}])
+    mai.generate_reviewed("workout", str(tmp_path / "bg.png"))
+    assert any(o in prompts[0] for o in mip.WORKOUT_OUTFITS)
+    assert "크롭탑·스포츠브라·민소매 크롭 금지" in prompts[0]
+    assert "탱크탑" not in mip.WORKOUT_TONE
