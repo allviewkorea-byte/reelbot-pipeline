@@ -5,7 +5,7 @@ import { toast } from "sonner"
 import { Clapperboard, Eye, Loader2, RefreshCw } from "lucide-react"
 import { jsonOrThrow } from "@/components/studio/studio-lib"
 
-// 컬렉션 릴스(A3) — 롤모델 포맷: 같은 자세·배경에 옷만 바꾼 Look 1~N + 표지 카피(".zip").
+// 컬렉션 릴스(A3) — 롤모델 포맷: 같은 자세·배경에 옷만 바꾼 Look 1~N + 표지 카피 + 슬로건 "오늘 뭐 입지?".
 // 1) "기획 미리보기": 테마·장면(자세·장소)·상품만 먼저 보여 준다(이미지 생성 없음, 저렴).
 // 2) "이대로 릴스 만들기": 확인한 기획 그대로 Look 1 → 옷 교체 → 영상. 결과: 영상 · 표지 · 룩별 사진·상품.
 
@@ -98,8 +98,8 @@ export function CollectionPanel({ character, ready }: { character: string; ready
       {planned && !running && (
         <div className="flex min-w-0 flex-col gap-3 rounded-lg border border-border bg-background p-3">
           <div className="flex min-w-0 flex-col gap-0.5">
-            <div className="text-sm font-semibold text-foreground">{planned.theme?.zip || planned.theme?.concept}</div>
-            {planned.theme?.title_ko && <p className="text-xs text-muted-foreground">표지: {planned.theme.title_ko.join(" / ")}</p>}
+            <div className="text-sm font-semibold text-foreground">{planned.theme?.concept || planned.theme?.zip}</div>
+            {planned.theme?.title_ko && <p className="text-xs text-muted-foreground">표지: {planned.theme.title_ko.join(" / ")} · 오늘 뭐 입지?</p>}
             {planned.theme?.plan && (
               <p className="text-xs text-muted-foreground">자세: {planned.theme.plan.pose_ko} · 장소: {planned.theme.plan.location_ko} · 얼굴은 턱 아래로</p>
             )}
@@ -139,7 +139,7 @@ export function CollectionPanel({ character, ready }: { character: string; ready
           )}
           <div className="flex min-w-0 flex-1 flex-col gap-2">
             <div className="text-sm font-semibold text-foreground">
-              {latest.theme?.zip || latest.theme?.concept || "컬렉션"}
+              {latest.theme?.concept || latest.theme?.zip || "컬렉션"}
               {latest.cost_usd ? <span className="ml-2 text-xs font-normal text-muted-foreground">약 {Math.round(latest.cost_usd * 1400).toLocaleString("ko-KR")}원</span> : null}
             </div>
             {latest.theme?.title_ko && <p className="text-xs text-muted-foreground">{latest.theme.title_ko.join(" ")}</p>}

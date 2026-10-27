@@ -130,6 +130,9 @@ def plan_theme(season: str, life: str, recent: list[str] | None = None, llm=None
     return {**r.choice(fresh), "source": "fallback"}
 
 
+# 표지 하단 박스 — 채널 슬로건(대표 2026-10-27, ".zip" 대신). theme["zip"]은 캡션 제목용으로 남김.
+SLOGAN = "오늘 뭐 입지?"
+
 VARIANT_SCORE_TOP = 15   # 컬렉션은 5개를 색 고르게 뽑아야 해서 코디(8)보다 많이 심사
 
 
@@ -327,7 +330,7 @@ def render_reel(work: Path, look_images: list[str], theme: dict, out_name: str =
         f"x=90:y=h*0.67:{shadow}",
         f"drawtext=fontfile={bold}:textfile={_txt(work, 't_k2.txt', theme['title_ko'][1])}:fontsize=76:fontcolor=white:"
         f"x=90:y=h*0.67+96:{shadow}",
-        f"drawtext=fontfile={bold}:textfile={_txt(work, 't_zip.txt', theme['zip'])}:fontsize=34:fontcolor=black:"
+        f"drawtext=fontfile={bold}:textfile={_txt(work, 't_zip.txt', SLOGAN)}:fontsize=34:fontcolor=black:"
         f"box=1:boxcolor=white@0.95:boxborderw=12:x=90:y=h*0.67+214",
     ]
     _segment(work, look_images[0], COVER_SEC, cover, "seg0.mp4")
