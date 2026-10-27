@@ -382,3 +382,10 @@ def test_swap(env):  # noqa: F811
     assert t.t["ig_feedback"] == [{"event": "swap", "look_id": "lk-20261026-abcd", "item_index": 0, "product_id": 1, "to_product_id": 3}]
     with pytest.raises(S.ShoppingError):
         K.swap("lk-20261026-abcd", 0, 99, d=K.Deps(coupang=_Shop("c", {}), naver=_Shop("n", {}), rest=t))
+
+
+def test_next_ref_prefers_screenshot():
+    t = _Tables()
+    t.t["ig_refs"] += [{"video_id": "yt", "status": "analyzed", "views": 999, "source": "youtube", "analysis": {"looks": [LOOK]}},
+                       {"video_id": "ss", "status": "analyzed", "views": 0, "source": "screenshot", "analysis": {"looks": [LOOK]}}]
+    assert K.next_ref(K.Deps(rest=t))["video_id"] == "ss"

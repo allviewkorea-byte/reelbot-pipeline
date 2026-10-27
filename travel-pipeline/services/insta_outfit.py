@@ -306,8 +306,11 @@ def _clean_products(products: list[dict]) -> list[dict]:
 
 def _clean_options(options: dict | None) -> dict:
     o = {k: v for k, v in (options or {}).items() if v not in (None, "", "auto")}
-    allowed = {"weekday", "cut", "location", "pose", "hair", "eyewear", "season"}
-    return {k: v for k, v in o.items() if k in allowed}
+    allowed = {"weekday", "cut", "location", "pose", "hair", "eyewear", "season", "styling_en"}
+    out = {k: v for k, v in o.items() if k in allowed}
+    if "styling_en" in out:  # 상품이 아닌 스타일링(스타킹·레그워머 등) — 짧은 영어 문구만
+        out["styling_en"] = str(out["styling_en"])[:120]
+    return out
 
 
 CAPTION_NOTE = "AI 가상 착용 · 가상 모델 기준"

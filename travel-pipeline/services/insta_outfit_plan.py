@@ -481,7 +481,7 @@ def plan_scene(*, character_id: str, products: list[dict], hair_roles: list[str]
         lips = face in ("full", "chin_crop", "sunglasses", "profile", "mirror_full")
         mood = rng.choice([m for m in MOODS if lips or not m.get("face")])["en"]
     return {
-        "face": face, "prop": prop, "mood": mood,
+        "face": face, "prop": prop, "mood": mood, "styling_en": (str(options.get("styling_en") or "")[:120] or None),
         "weekday": weekday, "weekday_ko": WEEKDAYS[weekday]["ko"], "life": WEEKDAYS[weekday]["life"],
         "location": loc, "location_ko": LOCATIONS[loc]["ko"], "pose": pose, "pose_ko": POSES[pose]["ko"],
         "cut": POSES[pose]["cut"], "hair_role": hair_role, "eyewear": eyewear,
@@ -564,6 +564,8 @@ def build(plan: dict, *, face_url: str, body_url: str, hair_url: str | None, pro
             f"model wearing them. She is wearing exactly {wear} — {_DETAIL}.",
             _YOUTH,
         ]
+        if plan.get("styling_en"):
+            parts.append(f"She also wears {plan['styling_en']}.")
         if any(p.get("revealing") for p in use):
             parts.append("She wears a plain fitted top underneath.")
         if loc["kind"] == "room" or pose["feet"] == "socks":

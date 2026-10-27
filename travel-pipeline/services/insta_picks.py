@@ -486,6 +486,8 @@ def usable_ref(ref: dict) -> bool:
 
 def next_ref(d: Deps) -> dict | None:
     rows = d.rest("ig_refs", "GET", params={"select": "*", "status": "eq.analyzed", "order": "views.desc", "limit": "20"})
+    # 대표가 직접 넣은 스크린샷 레퍼런스가 먼저(조회수가 없어 뒤로 밀리지 않게)
+    rows = sorted(rows, key=lambda r: 0 if r.get("source") == "screenshot" else 1)
     return next((r for r in rows if usable_ref(r)), None)
 
 

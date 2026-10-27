@@ -516,6 +516,11 @@ def run_auto(job_id: str, *, rng=None) -> None:
                 raise CoordiError("맞는 쿠팡 상품을 하나도 못 찾았어요 — 다시 누르면 다음 레퍼런스로 해요.")
             # 레퍼런스 룩이 덜 찼으면(상의만 등) 빈 종류를 가이드대로 채워 완성 — 가을·겨울엔 아우터 우선
             picked = [it for it in items if it.get("pick")]
+            # 가을·겨울인데 아우터가 없고 자리가 꽉 찼으면 소품·가방을 빼서 아우터 자리를 만든다(민소매만 입는 일 방지)
+            if season in ("autumn", "winter") and not any(it["kind"] == "outerwear" for it in picked):
+                for drop in ("accessory", "bag"):
+                    if len(picked) >= MAX_TOTAL:
+                        picked = [it for it in picked if it["kind"] != drop] if any(it["kind"] == drop for it in picked) else picked
             need = _auto_need([it["kind"] for it in picked], season)
             if need:
                 have = [{"kind": it["kind"], "desc": (it["pick"].get("name") or "")} for it in picked]
@@ -531,7 +536,9 @@ def run_auto(job_id: str, *, rng=None) -> None:
         capped = _cap_products(products)
         if len(capped) < len(products):
             notes.append(f"착장엔 {len(capped)}개까지만 입혀요({len(products) - len(capped)}개 제외)")
-        oj = io.start(args["character_id"], capped, {}, look_id=look_id, remake_of=f"{look_id}:{secrets.token_hex(2)}")
+        styling = (args.get("guide") or {}).get("styling_en")
+        oj = io.start(args["character_id"], capped, {"styling_en": styling} if styling else {}, look_id=look_id,
+                      remake_of=f"{look_id}:{secrets.token_hex(2)}")
         _set(job_id, outfit_id=oj["outfit_id"])
         io.run(oj["id"], rng=rng)
         oj = io.get_job(oj["id"])
