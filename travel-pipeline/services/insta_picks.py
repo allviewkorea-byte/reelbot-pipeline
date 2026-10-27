@@ -47,10 +47,11 @@ MIN_SCORE = 55             # 이보다 낮으면 '맞는 상품 없음'
 COUPANG_MARGIN = 5         # 1등이 네이버여도 쿠팡이 이 점수 안이면 쿠팡
 
 # 종류별 가격대(원) — 성인 여성 데일리 기준
+# 2026-10-27 대표 피드백("옷 선택이 후줄근") — 하한을 올려 너무 싼 기본템을 걸러낸다.
 PRICE_RANGE: dict[str, tuple[int, int]] = {
-    "top": (9_000, 150_000), "bottoms": (12_000, 160_000), "dress": (15_000, 220_000),
-    "outerwear": (25_000, 450_000), "shoes": (15_000, 260_000), "bag": (12_000, 320_000),
-    "accessory": (3_000, 120_000),
+    "top": (19_000, 180_000), "bottoms": (22_000, 180_000), "dress": (29_000, 250_000),
+    "outerwear": (49_000, 450_000), "shoes": (29_000, 280_000), "bag": (25_000, 350_000),
+    "accessory": (9_000, 150_000),
 }
 _EXCLUDE = re.compile(r"(키즈|아동|주니어|유아|남아|여아|베이비|토들러|남자|남성|맨즈|남자친구|신사|"
                       r"세트|셋업\s*세트|1\s*\+\s*1|2\s*\+\s*1|[2-9]\s*종|[2-9]\s*pcs|[2-9]\s*팩|묶음|커플)", re.I)
@@ -197,13 +198,17 @@ _USABLE_SYSTEM = (
 _SCORE_SYSTEM = (
     "You compare shopping-mall product photos against a target item spec for a Korean women's outfit. "
     "Score EACH candidate 0-10 on: kind (same garment type), color (same color/tone as spec color/hex), fit "
-    "(slim/regular/over silhouette), length, details (buttons, collar, pockets, pattern). Also give the "
+    "(slim/regular/over silhouette), length, details (buttons, collar, pockets, pattern), and style (does it look "
+    "like a quality, on-trend item a stylish Korean woman in her 20s would actually wear now — good fabric, refined "
+    "silhouette, well photographed; cheap-looking plain basics, shiny polyester, dated or costume-like items score "
+    "low). Also give the "
     "garment's main color as hex and whether it suits the given seasons. Be strict: a different color or type "
     "must score low. "
     'Return ONE JSON object: {"results": [{"n": <number>, "kind": 0-10, "color": 0-10, "fit": 0-10, "length": 0-10, '
-    '"details": 0-10, "hex": "#RRGGBB", "season_ok": true|false, "note": "짧은 한국어"}]}.'
+    '"details": 0-10, "style": 0-10, "hex": "#RRGGBB", "season_ok": true|false, "note": "짧은 한국어"}]}.'
 )
-_WEIGHTS = {"kind": 3.0, "color": 3.0, "fit": 1.5, "length": 1.5, "details": 1.0}
+_WEIGHTS = {"kind": 3.0, "color": 3.0, "fit": 1.5, "length": 1.5, "details": 1.0, "style": 2.0}
+_NEUTRAL = {"style": 6.0}   # 비전 응답에 없으면 중간값(예전 응답·폴백 호환)
 
 
 def vision_cost_usd(meter: dict) -> float:
@@ -217,7 +222,10 @@ def vision_cost_usd(meter: dict) -> float:
 
 
 def total_score(r: dict, season_ok: bool = True) -> float:
-    s = sum(_WEIGHTS[k] * max(0.0, min(10.0, float(r.get(k) or 0))) for k in _WEIGHTS) / sum(_WEIGHTS.values()) * 10
+    def v(k):
+        x = r.get(k)
+        return _NEUTRAL.get(k, 0.0) if x is None else float(x or 0)
+    s = sum(_WEIGHTS[k] * max(0.0, min(10.0, v(k))) for k in _WEIGHTS) / sum(_WEIGHTS.values()) * 10
     return round(s - (20 if not season_ok else 0), 1)
 
 

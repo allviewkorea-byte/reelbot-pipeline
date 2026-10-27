@@ -41,7 +41,8 @@ def outfit_options():
         "weekdays": [{"value": k, "label": f"{v['ko']} · {v['life']}"} for k, v in P.WEEKDAYS.items()],
         "cuts": sorted({p["cut"] for p in P.POSES.values()}),
         "locations": [{"value": k, "label": v["ko"]} for k, v in P.LOCATIONS.items()],
-        "poses": [{"value": k, "label": v["ko"], "cut": v["cut"]} for k, v in P.POSES.items()],
+        "poses": [{"value": k, "label": v["ko"], "cut": v["cut"]} for k, v in P.POSES.items()
+                  if v.get("self") or not P.SELF_SHOT_ONLY],
         "eyewear": [{"value": "none", "label": "안 씀"}] + [{"value": k, "label": v["ko"]} for k, v in P.EYEWEAR.items()],
         "kinds": [{"value": k, "label": v[0]} for k, v in P.PRODUCT_KINDS.items()],
         "estimate": io.estimate(),
