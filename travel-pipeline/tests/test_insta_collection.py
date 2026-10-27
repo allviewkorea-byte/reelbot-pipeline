@@ -21,6 +21,15 @@ from test_insta_outfit import flow  # noqa: E402,F401
 from test_insta_picks import _c, _dl, _Shop, _vision  # noqa: E402
 from test_shorts_cast import env  # noqa: E402,F401
 
+_REAL_MIX = CL.BR.mix_queries
+
+
+@pytest.fixture(autouse=True)
+def _plain_queries(monkeypatch):
+    """가짜 쇼핑은 검색어 그대로 매칭 — 브랜드 섞기는 따로 테스트."""
+    monkeypatch.setattr(CL.BR, "mix_queries", lambda kind, qs, rng=None: list(qs)[:3])
+
+
 needs_ffmpeg = pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg 필요")
 DEJAVU = ["/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]
 
@@ -135,3 +144,52 @@ def test_plan_then_make(coordi, monkeypatch):  # noqa: F811
     assert row["status"] == "ok" and row["video_key"] and len(row["looks"]) == 3
     first = coordi.muse.calls[0].prompt
     assert row["theme"]["plan"]["location"] and "mirror" in first.lower() or "wall" in first.lower()
+
+
+def test_pick_variants_uses_all_queries(coordi):  # noqa: F811
+    """코디는 검색어 1개만 쓰지만 컬렉션은 5개가 필요해 3개를 다 쓴다(1개만 쓰면 3개 미만으로 실패했음)."""
+    t = coordi.t
+    theme = dict(CL.FALLBACK_THEMES["autumn"][0])
+    q = theme["queries"]
+    items = {q[i]: [_c(f"q{i}{k}", f"{q[i]} {k}", price=69000, ch="coupang") for k in range(2)] for i in range(3)}
+    hexes = ["#F2EDE3", "#3B2A20", "#808080", "#111111", "#C8A27A", "#2E4A7A"]
+    scores = {f"coupang_q{i}{k}": (9, hexes[i * 2 + k]) for i in range(3) for k in range(2)}
+    shop = _Shop("coupang", items)
+    d = K.Deps(coupang=shop, vision=_vision(scores), download=_dl, rest=t)
+    usage: dict = {}
+    got = CL.pick_variants(theme, d, usage, n=5)
+    assert shop.calls == q[:3] and len(got) == 5
+
+
+def test_pick_variants_stops_on_quota(coordi):  # noqa: F811
+    theme = dict(CL.FALLBACK_THEMES["autumn"][0])
+    shop = _Shop("coupang", "quota")
+    d = K.Deps(coupang=shop, vision=_vision({}), download=_dl, rest=coordi.t)
+    usage: dict = {}
+    assert CL.pick_variants(theme, d, usage) == [] and len(shop.calls) == 1
+    assert any("한도" in n for n in usage["notes"])
+
+
+def test_material_and_brand_mix():
+    from services import insta_brands as BR
+    assert CL.material_of("여성 크롭 레더 자켓") == "leather" and CL.material_of("지퍼 크롭 니트") == "knit"
+    assert CL.material_of("겨울 오버핏 블루종") == "other"            # '겨울'은 울이 아님
+    qs = _REAL_MIX("outerwear", ["a", "b", "c"], random.Random(1))
+    assert qs[0].endswith(" a") and qs[0].split(" a")[0] in BR.brands("A", "outerwear")
+    assert qs[1].endswith(" b") and qs[1].split(" b")[0] in BR.brands("B", "outerwear") and qs[2] == "c"
+    assert _REAL_MIX("accessory", ["a"]) == ["a"]
+    assert BR.excluded("마인 울코트") and not BR.excluded("마인드 니트") and BR.excluded("구찌 스타일 가방")
+    assert BR.too_cheap_for_brand("나이키 에어포스", 39000, "shoes") and not BR.too_cheap_for_brand("나이키 에어포스", 99000, "shoes")
+
+
+def test_pick_variants_avoids_same_color_and_material(coordi):  # noqa: F811
+    """블랙 레더 3벌이 점수가 높아도 색·소재가 다른 것부터."""
+    theme = dict(CL.FALLBACK_THEMES["autumn"][0])
+    q = theme["queries"]
+    names = ["여성 레더 자켓 A", "여성 레더 자켓 B", "여성 레더 자켓 C", "여성 스웨이드 자켓", "여성 울코트 브라운"]
+    items = {q[0]: [_c(f"v{i}", nm, price=89000, ch="coupang") for i, nm in enumerate(names)]}
+    hexes = ["#111111", "#121212", "#101010", "#8B5A2B", "#C8A27A"]
+    scores = {f"coupang_v{i}": (9.5 - i * 0.1, hexes[i]) for i in range(5)}
+    d = K.Deps(coupang=_Shop("coupang", items), vision=_vision(scores), download=_dl, rest=coordi.t)
+    got = CL.pick_variants(theme, d, {}, n=3)
+    assert [g["product_id"] for g in got] == ["v0", "v3", "v4"]

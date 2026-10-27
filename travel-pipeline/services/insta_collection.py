@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import random
+import re
 import secrets
 import shutil
 import subprocess
@@ -28,6 +29,7 @@ from adapters import r2_storage
 from adapters.base import ImageGenerationRequest
 
 from services import character_studio_gen as gen
+from services import insta_brands as BR
 from services import insta_coordi as coordi
 from services import insta_outfit as io
 from services import insta_outfit_plan as P
@@ -86,7 +88,9 @@ _THEME_SYSTEM = (
     '"queries": ["<쿠팡 검색어 — 여성 + 종류 + 특징>", "...", "..."], '
     '"base": [{"kind": "...", "queries": ["<고정으로 함께 입을 아이템 검색어>"]}], '
     '"styling_en": "<optional non-product styling like sheer black tights, or empty>"} — base has 1-2 items, '
-    "different kinds from the theme kind, plain and versatile so every variant looks good with them."
+    "different kinds from the theme kind, plain and versatile so every variant looks good with them. "
+    "The 3 queries MUST differ in material or color (e.g. leather / suede / wool, or black / brown / cream) so the "
+    "looks are clearly different from each other — never 3 queries for the same material."
 )
 
 
@@ -126,24 +130,74 @@ def plan_theme(season: str, life: str, recent: list[str] | None = None, llm=None
     return {**r.choice(fresh), "source": "fallback"}
 
 
-def pick_variants(theme: dict, d: picks.Deps, usage: dict, n: int = N_LOOKS) -> list[dict]:
-    """테마 종류 상품 n개 — 점수 순, 같은 색 계열은 뒤로(색이 고르게)."""
+# 표지 맨 위 가장 큰 글씨 — 채널 슬로건(대표 2026-10-27). 아래 박스는 테마별 "○○ 모음.zip".
+SLOGAN = "코디 저장소"
+
+VARIANT_SCORE_TOP = 15   # 컬렉션은 5개를 색 고르게 뽑아야 해서 코디(8)보다 많이 심사
+
+
+# 소재 묶음 — 같은 색·같은 소재가 연달아 나오면 룩끼리 구분이 안 됨(대표 2026-10-27: 블랙 레더 3벌)
+_MATERIALS = [
+    ("leather", re.compile(r"(레더|가죽|PU|라이더|leather)", re.I)),
+    ("suede", re.compile(r"(스웨이드|스웨드|suede)", re.I)),
+    ("denim", re.compile(r"(데님|청\s?자켓|진\s?자켓|denim)", re.I)),
+    ("fur", re.compile(r"(페이크\s?퍼|퍼\s?(자켓|재킷|코트|점퍼)|무스탕|시어링|양털|플리스|뽀글)", re.I)),
+    ("tweed", re.compile(r"(트위드|tweed)", re.I)),
+    ("knit", re.compile(r"(니트|가디건|knit)", re.I)),
+    ("corduroy", re.compile(r"(코듀로이|골덴)", re.I)),
+    ("nylon", re.compile(r"(나일론|바람막이|윈드|패딩|푸퍼)", re.I)),
+    ("wool", re.compile(r"(울\s?(코트|자켓|재킷|블렌드)|모직|wool)", re.I)),
+]
+
+
+def material_of(name: str) -> str:
+    for key, rx in _MATERIALS:
+        if rx.search(name or ""):
+            return key
+    return "other"
+
+
+def pick_variants(theme: dict, d: picks.Deps, usage: dict, n: int = N_LOOKS,
+                  rng: random.Random | None = None) -> list[dict]:
+    """테마 종류 상품 n개 — 색 계열·소재가 겹치지 않게(1차: 둘 다 새로움, 2차: 하나라도 새로움, 3차: 나머지).
+
+    검색어: A 브랜드 + 검색어1 / B 브랜드 + 검색어2 / 검색어3(보세) — insta_brands.mix_queries.
+    """
     spec = {"kind": theme["kind"], "queries": theme["queries"], "color_name": "", "hex": None, "fit": "", "length": "",
             "material": "", "details": theme.get("concept", "")}
     with tempfile.TemporaryDirectory() as td:
-        cands, _ = picks.gather(spec, d, usage)
+        # 코디는 1개만 고르면 돼서 gather 가 검색어 1개(10개)만 쓴다 — 컬렉션은 5개가 필요해 검색어 3개를 다 쓴다.
+        cands = []
+        for q in BR.mix_queries(theme["kind"], theme["queries"], rng):
+            got, notes = picks.gather({**spec, "queries": [q]}, d, usage)
+            cands += got
+            usage.setdefault("notes", []).extend(notes)
+            if any("한도" in n for n in notes):
+                break
         kept, _ = picks.code_filter(cands, spec["kind"])
-        scored, _ = picks.judge(spec, {"seasons": [_season()]}, kept, d, usage, Path(td)) if kept else ([], [])
+        scored, _ = picks.judge(spec, {"seasons": [_season()]}, kept, d, usage, Path(td),
+                                top=VARIANT_SCORE_TOP) if kept else ([], [])
     scored = [c for c in scored if c.get("score", 0) >= picks.MIN_SCORE] or scored
-    out, fams = [], set()
-    for c in scored:  # 1차: 새 색 계열만
-        fam = picks.color_family((c.get("scores") or {}).get("hex"))[0]
-        if fam not in fams or fam == "unknown":
-            out.append(c)
-            fams.add(fam)
-        if len(out) >= n:
-            break
-    for c in scored:  # 2차: 모자라면 나머지
+    def key(c: dict) -> tuple[str, str]:
+        return picks.color_family((c.get("scores") or {}).get("hex"))[0], material_of(c.get("name", ""))
+
+    out: list[dict] = []
+    fams: set[str] = set()
+    mats: set[str] = set()
+    for need_both in (True, False):
+        for c in scored:
+            if len(out) >= n:
+                break
+            if c in out:
+                continue
+            fam, mat = key(c)
+            new_fam = fam not in fams or fam == "unknown"
+            new_mat = mat not in mats or mat == "other"
+            if (new_fam and new_mat) if need_both else (new_fam or new_mat):
+                out.append(c)
+                fams.add(fam)
+                mats.add(mat)
+    for c in scored:  # 3차: 그래도 모자라면 나머지
         if len(out) >= n:
             break
         if c not in out:
@@ -266,24 +320,25 @@ def _segment(work: Path, img: str, dur: float, draws: list[str], out: str) -> No
 
 def render_reel(work: Path, look_images: list[str], theme: dict, out_name: str = "reel.mp4") -> tuple[str, str]:
     """표지(Look 1 + 카피) + Look 1~N → mp4, 표지 jpg. 파일명은 work 기준 상대."""
-    serif = _stage(work, _font(_SERIF), "serif")
     bold = _stage(work, _font(_BOLD), "bold")
     shadow = "shadowcolor=black@0.45:shadowx=2:shadowy=2"
+    # 표지(대표 2026-10-27): 맨 위 가장 큰 글씨로 슬로건 "코디 저장소" → 영문 소제목 → 흰 박스 "○○ 모음.zip".
+    # 감성 카피(title_ko)는 표지에서 빼고 캡션 첫 줄용으로 남긴다.
     cover = [
-        f"drawtext=fontfile={bold}:textfile={_txt(work, 't_en.txt', theme['title_en'])}:fontsize=34:fontcolor=white:"
+        f"drawtext=fontfile={bold}:textfile={_txt(work, 't_slogan.txt', SLOGAN)}:fontsize=104:fontcolor=white:"
         f"x=90:y=h*0.64:{shadow}",
-        f"drawtext=fontfile={bold}:textfile={_txt(work, 't_k1.txt', theme['title_ko'][0])}:fontsize=76:fontcolor=white:"
-        f"x=90:y=h*0.67:{shadow}",
-        f"drawtext=fontfile={bold}:textfile={_txt(work, 't_k2.txt', theme['title_ko'][1])}:fontsize=76:fontcolor=white:"
-        f"x=90:y=h*0.67+96:{shadow}",
-        f"drawtext=fontfile={bold}:textfile={_txt(work, 't_zip.txt', theme['zip'])}:fontsize=34:fontcolor=black:"
-        f"box=1:boxcolor=white@0.95:boxborderw=12:x=90:y=h*0.67+214",
+        f"drawtext=fontfile={bold}:textfile={_txt(work, 't_en.txt', theme['title_en'])}:fontsize=34:fontcolor=white:"
+        f"x=94:y=h*0.64+136:{shadow}",
+        f"drawtext=fontfile={bold}:textfile={_txt(work, 't_zip.txt', theme['zip'])}:fontsize=40:fontcolor=black:"
+        f"box=1:boxcolor=white@0.95:boxborderw=14:x=94:y=h*0.64+198",
     ]
     _segment(work, look_images[0], COVER_SEC, cover, "seg0.mp4")
     segs = ["seg0.mp4"]
     for i, img in enumerate(look_images, start=1):
-        draw = (f"drawtext=fontfile={serif}:textfile={_txt(work, f'look{i}.txt', f'Look {i}')}:fontsize=128:"
-                f"fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2:{shadow}")
+        # 번호 스티커(대표 2026-10-27 ③안, "Look N" 대신) — 흰 박스에 굵은 "01", 표지 카피와 같은 자리.
+        # "몇 번 코디가 마음에 드세요?" 댓글을 번호로 받기 좋다.
+        draw = (f"drawtext=fontfile={bold}:textfile={_txt(work, f'look{i}.txt', f'{i:02d}')}:fontsize=80:"
+                f"fontcolor=black:box=1:boxcolor=white@0.95:boxborderw=22:x=94:y=h*0.64+60")
         _segment(work, img, LOOK_SEC, [draw], f"seg{i}.mp4")
         segs.append(f"seg{i}.mp4")
     (work / "list.txt").write_text("".join(f"file '{s}'\n" for s in segs), encoding="utf-8")
@@ -420,7 +475,7 @@ def _plan(job_id: str, d: picks.Deps, cid: str, args: dict, llm, rng: random.Ran
         theme["plan"] = {"pose": pose, "pose_ko": P.POSES[pose]["ko"], "location": location,
                          "location_ko": P.LOCATIONS[location]["ko"], "face": "chin_crop", "season": season}
         _set(job_id, step=f"「{theme['concept']}」 상품 고르는 중", theme={k: theme[k] for k in ("concept", "title_ko", "zip")})
-        variants = _saved(pick_variants(theme, d, usage, args["n"]), d)
+        variants = _saved(pick_variants(theme, d, usage, args["n"], rng=rng), d)
         base = pick_base(theme, d, usage)
         base_saved = _saved([b["pick"] for b in base], d) if base else []
         for c in variants:
@@ -429,7 +484,9 @@ def _plan(job_id: str, d: picks.Deps, cid: str, args: dict, llm, rng: random.Ran
             c["kind"] = b["kind"]
         products = variants + base_saved
         if len(variants) < 3:
-            raise CollectionError(f"「{theme['concept']}」 상품을 3개 이상 못 찾았어요 — 다시 기획해 주세요.")
+            if any("한도" in n for n in usage.get("notes") or []):
+                raise CollectionError("쿠팡 검색 한도에 걸렸어요 — 1시간쯤 뒤에 다시 기획해 주세요.")
+            raise CollectionError(f"「{theme['concept']}」 상품을 {len(variants)}개밖에 못 찾았어요 — '다른 기획 보기'로 다시 해 주세요.")
         looks = [{"n": i + 1, "product": _keep(v)} for i, v in enumerate(variants)]
         _patch(d, cid, {"theme": theme, "looks": looks, "base_items": [_keep(c) for c in base_saved],
                         "status": "planned", "usage": usage,
