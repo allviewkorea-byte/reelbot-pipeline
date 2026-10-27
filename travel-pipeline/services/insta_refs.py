@@ -34,7 +34,7 @@ from services.music_store import _http_err, _supabase_cfg
 logger = logging.getLogger(__name__)
 
 API = "https://www.googleapis.com/youtube/v3"
-YT_DAILY_UNIT_CAP = 600          # 하루 상한(유닛) — search 100 × 5 + videos.list
+YT_DAILY_UNIT_CAP = 1500         # 하루 상한(유닛) — search 100 × 14 + videos.list (대표 승인 2026-10-27, 음악 ~1,800 합쳐도 10,000 내)
 SEARCH_COST, VIDEOS_COST = 100, 1
 SEARCHES_PER_RUN = 3             # 1회 수집에서 쓰는 검색어 수
 PER_QUERY = 4                    # 검색어당 저장할 영상(조회수 상위)
