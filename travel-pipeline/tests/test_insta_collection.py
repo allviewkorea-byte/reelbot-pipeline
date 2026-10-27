@@ -135,3 +135,27 @@ def test_plan_then_make(coordi, monkeypatch):  # noqa: F811
     assert row["status"] == "ok" and row["video_key"] and len(row["looks"]) == 3
     first = coordi.muse.calls[0].prompt
     assert row["theme"]["plan"]["location"] and "mirror" in first.lower() or "wall" in first.lower()
+
+
+def test_pick_variants_uses_all_queries(coordi):  # noqa: F811
+    """코디는 검색어 1개만 쓰지만 컬렉션은 5개가 필요해 3개를 다 쓴다(1개만 쓰면 3개 미만으로 실패했음)."""
+    t = coordi.t
+    theme = dict(CL.FALLBACK_THEMES["autumn"][0])
+    q = theme["queries"]
+    items = {q[i]: [_c(f"q{i}{k}", f"{q[i]} {k}", price=69000, ch="coupang") for k in range(2)] for i in range(3)}
+    hexes = ["#F2EDE3", "#3B2A20", "#808080", "#111111", "#C8A27A", "#2E4A7A"]
+    scores = {f"coupang_q{i}{k}": (9, hexes[i * 2 + k]) for i in range(3) for k in range(2)}
+    shop = _Shop("coupang", items)
+    d = K.Deps(coupang=shop, vision=_vision(scores), download=_dl, rest=t)
+    usage: dict = {}
+    got = CL.pick_variants(theme, d, usage, n=5)
+    assert shop.calls == q[:3] and len(got) == 5
+
+
+def test_pick_variants_stops_on_quota(coordi):  # noqa: F811
+    theme = dict(CL.FALLBACK_THEMES["autumn"][0])
+    shop = _Shop("coupang", "quota")
+    d = K.Deps(coupang=shop, vision=_vision({}), download=_dl, rest=coordi.t)
+    usage: dict = {}
+    assert CL.pick_variants(theme, d, usage) == [] and len(shop.calls) == 1
+    assert any("한도" in n for n in usage["notes"])

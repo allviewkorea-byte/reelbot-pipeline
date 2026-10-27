@@ -313,7 +313,8 @@ def _small(d: Deps, c: dict, tmp: Path) -> tuple[Path, Path] | None:
         return None
 
 
-def judge(item: dict, look: dict, cands: list[dict], d: Deps, usage: dict, tmp: Path) -> tuple[list[dict], list[str]]:
+def judge(item: dict, look: dict, cands: list[dict], d: Deps, usage: dict, tmp: Path,
+          top: int = SCORE_TOP) -> tuple[list[dict], list[str]]:
     """2차(사용 가능) + 3차(명세 점수) → 점수 붙인 후보 내림차순."""
     notes: list[str] = []
     imgs, mid = [], {}
@@ -343,7 +344,7 @@ def judge(item: dict, look: dict, cands: list[dict], d: Deps, usage: dict, tmp: 
     if not usable:
         return [], notes + ["쓸 수 있는 사진이 없음"]
     usable.sort(key=lambda x: x[0].get("_rank", 0))
-    top = usable[:SCORE_TOP]
+    top = usable[:top]
     # 3차: 명세 점수
     spec_line = json.dumps({k: item.get(k) for k in ("kind", "color_name", "hex", "fit", "length", "material", "details")},
                            ensure_ascii=False)

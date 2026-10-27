@@ -126,14 +126,25 @@ def plan_theme(season: str, life: str, recent: list[str] | None = None, llm=None
     return {**r.choice(fresh), "source": "fallback"}
 
 
+VARIANT_SCORE_TOP = 15   # 컬렉션은 5개를 색 고르게 뽑아야 해서 코디(8)보다 많이 심사
+
+
 def pick_variants(theme: dict, d: picks.Deps, usage: dict, n: int = N_LOOKS) -> list[dict]:
     """테마 종류 상품 n개 — 점수 순, 같은 색 계열은 뒤로(색이 고르게)."""
     spec = {"kind": theme["kind"], "queries": theme["queries"], "color_name": "", "hex": None, "fit": "", "length": "",
             "material": "", "details": theme.get("concept", "")}
     with tempfile.TemporaryDirectory() as td:
-        cands, _ = picks.gather(spec, d, usage)
+        # 코디는 1개만 고르면 돼서 gather 가 검색어 1개(10개)만 쓴다 — 컬렉션은 5개가 필요해 검색어 3개를 다 쓴다.
+        cands = []
+        for q in theme["queries"][:3]:
+            got, notes = picks.gather({**spec, "queries": [q]}, d, usage)
+            cands += got
+            usage.setdefault("notes", []).extend(notes)
+            if any("한도" in n for n in notes):
+                break
         kept, _ = picks.code_filter(cands, spec["kind"])
-        scored, _ = picks.judge(spec, {"seasons": [_season()]}, kept, d, usage, Path(td)) if kept else ([], [])
+        scored, _ = picks.judge(spec, {"seasons": [_season()]}, kept, d, usage, Path(td),
+                                top=VARIANT_SCORE_TOP) if kept else ([], [])
     scored = [c for c in scored if c.get("score", 0) >= picks.MIN_SCORE] or scored
     out, fams = [], set()
     for c in scored:  # 1차: 새 색 계열만
@@ -429,7 +440,9 @@ def _plan(job_id: str, d: picks.Deps, cid: str, args: dict, llm, rng: random.Ran
             c["kind"] = b["kind"]
         products = variants + base_saved
         if len(variants) < 3:
-            raise CollectionError(f"「{theme['concept']}」 상품을 3개 이상 못 찾았어요 — 다시 기획해 주세요.")
+            if any("한도" in n for n in usage.get("notes") or []):
+                raise CollectionError("쿠팡 검색 한도에 걸렸어요 — 1시간쯤 뒤에 다시 기획해 주세요.")
+            raise CollectionError(f"「{theme['concept']}」 상품을 {len(variants)}개밖에 못 찾았어요 — '다른 기획 보기'로 다시 해 주세요.")
         looks = [{"n": i + 1, "product": _keep(v)} for i, v in enumerate(variants)]
         _patch(d, cid, {"theme": theme, "looks": looks, "base_items": [_keep(c) for c in base_saved],
                         "status": "planned", "usage": usage,
