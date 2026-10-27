@@ -335,7 +335,7 @@ def test_api_routes(flow, monkeypatch):
     app.include_router(routes.router, prefix="/insta")
     c = TestClient(app)
     opts = c.get("/insta/outfit-options").json()
-    assert len(opts["poses"]) == 10 and len(P.POSES) == 20 and opts["estimate"]["max"] == 0.033
+    assert len(opts["poses"]) == 14 and len(P.POSES) == 24 and opts["estimate"]["max"] == 0.033
     r = c.post("/insta/outfits", json={"character_id": "chaei", "products": PRODS})
     assert r.status_code == 200
     j = c.get(f"/insta/outfit-jobs/{r.json()['id']}").json()
@@ -345,3 +345,23 @@ def test_api_routes(flow, monkeypatch):
     assert c.post(f"/insta/outfits/{lst[0]['id']}/remake").status_code == 200
     assert c.post("/insta/outfits", json={"products": []}).status_code == 400
     assert c.get("/insta/outfits/of-20990101-zzzz").status_code == 404
+
+
+# ── 꾸안꾸 셀카(2026-10-27 대표 레퍼런스) ──────────────────────────────────
+def test_kkuankku_plan_face_eyewear_and_prompt():
+    rng = random.Random(3)
+    for _ in range(30):
+        plan = P.plan_scene(character_id="chaei", products=PRODS, hair_roles=[], history=[], now=NOW, rng=rng, llm=lambda s, u: "{}",
+                      options={"pose": "closeup_sunglasses", "location": "cafe"})
+        if plan["pose"] == "closeup_sunglasses":
+            break
+    assert plan["face"] == "sunglasses" and plan["eyewear"]["style"] == "wear" and P.EYEWEAR[plan["eyewear"]["item"]]["sun"]
+    prompt, _ = P.build(plan, face_url="f", body_url="b", hair_url=None, products=[{"url": "u", "kind": "top"}])
+    assert "rosy lip tint" in prompt and "꾸안꾸" in prompt and "no pearls" in prompt
+    assert "early 20s" in prompt and "never mature" in prompt                          # 노티 금지(2026-10-27)
+    crop = {**plan, "pose": "arm_selfie_high", "face": "chin_crop", "eyewear": None, "prop": "holding an iced americano"}
+    prompt, _ = P.build(crop, face_url="f", body_url="b", hair_url=None, products=[{"url": "u", "kind": "top"}])
+    assert "just below the eyes" in prompt and "iced americano" in prompt and "took this photo herself" in prompt
+    terrace = {**plan, "pose": "cafe_terrace"}
+    prompt, _ = P.build(terrace, face_url="f", body_url="b", hair_url=None, products=[{"url": "u", "kind": "top"}])
+    assert "a friend took" in prompt and "took this photo herself" not in prompt
