@@ -2,16 +2,19 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
-import { Clapperboard, Loader2 } from "lucide-react"
+import { Clapperboard, Eye, Loader2, RefreshCw } from "lucide-react"
 import { jsonOrThrow } from "@/components/studio/studio-lib"
 
 // 컬렉션 릴스(A3) — 롤모델 포맷: 같은 자세·배경에 옷만 바꾼 Look 1~N + 표지 카피(".zip").
-// 버튼 하나로 테마 → 쿠팡 픽 → Look 1 → 옷 교체 → 영상까지. 결과: 영상 미리보기 · 표지 · 룩별 사진·상품.
+// 1) "기획 미리보기": 테마·장면(자세·장소)·상품만 먼저 보여 준다(이미지 생성 없음, 저렴).
+// 2) "이대로 릴스 만들기": 확인한 기획 그대로 Look 1 → 옷 교체 → 영상. 결과: 영상 · 표지 · 룩별 사진·상품.
 
-interface LookRow { n: number; image_url: string | null; product?: { name?: string | null; mall?: string | null; price?: number | null } }
+interface Prod { name?: string | null; mall?: string | null; price?: number | null; image_url?: string | null; kind?: string | null }
+interface LookRow { n: number; image_url: string | null; product_image?: string | null; product?: Prod }
 interface Collection {
-  id: string; status: "making" | "ok" | "failed" | "hidden"; error: string | null; cost_usd: number | null
-  theme: { concept?: string; title_ko?: string[]; zip?: string; title_en?: string }
+  id: string; status: "planned" | "making" | "ok" | "failed" | "hidden"; error: string | null; cost_usd: number | null
+  theme: { concept?: string; title_ko?: string[]; zip?: string; title_en?: string; plan?: { pose_ko?: string; location_ko?: string } }
+  base_items?: Prod[]
   video_url: string | null; cover_url: string | null; looks: LookRow[]; created_at: string
 }
 interface Job { id: string; state: "queued" | "running" | "done" | "failed"; step: string; error: string | null; done_looks?: number; n?: number }
@@ -50,19 +53,30 @@ export function CollectionPanel({ character, ready }: { character: string; ready
     return () => clearInterval(t)
   }, [jobId, running, load])
 
-  async function make() {
+  async function plan() {
     try {
-      const j = await jsonOrThrow(await fetch("/api/insta/collections", {
+      const j = await jsonOrThrow(await fetch("/api/insta/collections/plan", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ character_id: character, n: 5 }),
       }))
       setJob(j)
-      toast.message("컬렉션 릴스를 만드는 중 — 8~12분 걸려요")
+      toast.message("테마·자세·옷을 고르는 중 — 1~3분 걸려요")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "시작 실패")
+    }
+  }
+
+  async function make(c: Collection) {
+    try {
+      const j = await jsonOrThrow(await fetch(`/api/insta/collections/${encodeURIComponent(c.id)}/make`, { method: "POST" }))
+      setJob(j)
+      toast.message("릴스를 만드는 중 — 7~10분 걸려요")
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "시작 실패")
     }
   }
 
   const latest = rows[0]
+  const planned = latest?.status === "planned" ? latest : null
   return (
     <section className="flex min-w-0 flex-col gap-3 rounded-xl border border-primary/30 bg-card p-4">
       <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
@@ -71,17 +85,49 @@ export function CollectionPanel({ character, ready }: { character: string; ready
           <p className="text-xs text-muted-foreground">
             {running
               ? `${job?.step || "진행 중…"}${job?.n ? ` (${job?.done_looks ?? 0}/${job.n})` : ""}`
-              : "테마 하나로 같은 자세에 옷만 바꾼 Look 1~5 릴스를 만들어요. 누르기만 하면 돼요."}
+              : "먼저 테마·자세·옷을 미리 보고, 마음에 들면 Look 1~5 릴스로 만들어요."}
           </p>
         </div>
-        <button onClick={make} disabled={!ready || running}
-          className="flex min-h-[44px] shrink-0 items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
-          {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clapperboard className="h-4 w-4" />}
-          {running ? "만드는 중…" : "컬렉션 릴스 만들기"}
+        <button onClick={plan} disabled={!ready || running}
+          className={`flex min-h-[44px] shrink-0 items-center justify-center gap-2 rounded-lg px-5 text-sm font-semibold disabled:opacity-50 ${planned ? "border border-border bg-background text-foreground hover:border-primary/40" : "bg-primary text-primary-foreground hover:bg-primary/90"}`}>
+          {running ? <Loader2 className="h-4 w-4 animate-spin" /> : planned ? <RefreshCw className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          {running ? "진행 중…" : planned ? "다른 기획 보기" : "기획 미리보기"}
         </button>
       </div>
 
-      {latest && (
+      {planned && !running && (
+        <div className="flex min-w-0 flex-col gap-3 rounded-lg border border-border bg-background p-3">
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <div className="text-sm font-semibold text-foreground">{planned.theme?.zip || planned.theme?.concept}</div>
+            {planned.theme?.title_ko && <p className="text-xs text-muted-foreground">표지: {planned.theme.title_ko.join(" / ")}</p>}
+            {planned.theme?.plan && (
+              <p className="text-xs text-muted-foreground">자세: {planned.theme.plan.pose_ko} · 장소: {planned.theme.plan.location_ko} · 얼굴은 턱 아래로</p>
+            )}
+          </div>
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+            {planned.looks.map((lk) => (
+              <div key={lk.n} className="flex min-w-0 flex-col gap-1">
+                {lk.product_image ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={lk.product_image} alt={lk.product?.name ?? ""} className="aspect-square w-full rounded-md bg-secondary object-cover" />
+                ) : <div className="aspect-square w-full rounded-md bg-secondary" />}
+                <span className="text-[11px] font-medium text-foreground">Look {lk.n}</span>
+                <span className="line-clamp-2 text-[11px] text-muted-foreground">{lk.product?.name ?? ""}</span>
+                {lk.product?.price ? <span className="text-[11px] text-muted-foreground">{lk.product.price.toLocaleString("ko-KR")}원</span> : null}
+              </div>
+            ))}
+          </div>
+          {(planned.base_items?.length ?? 0) > 0 && (
+            <p className="text-xs text-muted-foreground">모든 룩에 같이 입는 옷: {planned.base_items!.map((b) => b.name).filter(Boolean).join(" · ")}</p>
+          )}
+          <button onClick={() => make(planned)} disabled={!ready || running}
+            className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+            <Clapperboard className="h-4 w-4" /> 이대로 릴스 만들기 · 약 300~500원
+          </button>
+        </div>
+      )}
+
+      {latest && !planned && (
         <div className="flex min-w-0 flex-col gap-3 md:flex-row">
           {latest.video_url ? (
             <video src={latest.video_url} poster={latest.cover_url ?? undefined} controls playsInline
