@@ -32,6 +32,7 @@ from services import insta_outfit as io
 from services import insta_outfit_plan as P
 from services import insta_picks as picks
 from services import insta_refs as refs
+from services import insta_style_guide as SG
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +104,9 @@ def missing_kinds(kinds: list[str], season: str) -> list[str]:
 _FILL_SYSTEM = (
     "You style a Korean woman's everyday outfit. Given the items she already chose (kind + short description) and "
     "the season, design the MISSING items so the whole outfit is coherent: max 3 colors with at most 1 accent, "
-    "matching the season and a daily situation. Return ONE JSON object: "
+    "matching the season and a daily situation. Follow the given style_guide strictly — quality, on-trend pieces a "
+    "hip Korean woman in her early 20s would really post (youthful Seoul street vibe, never matronly); never the "
+    "items in its avoid list. Return ONE JSON object: "
     '{"concept": "<짧은 한글 컨셉, 12자 이내>", "items": [{"kind": "...", "color_name": "<한글>", "hex": "#RRGGBB", '
     '"fit": "slim|regular|over", "length": "...", "material": "<한글>", "details": "<short English>", '
     '"queries": ["<쿠팡에서 찾을 한국어 검색어 — 여성, 색, 종류 포함>", "...", "..."]}]} — only the requested kinds.'
@@ -115,15 +118,21 @@ _FALLBACK = {  # AI 가 실패하면 무난한 기본(계절 무관 기본색)
 }
 
 
-def fill_specs(bose: list[dict], need: list[str], season: str, llm: Callable | None = None) -> tuple[str, list[dict]]:
-    """빈 종류의 아이템 명세(검색어 포함). → (컨셉, items). AI 실패·누락 종류는 기본 명세로."""
+def _life_today() -> str:
+    return P.WEEKDAYS[datetime.now(P.KST).weekday()]["life"]
+
+
+def fill_specs(bose: list[dict], need: list[str], season: str, llm: Callable | None = None,
+               guide: str | None = None) -> tuple[str, list[dict]]:
+    """빈 종류의 아이템 명세(검색어 포함). → (컨셉, items). AI 실패·누락 종류는 기본 명세로.
+    guide: 스타일 가이드(없으면 계절·오늘 생활 기준 기본 가이드)."""
     from services import music_lyrics
     llm = llm or (lambda s, u: music_lyrics._call(s, u, max_tokens=900, task="insta_fill"))
     concept, items = "내 상품 코디", []
     try:
         data = music_lyrics._extract_json(llm(_FILL_SYSTEM, json.dumps({
             "season": season, "have": [{"kind": p["kind"], "desc": p.get("desc") or p.get("name") or ""} for p in bose],
-            "need": need}, ensure_ascii=False)))
+            "need": need, "style_guide": guide or SG.guide_text(season, _life_today())}, ensure_ascii=False)))
         norm = refs.normalize_analysis({"looks": [{"concept": data.get("concept") or concept, "items": data.get("items") or []}]})
         if norm["looks"]:
             concept = norm["looks"][0]["concept"]
@@ -231,13 +240,13 @@ def start(character_id: str, products: list[dict], mode: str = "only", options: 
 
 
 def _fill(bose: list[dict], season: str, d: picks.Deps, job_id: str, llm: Callable | None,
-          need: list[str] | None = None) -> tuple[str, list[dict], dict, list[str]]:
+          need: list[str] | None = None, guide: str | None = None) -> tuple[str, list[dict], dict, list[str]]:
     """빈 종류 → 명세 → 쿠팡 픽 → 저장. → (컨셉, 아이템들, 조합, 메모). need 를 주면 그 종류만."""
     need = missing_kinds([p["kind"] for p in bose], season) if need is None else need
     if not need:
         return "내 상품 코디", [], {"ok": True, "swaps": []}, ["더 채울 종류가 없어요"]
     _set(job_id, step="채울 종류 정하는 중")
-    concept, specs = fill_specs(bose, need, season, llm)
+    concept, specs = fill_specs(bose, need, season, llm, guide=guide)
     _set(job_id, step="쿠팡에서 고르는 중")
     usage: dict = {}
     items, notes = [], []
@@ -448,9 +457,21 @@ def start_auto(character_id: str = "chaei", d: picks.Deps | None = None) -> dict
     picks.sweep_images(d)
     ref = picks.next_ref(d)
     looks = ((ref or {}).get("analysis") or {}).get("looks") or []
+    season = P.season_of(datetime.now(P.KST).date())
     if not ref or not looks:
-        raise CoordiError("고를 레퍼런스가 없어요 — '레퍼런스 모으기'를 먼저 눌러 주세요.")
-    idx = _best_look(looks, P.season_of(datetime.now(P.KST).date()))
+        # 쓸 레퍼런스가 없으면 스타일 가이드 공식으로 코디를 통째로 설계(완전 자동 — 멈추지 않게)
+        f = SG.pick_formula(season, _life_today())
+        look_id = f"lk-{datetime.now(timezone.utc):%Y%m%d}-{secrets.token_hex(3)}"
+        d.rest("ig_looks", "POST", json_body=[{"id": look_id, "source": "reference", "concept": f["name"],
+                                                "spec": {"guide": f["name"], "hint": f["hint"]}, "status": "picking"}],
+               prefer="return=minimal")
+        job_id = f"cj_{secrets.token_hex(5)}"
+        with _LOCK:
+            _JOBS[job_id] = {"id": job_id, "look_id": look_id, "outfit_id": None, "mode": "auto", "state": "queued",
+                             "step": "준비", "error": None, "cost": None, "concept": f["name"], "ref": None, "_deps": d,
+                             "_args": {"character_id": char["id"], "guide": f}}
+        return public_job(_JOBS[job_id])
+    idx = _best_look(looks, season)
     look_id = f"lk-{datetime.now(timezone.utc):%Y%m%d}-{secrets.token_hex(3)}"
     d.rest("ig_looks", "POST", json_body=[{"id": look_id, "ref_video_id": ref["video_id"], "look_index": idx,
                                             "concept": looks[idx].get("concept"), "spec": looks[idx], "source": "reference",
@@ -472,24 +493,35 @@ def run_auto(job_id: str, *, rng=None) -> None:
         d, look_id, args = j["_deps"], j["look_id"], dict(j["_args"])
     items: list[dict] = []
     try:
-        _set(job_id, step="레퍼런스 룩에 맞는 쿠팡 상품 고르는 중")
-        look = picks.pick_look(look_id, args["ref"], args.get("look_index", 0), d)
-        items = look.get("items") or []
-        for it in items:
-            it["source"] = "coupang"
-        notes = [f"{P.PRODUCT_KINDS.get(it['kind'], [it['kind']])[0]}: 맞는 쿠팡 상품을 못 찾았어요"
-                 for it in items if not it.get("pick")]
-        if look.get("status") != "picked":
-            raise CoordiError("맞는 쿠팡 상품을 하나도 못 찾았어요 — 다시 누르면 다음 레퍼런스로 해요.")
-        # 레퍼런스 룩이 덜 찼으면(상의만 등) 빈 종류를 채워 코디를 완성 — 가을·겨울엔 아우터 우선
         season = P.season_of(datetime.now(P.KST).date())
-        picked = [it for it in items if it.get("pick")]
-        need = _auto_need([it["kind"] for it in picked], season)
-        if need:
-            have = [{"kind": it["kind"], "desc": (it["pick"].get("name") or "")} for it in picked]
-            _, filled, _, n3 = _fill(have, season, d, job_id, None, need=need)
-            items = picked + [it for it in filled if it.get("pick")]
-            notes += n3
+        if args.get("guide"):
+            f = args["guide"]
+            _set(job_id, step=f"가이드 코디 「{f['name']}」 설계 중")
+            guide = SG.guide_text(season, _life_today()) + f"\n- 이번 코디 공식: {f['name']} — {f['hint']}"
+            concept, filled, combo, notes = _fill([], season, d, job_id, None, need=list(f["kinds"]), guide=guide)
+            items = [it for it in filled if it.get("pick")]
+            if not items:
+                raise CoordiError("가이드 코디에 맞는 쿠팡 상품을 못 찾았어요 — 잠시 후 다시 눌러 주세요.")
+            d.rest("ig_looks", "PATCH", params={"id": f"eq.{look_id}"}, prefer="return=minimal",
+                   json_body={"concept": concept or f["name"], "combo": combo, "status": "picked"})
+        else:
+            _set(job_id, step="레퍼런스 룩에 맞는 쿠팡 상품 고르는 중")
+            look = picks.pick_look(look_id, args["ref"], args.get("look_index", 0), d)
+            items = look.get("items") or []
+            for it in items:
+                it["source"] = "coupang"
+            notes = [f"{P.PRODUCT_KINDS.get(it['kind'], [it['kind']])[0]}: 맞는 쿠팡 상품을 못 찾았어요"
+                     for it in items if not it.get("pick")]
+            if look.get("status") != "picked":
+                raise CoordiError("맞는 쿠팡 상품을 하나도 못 찾았어요 — 다시 누르면 다음 레퍼런스로 해요.")
+            # 레퍼런스 룩이 덜 찼으면(상의만 등) 빈 종류를 가이드대로 채워 완성 — 가을·겨울엔 아우터 우선
+            picked = [it for it in items if it.get("pick")]
+            need = _auto_need([it["kind"] for it in picked], season)
+            if need:
+                have = [{"kind": it["kind"], "desc": (it["pick"].get("name") or "")} for it in picked]
+                _, filled, _, n3 = _fill(have, season, d, job_id, None, need=need)
+                items = picked + [it for it in filled if it.get("pick")]
+                notes += n3
         for i, it in enumerate(items):
             it["index"] = i
         d.rest("ig_looks", "PATCH", params={"id": f"eq.{look_id}"}, prefer="return=minimal", json_body={"items": items})

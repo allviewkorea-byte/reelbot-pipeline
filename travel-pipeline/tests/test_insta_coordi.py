@@ -290,9 +290,14 @@ def test_auto_ref_to_outfit_without_input(coordi):
     assert not [k for k in coordi.s3.objs if k.startswith("insta/products/coupang/")]      # 쿠팡 사본 삭제
 
 
-def test_auto_needs_refs_and_coupang(coordi):
-    with pytest.raises(C.CoordiError, match="레퍼런스"):
-        C.start_auto("chaei", d=_deps(coordi.t))
+def test_auto_without_refs_uses_style_guide(coordi):
+    job = C.start_auto("chaei", d=_deps(coordi.t))                                       # 레퍼런스 없음 → 멈추지 않고 가이드
+    assert job["ref"] is None and job["concept"]
+    look = coordi.t.t["ig_looks"][0]
+    assert look["spec"]["guide"] == job["concept"] and look["spec"]["hint"]
+
+
+def test_auto_needs_coupang(coordi):
 
     class _Off:
         def is_available(self):
@@ -318,3 +323,45 @@ def test_best_look_prefers_season_and_fuller_look():
     looks = [{"seasons": ["summer"], "items": [1, 2, 3, 4]}, {"seasons": ["autumn"], "items": [1]},
              {"seasons": ["autumn"], "items": [1, 2, 3]}]
     assert C._best_look(looks, "autumn") == 2
+
+
+@needs_ffmpeg
+def test_auto_guide_flow_end_to_end(coordi, monkeypatch):
+    """레퍼런스 없음 → 가이드 공식(가을) → 명세 AI 실패 시 기본 명세 검색어 → 쿠팡 픽 → 착장."""
+    from services import insta_style_guide as SG
+    from services import music_lyrics
+    monkeypatch.setattr(SG, "pick_formula", lambda season, life=None, rng=None, avoid_names=None: {
+        "name": "트렌치 출근룩", "life": ["출근"], "kinds": ["outerwear", "top", "bottoms", "shoes"], "hint": "트렌치 + 니트"})
+    seen = {}
+
+    def fake_call(system, user, **kw):
+        seen["user"] = user
+        raise RuntimeError("down")
+    monkeypatch.setattr(music_lyrics, "_call", fake_call)
+    shop = _Shop("coupang", {
+        "여성 베이지 트렌치코트": [_c("o1", "여성 베이지 트렌치코트", price=89000, ch="coupang")],
+        "여성 아이보리 니트": [_c("t1", "여성 아이보리 울 니트", ch="coupang")],
+        "여성 차콜 와이드 슬랙스": [_c("c4", "여성 차콜 와이드 슬랙스", ch="coupang")],
+        "여성 블랙 로퍼": [_c("s1", "여성 블랙 로퍼", ch="coupang")],
+    })
+    scores = {"coupang_o1": (9, "#D2B48C"), "coupang_t1": (9, "#F2EDE3"), "coupang_c4": (9, "#36454F"), "coupang_s1": (9, "#111111")}
+    d = K.Deps(coupang=shop, vision=_vision(scores), download=_dl, rest=coordi.t)
+    job = C.start_auto("chaei", d=d)
+    C.run_auto(job["id"], rng=random.Random(2))
+    j = C.get_job(job["id"])
+    assert j["state"] == "done", j
+    assert "style_guide" in seen["user"] and "이번 코디 공식: 트렌치 출근룩" in seen["user"]
+    row = next(r for r in coordi.rest_out.rows if r["id"] == j["outfit_id"])
+    assert sorted(p["kind"] for p in row["product_images"]) == ["bottoms", "outerwear", "shoes", "top"]
+    assert not [k for k in coordi.s3.objs if k.startswith("insta/products/coupang/")]
+
+
+def test_style_guide_text_and_formula():
+    from services import insta_style_guide as SG
+    t = SG.guide_text("autumn", "출근")
+    assert "코발트 블루" in t and "피할 것" in t and "트렌치" in t
+    f = SG.pick_formula("autumn", "퇴근 후 데이트", rng=random.Random(1))
+    assert "데이트" in f["life"] and len(f["kinds"]) <= 4
+    assert SG.pick_formula("winter", "없는생활")["name"] in {x["name"] for x in SG.FORMULAS["winter"]}
+    for season, fs in SG.FORMULAS.items():
+        assert all(len(x["kinds"]) <= 4 for x in fs), season
