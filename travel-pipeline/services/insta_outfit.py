@@ -438,8 +438,11 @@ def run(job_id: str, *, rng: random.Random | None = None) -> None:
             try:
                 res = asyncio.run(adapter.generate(ImageGenerationRequest(prompt=prompt, reference_images=ref_urls,
                                                                           aspect_ratio="9:16", output_path=str(out))))
-            except RefBlocked:  # 안전 필터 → 표현 바꿔 1회 재시도
-                prompt = gen.sanitize(prompt)
+            except RefBlocked:  # 안전 필터 → 체형·피부·분위기 문장을 뺀 단순 프롬프트 + 안전 문구로 1회 재시도
+                logger.warning("[insta-outfit] %s 안전 필터 → 단순 프롬프트로 재시도", outfit_id)
+                prompt, ref_urls = P.build(plan, face_url=refs[gen.FACE_ROLE]["url"], body_url=refs[gen.BODY_ROLE]["url"],
+                                           hair_url=hair_url, products=prods, fix_hint=None, safe=True)
+                prompt = gen.sanitize(gen.strip_unsafe(prompt))
                 res = asyncio.run(adapter.generate(ImageGenerationRequest(prompt=prompt, reference_images=ref_urls,
                                                                           aspect_ratio="9:16", output_path=str(out))))
             attempts = attempt + 1

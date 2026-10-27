@@ -11,7 +11,7 @@ import { jsonOrThrow } from "@/components/studio/studio-lib"
 
 interface Prod { name?: string | null; mall?: string | null; price?: number | null; image_url?: string | null; kind?: string | null }
 interface Scene { pose_ko?: string; location_ko?: string; face?: string }
-interface LookRow { n: number; image_url: string | null; product_image?: string | null; product?: Prod; items?: Prod[]; scene?: Scene }
+interface LookRow { n: number; image_url: string | null; product_image?: string | null; product?: Prod; items?: Prod[]; scene?: Scene; spare?: boolean }
 interface Collection {
   id: string; status: "planned" | "making" | "ok" | "failed" | "hidden"; error: string | null; cost_usd: number | null
   theme: { concept?: string; title_ko?: string[]; zip?: string; title_en?: string }
@@ -25,6 +25,7 @@ const POLL_MS = 4000
 export function CollectionPanel({ character, ready }: { character: string; ready: boolean }) {
   const [rows, setRows] = useState<Collection[]>([])
   const [job, setJob] = useState<Job | null>(null)
+  const [zoom, setZoom] = useState<{ src: string; caption: string } | null>(null)   // 눌러서 크게 보기
   const running = job?.state === "queued" || job?.state === "running"
 
   const load = useCallback(
@@ -101,14 +102,15 @@ export function CollectionPanel({ character, ready }: { character: string; ready
           <div className="flex min-w-0 flex-col gap-0.5">
             <div className="text-sm font-semibold text-foreground">{planned.theme?.concept || planned.theme?.zip}</div>
             {planned.theme?.title_ko && <p className="text-xs text-muted-foreground">표지: 코디 저장소 · {planned.theme.zip} — 캡션: {planned.theme.title_ko.join(" ")}</p>}
-            <p className="text-xs text-muted-foreground">룩마다 다른 포즈·장소·코디예요.</p>
+            <p className="text-xs text-muted-foreground">룩마다 다른 포즈·장소·코디예요. 하나가 실패하면 예비 코디로 대신 만들어 최소 4룩을 채워요.</p>
           </div>
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-            {planned.looks.map((lk) => (
+            {planned.looks.filter((lk) => !lk.spare).map((lk) => (
               <div key={lk.n} className="flex min-w-0 flex-col gap-1">
                 {lk.product_image ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={lk.product_image} alt={lk.product?.name ?? ""} className="aspect-square w-full rounded-md bg-secondary object-cover" />
+                  <img src={lk.product_image} alt={lk.product?.name ?? ""} onClick={() => setZoom({ src: lk.product_image!, caption: lk.product?.name ?? "" })}
+                    className="aspect-square w-full cursor-zoom-in rounded-md bg-secondary object-cover" />
                 ) : <div className="aspect-square w-full rounded-md bg-secondary" />}
                 <span className="text-[11px] font-medium text-foreground">{String(lk.n).padStart(2, "0")}</span>
                 {lk.scene && <span className="line-clamp-2 text-[11px] text-primary">{lk.scene.location_ko} · {lk.scene.pose_ko}</span>}
@@ -151,13 +153,23 @@ export function CollectionPanel({ character, ready }: { character: string; ready
                 <div key={lk.n} className="flex min-w-0 flex-col gap-1">
                   {lk.image_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={lk.image_url} alt={`Look ${lk.n}`} className="aspect-[9/16] w-full rounded-md object-cover" />
+                    <img src={lk.image_url} alt={`Look ${lk.n}`} onClick={() => setZoom({ src: lk.image_url!, caption: `${String(lk.n).padStart(2, "0")} · ${lk.product?.name ?? ""}` })}
+                      className="aspect-[9/16] w-full cursor-zoom-in rounded-md object-cover" />
                   ) : <div className="aspect-[9/16] w-full rounded-md bg-secondary" />}
                   <span className="truncate text-[11px] text-muted-foreground">{String(lk.n).padStart(2, "0")} · {lk.product?.name ?? ""}</span>
                 </div>
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {zoom && (
+        <div role="dialog" aria-modal="true" onClick={() => setZoom(null)}
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-black/85 p-4">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={zoom.src} alt={zoom.caption} className="max-h-[85vh] max-w-full rounded-lg object-contain" />
+          <p className="max-w-full truncate text-xs text-white/80">{zoom.caption} · 눌러서 닫기</p>
         </div>
       )}
     </section>

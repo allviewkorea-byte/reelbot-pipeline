@@ -93,7 +93,7 @@ def test_collection_end_to_end(coordi, monkeypatch):  # noqa: F811
     assert [lk["n"] for lk in row["looks"]] == [1, 2, 3, 4]
     assert len({lk["product"]["id"] for lk in row["looks"]}) == 4                         # 룩마다 다른 상품
     calls = coordi.muse.calls
-    assert len(calls) >= 4 and all("reference image 1" in c.prompt for c in calls)        # 룩마다 새로 생성(얼굴·체형 참조)
+    assert len(calls) >= 4 and all("reference image 1" in c.prompt for c in calls), [c.prompt[:200] for c in calls if "reference image 1" not in c.prompt]
     scenes = [(lk["scene"]["pose"], lk["scene"]["location"]) for lk in row["looks"]]
     assert len({p for p, _ in scenes}) == 4 and len({loc for _, loc in scenes}) == 4       # 포즈·장소 모두 다름
     assert all(lk["items"] for lk in row["looks"])                                         # 함께 입는 옷도 룩마다
@@ -124,7 +124,8 @@ def test_plan_then_make(coordi, monkeypatch):  # noqa: F811
     CL.run(j["id"], rng=random.Random(1))
     assert CL.get_job(j["id"])["state"] == "done"
     row = t.t["ig_collections"][0]
-    assert row["status"] == "planned" and len(row["looks"]) == 3 and row["theme"]["plan"]["mode"] == "varied"
+    assert row["status"] == "planned" and row["theme"]["plan"]["mode"] == "varied"
+    assert len([x for x in row["looks"] if not x.get("spare")]) == 4 and [x for x in row["looks"] if x.get("spare")]  # 최소 4 + 예비
     assert all(lk["scene"]["pose_ko"] and lk["scene"]["location_ko"] for lk in row["looks"])   # 미리보기에 장면
     assert all(lk["product"]["image_url"] for lk in row["looks"]) and all(len(lk["items"]) == 2 for lk in row["looks"])
     assert not coordi.muse.calls                                                          # 미리보기는 이미지 생성 없음
@@ -138,7 +139,7 @@ def test_plan_then_make(coordi, monkeypatch):  # noqa: F811
     CL.run(m["id"], rng=random.Random(1))
     assert CL.get_job(m["id"])["state"] == "done", CL.get_job(m["id"])
     row = next(r for r in t.t["ig_collections"] if r["id"] == row["id"])
-    assert row["status"] == "ok" and row["video_key"] and len(row["looks"]) == 3
+    assert row["status"] == "ok" and row["video_key"] and len(row["looks"]) == 4
     assert len(coordi.muse.calls) >= 3 and all(lk.get("outfit_id") for lk in row["looks"])
 
 
