@@ -56,11 +56,13 @@ def test_coupang_search_cap_and_deeplink():
     assert got[0]["name"] == "여성 니트 & 가디건" and got[0]["mall"] == "쿠팡 로켓" and len(got) == 1   # 이미지 없는 건 제외
     assert "limit=10" in calls[0][1] and calls[0][2]["Authorization"].startswith("CEA algorithm=HmacSHA256, access-key=ak, signed-date=")
     assert c.search("니트", 10)[0]["product_id"] == "7" and c.cached and len(calls) == 1   # 같은 검색어 1시간 캐시 — 호출 안 함
-    for i in range(S.COUPANG_SEARCH_HOURLY_CAP - 1):
+    for i in range(S.COUPANG_SEARCH_PER_MIN - 1):
         c.search(f"x{i}")
     with pytest.raises(S.QuotaExceeded):
         c.search("새 검색어")
     assert c.search("니트", 10) and c.cached                                                 # 한도에 걸려도 캐시는 준다
+    S._CALLS[:] = [t - S.COUPANG_SEARCH_WINDOW_SEC for t in S._CALLS]                     # 1분 지나면 다시 가능(분당 상한)
+    assert c.search("새 검색어 2") is not None
     links = c.deeplinks(["https://link.coupang.com/re/AFF", "https://www.coupang.com/vp/products/1"])
     assert links["https://link.coupang.com/re/AFF"] == "https://link.coupang.com/re/AFF"
     assert links["https://www.coupang.com/vp/products/1"] == "https://link.coupang.com/a/x"

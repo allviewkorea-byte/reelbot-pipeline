@@ -282,7 +282,7 @@ def gather(item: dict, d: Deps, usage: dict) -> tuple[list[dict], list[str]]:
             logger.warning("[insta-picks] %s 검색 실패(%s): %s", ch, q, str(e)[:160])
             continue
         if ch == "coupang" and getattr(d.coupang, "cached", False):
-            usage["coupang_cached"] = usage.get("coupang_cached", 0) + 1  # 1시간 캐시 — 호출·한도에 안 셈
+            usage["coupang_cached"] = usage.get("coupang_cached", 0) + 1  # 1시간 캐시 — 호출·한도에 안 셈(한도: 분당)
         else:
             usage[ch] = usage.get(ch, 0) + 1
         try:

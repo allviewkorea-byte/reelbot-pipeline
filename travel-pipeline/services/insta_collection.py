@@ -522,7 +522,7 @@ def _plan(job_id: str, d: picks.Deps, cid: str, args: dict, llm, rng: random.Ran
         products = variants + [c for pool in saved_pools for c in pool]
         if len(variants) < 3:
             if any("한도" in n for n in usage.get("notes") or []):
-                raise CollectionError("쿠팡 검색 한도에 걸렸어요 — 1시간쯤 뒤에 다시 기획해 주세요.")
+                raise CollectionError("쿠팡 검색 한도에 걸렸어요 — 1분쯤 뒤에 다시 기획해 주세요.")
             raise CollectionError(f"「{theme['concept']}」 상품을 {len(variants)}개밖에 못 찾았어요 — '다른 기획 보기'로 다시 해 주세요.")
         outfits = pair_outfits(variants, saved_pools)
         _set(job_id, step="룩마다 포즈·장소 정하는 중")

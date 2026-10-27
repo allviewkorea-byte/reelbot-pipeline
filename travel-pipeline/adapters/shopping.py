@@ -5,7 +5,8 @@
   상품 검색 GET /v2/providers/affiliate_open_api/apis/openapi/v1/products/search?keyword=&limit=(≤10)
   → data.productData[{productId, productName, productPrice, productImage, productUrl, categoryName, isRocket}]
   (productUrl 은 이미 제휴 추적 링크). 딥링크 POST …/v1/deeplink {"coupangUrls": [...]}.
-  검색 호출 한도가 작다(비공식: 시간당 10회) → COUPANG_SEARCH_HOURLY_CAP 로 막는다.
+  검색 호출 한도: 쿠팡 공식 API 가이드 "1분당 최대 50번"(대표 확인 2026-10-27) → 여유를 두고
+  COUPANG_SEARCH_PER_MIN(40)으로 막는다. (예전엔 비공식 "시간당 10회"로 너무 좁게 막았음)
 - 네이버 쇼핑: GET https://openapi.naver.com/v1/search/shop.json?query=&display=&sort=sim
   헤더 X-Naver-Client-Id / X-Naver-Client-Secret. items[{title(<b>태그), link, image, lprice, mallName,
   productId, brand, category1~4}]. 하루 25,000회.
@@ -29,10 +30,11 @@ import httpx
 COUPANG_HOST = "https://api-gateway.coupang.com"
 COUPANG_SEARCH = "/v2/providers/affiliate_open_api/apis/openapi/v1/products/search"
 COUPANG_DEEPLINK = "/v2/providers/affiliate_open_api/apis/openapi/v1/deeplink"
-COUPANG_SEARCH_HOURLY_CAP = 10
+COUPANG_SEARCH_PER_MIN = 40      # 공식 50/분 — 여유 10
+COUPANG_SEARCH_WINDOW_SEC = 60
 SEARCH_CACHE_SEC = 3600   # 같은 검색어 결과 1시간 메모리 캐시(저장 아님) — 한도 아끼기
 _SEARCH_CACHE: dict[tuple[str, int], tuple[float, list[dict]]] = {}
-_CALLS: list[float] = []  # 시간당 상한(프로세스 공용 — 픽마다 클라이언트를 새로 만들어도 같이 센다)
+_CALLS: list[float] = []  # 분당 상한(프로세스 공용 — 픽마다 클라이언트를 새로 만들어도 같이 센다)
 _CALLS_LOCK = threading.Lock()
 NAVER_SHOP = "https://openapi.naver.com/v1/search/shop.json"
 
@@ -93,10 +95,10 @@ class CoupangClient:
             if hit and now - hit[0] < SEARCH_CACHE_SEC:
                 self.cached = True
                 return [dict(x) for x in hit[1]]
-            # 시간당 상한(이 프로세스 기준 — 하루 합계는 ig_api_usage 에 따로 기록)
-            _CALLS[:] = [t for t in _CALLS if now - t < 3600]
-            if len(_CALLS) >= COUPANG_SEARCH_HOURLY_CAP:
-                raise QuotaExceeded("쿠팡 검색 시간당 상한")
+            # 분당 상한(이 프로세스 기준 — 하루 합계는 ig_api_usage 에 따로 기록)
+            _CALLS[:] = [t for t in _CALLS if now - t < COUPANG_SEARCH_WINDOW_SEC]
+            if len(_CALLS) >= COUPANG_SEARCH_PER_MIN:
+                raise QuotaExceeded("쿠팡 검색 분당 상한")
             _CALLS.append(now)
         self.cached = False
         data = self._request("GET", COUPANG_SEARCH, {"keyword": keyword, "limit": limit})
