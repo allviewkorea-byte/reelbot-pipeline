@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
-import { ArrowLeft, CheckCircle2, ImageIcon, Loader2, RefreshCw, Sparkles, X } from "lucide-react"
+import { ArrowLeft, CheckCircle2, ImageIcon, Loader2, RefreshCw, Shirt, Sparkles, X } from "lucide-react"
 import { CustomPromptPanel } from "./CustomPromptPanel"
 import { GeneratePanel } from "./GeneratePanel"
 import { ImportPanel } from "./ImportPanel"
@@ -228,6 +228,12 @@ export function CharacterView({ characterId, initialJobId }: { characterId: stri
             <span className={`h-2 w-2 rounded-full ${view.ready ? "bg-emerald-500" : "bg-amber-400"}`} />
             {view.ready ? "준비 완료" : hasFace ? "체형 사진이 필요해요" : "얼굴 사진이 필요해요"}
           </span>
+          {view.ready && view.character.channel_id === "insta_chaei" && (
+            <Link href={`/insta/outfit?character=${encodeURIComponent(view.character.id)}`}
+              className="flex min-h-[36px] items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90">
+              <Shirt className="h-3.5 w-3.5" /> 이 캐릭터로 착장 만들기
+            </Link>
+          )}
           <label className="ml-auto flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
             전문가 모드
             <button type="button" role="switch" aria-checked={expert} onClick={() => toggleExpert(!expert)}

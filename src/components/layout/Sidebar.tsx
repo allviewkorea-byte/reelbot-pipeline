@@ -217,6 +217,7 @@ function SidebarBody({ activeChannel }: { activeChannel: string }) {
   const inMusic = pathname === "/music" || pathname.startsWith("/music/")
   const musicActive = inMusic && activeChannel === DEFAULT_MUSIC_CHANNEL
   const workoutActive = inMusic && activeChannel === WORKOUT_CHANNEL_ID
+  const instaActive = pathname === "/insta" || pathname.startsWith("/insta/")
   const studioActive = pathname === "/studio" || pathname.startsWith("/studio/")
   const systemActive = pathname === "/system" || pathname.startsWith("/system/")
   const settingsActive =
@@ -267,7 +268,7 @@ function SidebarBody({ activeChannel }: { activeChannel: string }) {
           </button>
         </div>
 
-        {/* 내 채널 — 운동 + 백곰 + 음악(검토 대기 큐). 카드 스타일 통일(데이터·동작 무변경).
+        {/* 내 채널 — 운동 + 백곰 + 음악(검토 대기 큐) + 인스타 쇼핑. 카드 스타일 통일(데이터·동작 무변경).
             순서는 대표 지시(2주안에몸매만들기 → 백곰 → where). 링크·배지·active 판정은 그대로. */}
         <div className="flex min-h-0 flex-1 flex-col px-3 pt-4">
           <div className="px-3 pb-1">
@@ -304,6 +305,16 @@ function SidebarBody({ activeChannel }: { activeChannel: string }) {
               status="idle"
               statusText="유튜브 · 검토 대기"
               badge={whereQueue > 0 ? { label: `검토 ${whereQueue}`, tone: "review" } : undefined}
+              onNavigate={closeMobile}
+            />
+            {/* 인스타 쇼핑(A2-3a) — 착장 만들기 화면. 자동 게시(B단계) 전이라 상태는 '테스트'. */}
+            <ChannelCard
+              href="/insta/outfit"
+              active={instaActive}
+              icon="🛍️"
+              name="인스타 쇼핑"
+              status="idle"
+              statusText="인스타 · 테스트"
               onNavigate={closeMobile}
             />
 

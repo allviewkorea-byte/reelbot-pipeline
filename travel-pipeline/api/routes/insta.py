@@ -1,4 +1,5 @@
-"""인스타 쇼핑 API — 착장 생성(A1) · 레퍼런스 수집·분석(A2-1) · 쿠팡·네이버 상품 픽(A2-2). 테스트 화면 /insta/outfit."""
+"""인스타 쇼핑 API — 착장 생성(A1) · 레퍼런스 수집·분석(A2-1) · 쿠팡 상품 픽(A2-2) · 내 상품으로 코디(A2-3a).
+테스트 화면 /insta/outfit."""
 
 from __future__ import annotations
 
@@ -7,6 +8,7 @@ from pydantic import BaseModel
 
 from adapters.shopping import ShoppingError
 from services import character_studio as cs
+from services import insta_coordi as coordi
 from services import insta_outfit as io
 from services import insta_outfit_plan as P
 from services import insta_picks as picks
@@ -24,9 +26,9 @@ class OutfitReq(BaseModel):
 def _call(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
-    except (io.OutfitError, cs.StudioError, ValueError) as e:
+    except (io.OutfitError, cs.StudioError, ShoppingError, ValueError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    except (io.OutfitNotFound, cs.StudioNotFound) as e:
+    except (io.OutfitNotFound, cs.StudioNotFound, LookupError) as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except (io.OutfitStoreError, cs.StudioStoreError) as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
@@ -73,7 +75,8 @@ def remake(outfit_id: str, bg: BackgroundTasks):
 
 @router.get("/outfits")
 def outfits(character_id: str = "chaei", limit: int = 12):
-    return {"outfits": [io.view(r) for r in _call(io.list_outfits, character_id, limit)]}
+    """최근 착장(내린 것 제외) + 룩(상품·출처·링크·교체 후보)."""
+    return {"outfits": coordi.attach_looks(_call(io.list_outfits, character_id, limit))}
 
 
 @router.get("/outfits/{outfit_id}")
@@ -177,3 +180,70 @@ def looks(limit: int = 10):
 def swap(look_id: str, req: SwapReq):
     """아이템 1등을 예비 후보로 교체."""
     return _pcall(picks.swap, look_id, req.item_index, req.product_id)
+
+
+# ── 내 상품으로 코디(A2-3a) ──────────────────────────────────────────────
+class CoordiReq(BaseModel):
+    character_id: str = "chaei"
+    products: list[dict]
+    mode: str = "only"          # only = 이것만 입히기 / fill = 나머지 AI가 채우기
+    options: dict | None = None
+
+
+class DecisionReq(BaseModel):
+    decision: str               # approved | rejected
+    reason: str | None = None
+
+
+class HideReq(BaseModel):
+    reason: str
+
+
+@router.post("/coordi")
+def start_coordi(req: CoordiReq, bg: BackgroundTasks):
+    """보세 상품(사진·링크) → (빈 종류 쿠팡 채우기) → 착장. 백그라운드, 같은 요청이 돌면 그 작업."""
+    job = _call(coordi.start, req.character_id, req.products, req.mode, req.options)
+    if job["state"] == "queued":
+        bg.add_task(coordi.run, job["id"])
+    return job
+
+
+@router.get("/coordi/jobs/{job_id}")
+def coordi_job(job_id: str):
+    return _call(coordi.get_job, job_id)
+
+
+@router.post("/coordi/{outfit_id}/remake")
+def coordi_remake(outfit_id: str, bg: BackgroundTasks):
+    """같은 상품(교체 반영), 새 장면으로 다시 입히기."""
+    job = _call(coordi.remake, outfit_id)
+    if job["state"] == "queued":
+        bg.add_task(coordi.run_remake, job["id"])
+    return job
+
+
+@router.post("/outfits/{outfit_id}/decision")
+def outfit_decision(outfit_id: str, req: DecisionReq):
+    """대표 승인(이 코디 좋아요)/반려(다른 코디) — ig_feedback 에 기록."""
+    return io.view(_call(coordi.decide, outfit_id, req.decision, req.reason))
+
+
+@router.post("/outfits/{outfit_id}/hide")
+def hide_outfit(outfit_id: str, req: HideReq):
+    """내리기(숨김 + 사유). B단계 업로드 대상에서 빠진다."""
+    return io.view(_call(coordi.hide_outfit, outfit_id, req.reason))
+
+
+@router.post("/products/{product_id}/hide")
+def hide_product(product_id: int, req: HideReq):
+    return _call(coordi.hide_product, product_id, req.reason)
+
+
+@router.post("/refs/screenshot")
+async def add_screenshot(file: UploadFile = File(...)):
+    """스크린샷 레퍼런스(분석용 보관만, 게시물엔 쓰지 않음) → 분석 → 픽에 쓸 수 있게."""
+    data = await file.read()
+    try:
+        return refs.add_screenshot(data, file.filename or "")
+    except (refs.RefsError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e

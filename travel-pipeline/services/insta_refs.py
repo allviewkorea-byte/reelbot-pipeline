@@ -48,6 +48,10 @@ QUERY_POOL = [
 ]
 
 
+# 유튜브 검색에서 바로 빼는 단어(남성 패션·명품 토크 — 실측 12개 중 3개 불량, 2026-10-27)
+QUERY_EXCLUDE = "-남자 -남성 -명품 -남친"
+
+
 class RefsError(RuntimeError):
     """수집·분석 실패(502)."""
 
@@ -200,7 +204,7 @@ def collect(now: datetime | None = None, *, http_get: Callable | None = None, ll
         if used + SEARCH_COST + VIDEOS_COST > YT_DAILY_UNIT_CAP:
             out["stopped_by_quota"] = True
             break
-        s = http_get(f"{API}/search", {"key": key, "part": "snippet", "q": q, "type": "video", "order": "viewCount",
+        s = http_get(f"{API}/search", {"key": key, "part": "snippet", "q": f"{q} {QUERY_EXCLUDE}", "type": "video", "order": "viewCount",
                                        "publishedAfter": after, "regionCode": "KR", "relevanceLanguage": "ko",
                                        "maxResults": 15, "safeSearch": "strict"})
         used += SEARCH_COST
@@ -242,8 +246,12 @@ _ANALYZE_SYSTEM = (
     "You analyze ONE YouTube outfit video thumbnail plus its title and description for a Korean women's fashion "
     "account. Write a look spec. If the thumbnail shows several distinct outfits, split them into separate looks "
     "(max 3). Do NOT describe faces or identities; ignore overlaid text except clothing info.\n"
+    "First decide if it is a usable reference: usable only when the image shows a woman's outfit (ideally one woman "
+    "in her 20s, full body, solo). NOT usable: men's fashion, luxury/brand talk or review videos (several people "
+    "sitting and talking, luxury logos as the focus), or no visible full-body women's outfit. If not usable, "
+    "return looks: [].\n"
     "Return ONE JSON object only:\n"
-    '{"looks": [{"concept": "<짧은 한글 컨셉 이름, 12자 이내>", "mood": "<짧은 한글>", '
+    '{"usable": true|false, "usable_reason": "<짧은 한국어>", "looks": [{"concept": "<짧은 한글 컨셉 이름, 12자 이내>", "mood": "<짧은 한글>", '
     '"situations": ["출근"|"데이트"|"주말"|"하객"|"여행"|...], "seasons": ["spring"|"summer"|"autumn"|"winter"], '
     '"items": [{"kind": "top|bottoms|dress|outerwear|shoes|bag|accessory", "color_name": "<한글 색 이름>", '
     '"hex": "#RRGGBB", "fit": "slim|regular|over", "length": "<e.g. cropped, hip, mid-thigh, knee, midi, ankle, full>", '
@@ -288,7 +296,9 @@ def normalize_analysis(data: dict) -> dict:
         })
     prods = [{"name": str(p.get("name") or "")[:80], "brand": str(p.get("brand") or "")[:40], "kind": p.get("kind") or ""}
              for p in (data.get("desc_products") or []) if isinstance(p, dict) and p.get("name")][:20]
-    return {"looks": looks, "desc_products": prods}
+    usable = data.get("usable") is not False
+    return {"usable": usable, "usable_reason": str(data.get("usable_reason") or "")[:80],
+            "looks": looks if usable else [], "desc_products": prods}
 
 
 def analyze(row: dict, *, vision: Callable | None = None, download: Callable | None = None) -> dict:
@@ -306,7 +316,8 @@ def analyze(row: dict, *, vision: Callable | None = None, download: Callable | N
             ask = json.dumps({"title": row.get("title"), "description": (row.get("description") or "")[:1500],
                               "product_lines": product_lines(row.get("description") or "")}, ensure_ascii=False)
             spec = normalize_analysis(vision(_ANALYZE_SYSTEM, [small], ask, "insta_refs_analyze", 1500))
-        if not spec["looks"]:
+        # '참고 안 함'(남성·명품 토크·전신 착장 없음)은 실패가 아니라 판정 결과 — 사유와 함께 저장, 픽에서 건너뜀
+        if spec["usable"] and not spec["looks"]:
             raise RefsError("분석된 룩이 없음")
         rest("ig_refs", "PATCH", params={"video_id": f"eq.{vid}"}, prefer="return=minimal",
              json_body={"analysis": spec, "desc_products": spec["desc_products"], "status": "analyzed", "error": None})
@@ -368,8 +379,45 @@ def run(*, force: bool = False, **deps) -> dict:
 
 
 def list_refs(limit: int = 20) -> list[dict]:
-    rows = rest("ig_refs", "GET", params={"select": "video_id,query,title,channel_title,views,published_at,thumb_key,"
+    rows = rest("ig_refs", "GET", params={"select": "video_id,source,query,title,channel_title,views,published_at,thumb_key,"
                                                     "analysis,status,error,collected_at",
                                           "order": "collected_at.desc", "limit": str(max(1, min(int(limit), 50)))})
-    return [{**r, "thumb_url": io.public_url(r.get("thumb_key")), "video_url": f"https://www.youtube.com/watch?v={r['video_id']}"}
-            for r in rows]
+    out = []
+    for r in rows:
+        yt = (r.get("source") or "youtube") == "youtube"
+        out.append({**r, "thumb_url": io.public_url(r.get("thumb_key")),
+                    "video_url": f"https://www.youtube.com/watch?v={r['video_id']}" if yt else None,
+                    "usable": (r.get("analysis") or {}).get("usable", True) is not False})
+    return out
+
+
+# ── 스크린샷 레퍼런스(대표가 무신사 등 화면을 캡처해 올림) ────────────────
+def add_screenshot(data: bytes, filename: str, *, vision: Callable | None = None, download: Callable | None = None) -> dict:
+    """스크린샷 1장 → jpg 로 R2(insta/refs/screenshots/…, 분석용으로만 보관·게시물 사용 금지) → ig_refs(source=screenshot)
+    → 유튜브 썸네일과 같은 룩 분석. 반환: 분석 결과가 붙은 행."""
+    import secrets
+    import subprocess
+
+    ext = (filename.rsplit(".", 1)[-1] if "." in (filename or "") else "").lower()
+    if ext not in ("png", "jpg", "jpeg", "webp"):
+        raise RefsError("png·jpg·webp 이미지만 올릴 수 있어요.")
+    if not data or len(data) > 15 * 1024 * 1024:
+        raise RefsError("빈 파일이거나 15MB 를 넘어요.")
+    if not r2_storage.is_available():
+        raise RefsError("R2 미설정")
+    vid = f"ss-{datetime.now(timezone.utc):%Y%m%d}-{secrets.token_hex(3)}"
+    key = f"insta/refs/screenshots/{vid}.jpg"
+    with tempfile.TemporaryDirectory() as d:
+        src, jpg = Path(d) / f"src.{ext}", Path(d) / "s.jpg"
+        src.write_bytes(data)
+        res = subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(src), "-frames:v", "1", "-q:v", "3", str(jpg)],
+                             capture_output=True, text=True, timeout=60)
+        if res.returncode != 0 or not jpg.exists():
+            raise RefsError("이미지를 읽을 수 없어요.")
+        r2_storage.upload_image(str(jpg), key, bucket=r2_storage._character_bucket(),
+                                public_base_url=r2_storage._character_public_base(), content_type="image/jpeg")
+    row = {"video_id": vid, "source": "screenshot", "title": "스크린샷", "description": "", "thumb_key": key, "status": "new"}
+    rest("ig_refs", "POST", json_body=[row], prefer="return=minimal")
+    spec = analyze(row, vision=vision, download=download)
+    return {**row, "analysis": None if spec.get("error") else spec, "error": spec.get("error"),
+            "thumb_url": io.public_url(key)}
