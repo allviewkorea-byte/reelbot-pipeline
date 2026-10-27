@@ -131,7 +131,7 @@ def plan_theme(season: str, life: str, recent: list[str] | None = None, llm=None
 
 
 # 표지 맨 위 가장 큰 글씨 — 채널 슬로건(대표 2026-10-27). 아래 박스는 테마별 "○○ 모음.zip".
-SLOGAN = "오늘 뭐 입지?"
+SLOGAN = "코디 저장소"
 
 VARIANT_SCORE_TOP = 15   # 컬렉션은 5개를 색 고르게 뽑아야 해서 코디(8)보다 많이 심사
 
@@ -320,10 +320,9 @@ def _segment(work: Path, img: str, dur: float, draws: list[str], out: str) -> No
 
 def render_reel(work: Path, look_images: list[str], theme: dict, out_name: str = "reel.mp4") -> tuple[str, str]:
     """표지(Look 1 + 카피) + Look 1~N → mp4, 표지 jpg. 파일명은 work 기준 상대."""
-    serif = _stage(work, _font(_SERIF), "serif")
     bold = _stage(work, _font(_BOLD), "bold")
     shadow = "shadowcolor=black@0.45:shadowx=2:shadowy=2"
-    # 표지(대표 2026-10-27): 맨 위 가장 큰 글씨로 슬로건 → 영문 소제목 → 흰 박스 "○○ 모음.zip".
+    # 표지(대표 2026-10-27): 맨 위 가장 큰 글씨로 슬로건 "코디 저장소" → 영문 소제목 → 흰 박스 "○○ 모음.zip".
     # 감성 카피(title_ko)는 표지에서 빼고 캡션 첫 줄용으로 남긴다.
     cover = [
         f"drawtext=fontfile={bold}:textfile={_txt(work, 't_slogan.txt', SLOGAN)}:fontsize=104:fontcolor=white:"
@@ -336,8 +335,10 @@ def render_reel(work: Path, look_images: list[str], theme: dict, out_name: str =
     _segment(work, look_images[0], COVER_SEC, cover, "seg0.mp4")
     segs = ["seg0.mp4"]
     for i, img in enumerate(look_images, start=1):
-        draw = (f"drawtext=fontfile={serif}:textfile={_txt(work, f'look{i}.txt', f'Look {i}')}:fontsize=128:"
-                f"fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2:{shadow}")
+        # 번호 스티커(대표 2026-10-27 ③안, "Look N" 대신) — 흰 박스에 굵은 "01", 표지 카피와 같은 자리.
+        # "몇 번 코디가 마음에 드세요?" 댓글을 번호로 받기 좋다.
+        draw = (f"drawtext=fontfile={bold}:textfile={_txt(work, f'look{i}.txt', f'{i:02d}')}:fontsize=80:"
+                f"fontcolor=black:box=1:boxcolor=white@0.95:boxborderw=22:x=94:y=h*0.64+60")
         _segment(work, img, LOOK_SEC, [draw], f"seg{i}.mp4")
         segs.append(f"seg{i}.mp4")
     (work / "list.txt").write_text("".join(f"file '{s}'\n" for s in segs), encoding="utf-8")
