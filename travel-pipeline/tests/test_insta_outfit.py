@@ -138,11 +138,12 @@ def test_build_prompt_and_refs():
              {"kind": "bag", "url": "g", "revealing": False}]
     prompt, refs = P.build(_plan(), face_url="F", body_url="B", hair_url="H", products=prods)
     assert refs == ["F", "B", "H", "t", "b", "s", "g"]
-    assert prompt.startswith("Her face is exactly the woman in reference image 1")          # 얼굴 먼저(2026-10-27)
+    assert prompt.startswith(P._SHOT) and "Her face is exactly the woman in reference image 1" in prompt
+    assert "Lighting:" in prompt and "no cinematic color grading" in prompt and "wide-angle" not in prompt
     assert "with the hairstyle from image 3" in prompt and "matches reference image 2 exactly" in prompt
     assert ("She is wearing exactly the top from image 4, the bottoms from image 5, the shoes from image 6, carrying "
             "the bag from image 7 — keep every garment detail identical") in prompt
-    assert "phone held up covering her face" in prompt and prompt.endswith("no retouching.")
+    assert "phone held up covering her face" in prompt and prompt.endswith("no beauty filter.")
     assert "bust" not in prompt.lower() and "cropped at the neck" not in prompt
 
 
@@ -445,3 +446,17 @@ def test_body_line_and_identity_review_refs(tmp_path):
     assert "172 cm tall" in line and "90-63-92" in line and gen.strip_unsafe(line) == line
     assert "(" not in P.body_line(None)
     assert "identity" in io._REVIEW_SYSTEM and "body reference" in io._REVIEW_SYSTEM
+
+
+def test_night_locations_are_rare():
+    """밤 장소는 가끔만(NIGHT_RATE) — 지정하면 그대로."""
+    import random as _r
+    hits = 0
+    for seed in range(40):
+        plan = P.plan_scene(character_id="chaei", products=[{"kind": "top", "desc": ""}], hair_roles=[], history=[],
+                            rng=_r.Random(seed), llm=lambda s, u: "{}")
+        hits += plan["location"] in P.NIGHT_LOCATIONS
+    assert hits <= 12
+    forced = P.plan_scene(character_id="chaei", products=[{"kind": "top", "desc": ""}], hair_roles=[], history=[],
+                          options={"location": "bar_front"}, rng=_r.Random(1), llm=lambda s, u: "{}")
+    assert forced["location"] == "bar_front" or forced["notes"]

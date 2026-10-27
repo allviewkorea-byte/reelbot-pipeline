@@ -51,9 +51,10 @@ HISTORY_N = 14                # 연속 금지 판정에 보는 최근 이력
 
 # 폰카 후처리 강도(상수 — 테스트 화면에서 원본/처리본 비교 후 조정)
 POST_LONG_EDGE = 1440
-POST_NOISE = 7                # ffmpeg noise alls(0~100), 약한 필름 그레인
-POST_SATURATION = 0.92        # eq saturation
-POST_VIGNETTE = "PI/7"        # vignette angle(작을수록 약함, 기본 PI/5)
+# 2026-10-27: 노이즈·채도↓·비네팅이 사진을 탁하게 해 AI 티를 키움 → 끔(축소·jpg 만). 값 0 이면 그 필터를 안 건다.
+POST_NOISE = 0                # ffmpeg noise alls(0~100)
+POST_SATURATION = 1.0         # eq saturation
+POST_VIGNETTE = ""            # vignette angle — 빈 값이면 안 씀
 POST_JPEG_Q = 3               # ffmpeg -q:v (≈ quality 85)
 
 _BATCH_RE = re.compile(r"^[a-z0-9]{6,24}$")
@@ -261,9 +262,15 @@ def review(result_path: Path, product_paths: list[Path], plan: dict, tmp: Path,
 
 # ── 폰카 후처리 ──────────────────────────────────────────────────────────
 def postprocess(src: Path, dst: Path) -> Path:
-    """원본은 두고 처리본만: 긴 변 1440 축소 → 채도 소폭↓ → 약한 노이즈 → 아주 약한 비네팅 → jpg."""
-    vf = (f"scale='if(gt(iw,ih),min({POST_LONG_EDGE},iw),-2)':'if(gt(iw,ih),-2,min({POST_LONG_EDGE},ih))',"
-          f"eq=saturation={POST_SATURATION},noise=alls={POST_NOISE}:allf=t,vignette=angle={POST_VIGNETTE}")
+    """원본은 두고 처리본만: 긴 변 1440 축소 → (설정 시 채도·노이즈·비네팅) → jpg. 2026-10-27부터 축소·jpg 만."""
+    filters = [f"scale='if(gt(iw,ih),min({POST_LONG_EDGE},iw),-2)':'if(gt(iw,ih),-2,min({POST_LONG_EDGE},ih))'"]
+    if POST_SATURATION != 1.0:
+        filters.append(f"eq=saturation={POST_SATURATION}")
+    if POST_NOISE:
+        filters.append(f"noise=alls={POST_NOISE}:allf=t")
+    if POST_VIGNETTE:
+        filters.append(f"vignette=angle={POST_VIGNETTE}")
+    vf = ",".join(filters)
     res = subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(src), "-vf", vf, "-frames:v", "1",
                           "-q:v", str(POST_JPEG_Q), str(dst)], capture_output=True, text=True, timeout=120)
     if res.returncode != 0 or not dst.exists():

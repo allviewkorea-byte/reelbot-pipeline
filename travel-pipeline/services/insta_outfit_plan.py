@@ -427,6 +427,8 @@ def plan_scene(*, character_id: str, products: list[dict], hair_roles: list[str]
     pairs, hairs = cand["pairs"], cand["hairs"]
     if not pairs:
         raise ValueError("장면 규칙을 만족하는 장소·포즈 조합이 없어요.")
+    if not options.get("location") and rng.random() >= NIGHT_RATE:   # 밤 장소는 가끔만
+        pairs = [pr for pr in pairs if pr[0] not in NIGHT_LOCATIONS] or pairs
     # 얼굴 셀카는 가끔만: 이번에 넣을지 먼저 정하고(직전이 얼굴 셀카면 안 넣음), 아니면 후보에서 뺀다.
     if not options.get("pose"):
         # 컷 종류를 먼저 정한다: 얼굴 셀카(가끔) / 캔디드·파파라치(가끔) / 셀카(기본). 같은 특별 컷 연속 금지.
@@ -494,8 +496,47 @@ def plan_scene(*, character_id: str, products: list[dict], hair_roles: list[str]
 
 
 # ── 프롬프트 ─────────────────────────────────────────────────────────────
-_TAIL = ("Candid iPhone photo, not a professional shoot: slightly uneven exposure, natural skin texture, real fabric "
-         "wrinkles, a little everyday clutter, slight wide-angle phone lens distortion, natural color, no retouching.")
+# 사실감(대표 2026-10-27 "너무 AI 같다" + GPT Image 실사 프롬프트 참고): 구체적인 촬영 방식·빛의 출처·피부결을
+# 적고, 과장되던 지시(노출 불균형·잡동사니·광각 왜곡)는 뺀다. AI 티는 시네마틱 보정·HDR·과샤픈에서 난다.
+_SHOT = ("A realistic vertical smartphone snapshot — handheld, subject slightly off-center, natural candid framing, "
+         "true-to-life proportions.")
+_SKIN = ("Real skin with natural texture and fine pores on her face, neck, shoulders and arms — no airbrushing, no "
+         "plastic or waxy skin. Fabrics show real texture and subtle natural creases.")
+_TAIL = ("Shot on an iPhone main camera: true-to-life colors, clean natural exposure, faint mobile sensor noise, the "
+         "background in natural soft focus — no cinematic color grading, no HDR glow, no oversharpening, no beauty filter.")
+
+# 장소별 빛의 출처·바닥/벽 재질(구체적일수록 실사처럼). 없으면 종류별 기본.
+LIGHT = {
+    "entry_mirror": "soft daylight from a nearby window, beige tile floor, white walls",
+    "elevator_mirror": "even overhead elevator LED light, brushed metal and mirror panels",
+    "fitting_room": "warm even fitting-room lighting, a neutral curtain behind",
+    "evening_alley": "warm light spilling from shop windows onto her, faint blue dusk sky, clean exposure",
+    "restaurant_front": "warm entrance light falling on her softly, the street still lit by the last daylight",
+    "bar_front": "warm soft light from the bar doorway lighting her evenly, clean exposure without harsh shadows",
+    "convenience_store": "bright white light from the convenience-store windows lighting her evenly, clean exposure",
+    "euljiro_alley": "soft late-afternoon daylight in the alley with a few warm shop lights, worn concrete underfoot",
+    "market_alley": "soft daylight under the market canopy mixed with warm hanging bulbs",
+    "shutter_street": "soft overcast daylight on the colorful roller shutters, asphalt underfoot",
+    "subway_car": "cool even fluorescent light inside the train, metal poles and window reflections",
+    "subway_stairs": "soft daylight at the station exit, grey stone steps",
+    "amusement_park": "golden late-afternoon sunlight with colorful rides softly out of focus",
+}
+LIGHT_BY_KIND = {
+    "outdoor": "soft natural daylight (overcast or late afternoon), gentle shadows",
+    "indoor": "soft daylight from large windows mixed with warm interior light",
+    "vehicle": "soft daylight through the windows",
+    "room": "soft morning daylight from the window",
+    "entry": "soft daylight from a nearby window",
+    "elevator": "even overhead LED light",
+    "fitting": "warm even fitting-room lighting",
+}
+NIGHT_LOCATIONS = {"evening_alley", "restaurant_front", "bar_front", "convenience_store"}
+NIGHT_RATE = 0.25   # 밤·저녁 장소는 가끔만(어두운 장면에서 AI 티가 가장 많이 남)
+
+
+def light_line(location: str) -> str:
+    loc = LOCATIONS[location]
+    return f"Lighting: {LIGHT.get(location) or LIGHT_BY_KIND.get(loc['kind'], LIGHT_BY_KIND['outdoor'])}."
 _SELF_TAIL = ("She took this photo herself with her own phone for her Instagram — a casual, unposed self-shot, not a "
               "photographer's or model shoot: natural relaxed stance, slightly tilted, imperfect off-center framing. "
               "It feels like a page from her everyday photo diary.")
@@ -571,6 +612,7 @@ def build(plan: dict, *, face_url: str, body_url: str, hair_url: str | None, pro
         hair_part = "with the hairstyle from image 3" if hair_url else "with her usual long black hair"
         wear = ", ".join(_product_phrase(p.get("kind", ""), start + i) for i, p in enumerate(use))
         parts = [
+            _SHOT,
             "Her face is exactly the woman in reference image 1 — same eyes, nose, lips, jawline, face shape and moles, "
             f"clearly recognisable as the same person; only the hairstyle may differ ({hair_part}, black hair color).",
             body_line(measurements),
@@ -592,6 +634,8 @@ def build(plan: dict, *, face_url: str, body_url: str, hair_url: str | None, pro
         if plan.get("mood"):
             parts.append(f"Free-spirited mood: {plan['mood']}.")
         parts.append(f"{pose['en'][:1].upper()}{pose['en'][1:]}, {loc['en']}, {_face_line(plan)}, {weather}.")
+        parts.append(light_line(plan["location"]))
+        parts.append(_SKIN)
         if (plan.get("face") or pose["face"]) in ("chin_crop", "sunglasses", "full", "profile", "mirror_full"):
             parts.append(_MAKEUP)
         parts.append(_EFFORTLESS)
