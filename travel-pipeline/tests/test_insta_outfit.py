@@ -33,7 +33,10 @@ def _hist(*plans, days_ago=1):
 def test_compatible_scene_rules():
     shoe_poses = [k for k, v in P.POSES.items() if v["feet"] == "shoes"]
     assert shoe_poses and not any(P.compatible(p, "room") for p in shoe_poses)        # 신발 보이는 컷 방 금지
-    assert P.compatible("bed_edge", "room") and not P.compatible("bed_edge", "cafe")  # 양말은 방 전용
+    assert P.compatible("floor_mirror", "room") and not P.compatible("floor_mirror", "cafe")  # 양말은 방 전용
+    # 2026-10-27: 셀카 느낌만 — 제3자 시점 포즈는 꺼짐
+    assert P.SELF_SHOT_ONLY and not P.compatible("bench_side", "park_bench") and not P.compatible("walk_toward", "street")
+    assert P.compatible("sit_look_down", "park_bench") and P.compatible("glass_reflection", "street")
     assert not P.compatible("mirror_lean", "street") and P.compatible("mirror_lean", "elevator_mirror")
     for lk, loc in P.LOCATIONS.items():
         for pk, pose in P.POSES.items():
@@ -332,7 +335,7 @@ def test_api_routes(flow, monkeypatch):
     app.include_router(routes.router, prefix="/insta")
     c = TestClient(app)
     opts = c.get("/insta/outfit-options").json()
-    assert len(opts["poses"]) == 17 and opts["estimate"]["max"] == 0.033
+    assert len(opts["poses"]) == 10 and len(P.POSES) == 20 and opts["estimate"]["max"] == 0.033
     r = c.post("/insta/outfits", json={"character_id": "chaei", "products": PRODS})
     assert r.status_code == 200
     j = c.get(f"/insta/outfit-jobs/{r.json()['id']}").json()

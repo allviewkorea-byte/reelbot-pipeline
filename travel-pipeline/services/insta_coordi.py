@@ -230,9 +230,10 @@ def start(character_id: str, products: list[dict], mode: str = "only", options: 
     return public_job(_JOBS[job_id])
 
 
-def _fill(bose: list[dict], season: str, d: picks.Deps, job_id: str, llm: Callable | None) -> tuple[str, list[dict], dict, list[str]]:
-    """빈 종류 → 명세 → 쿠팡 픽 → 저장. → (컨셉, 아이템들, 조합, 메모)."""
-    need = missing_kinds([p["kind"] for p in bose], season)
+def _fill(bose: list[dict], season: str, d: picks.Deps, job_id: str, llm: Callable | None,
+          need: list[str] | None = None) -> tuple[str, list[dict], dict, list[str]]:
+    """빈 종류 → 명세 → 쿠팡 픽 → 저장. → (컨셉, 아이템들, 조합, 메모). need 를 주면 그 종류만."""
+    need = missing_kinds([p["kind"] for p in bose], season) if need is None else need
     if not need:
         return "내 상품 코디", [], {"ok": True, "swaps": []}, ["더 채울 종류가 없어요"]
     _set(job_id, step="채울 종류 정하는 중")
@@ -413,6 +414,27 @@ def _cap_products(products: list[dict]) -> list[dict]:
     return sorted(products, key=lambda p: rank.get(p.get("kind"), len(rank)))[: io.MAX_PRODUCTS]
 
 
+def _auto_need(kinds: list[str], season: str) -> list[str]:
+    """자동 코디 빈칸: 레퍼런스 룩에서 못 고른 종류. 가을·겨울엔 아우터를 신발·가방보다 먼저(대표: 가을 코디)."""
+    have = set(kinds)
+    order: list[str] = []
+    if "dress" not in have:
+        order += [k for k in ("top", "bottoms") if k not in have]
+    if season in ("autumn", "winter") and "outerwear" not in have:
+        order.append("outerwear")
+    order += [k for k in ("shoes", "bag") if k not in have]
+    return order[: max(0, MAX_TOTAL - len(have))]
+
+
+def _best_look(looks: list[dict], season: str) -> int:
+    """레퍼런스 안 여러 룩 중: 이번 계절에 맞고 아이템이 많은 룩(코디가 꽉 찬 룩)."""
+    def rank(i: int):
+        lk = looks[i]
+        seasons = lk.get("seasons") or [season]
+        return (season in seasons, len(lk.get("items") or []))
+    return max(range(len(looks)), key=rank)
+
+
 def start_auto(character_id: str = "chaei", d: picks.Deps | None = None) -> dict:
     """다음 레퍼런스 룩으로 자동 코디 잡 등록(실행은 run_auto). 같은 캐릭터 자동 잡이 돌고 있으면 그 잡."""
     d = d or picks.Deps()
@@ -428,16 +450,17 @@ def start_auto(character_id: str = "chaei", d: picks.Deps | None = None) -> dict
     looks = ((ref or {}).get("analysis") or {}).get("looks") or []
     if not ref or not looks:
         raise CoordiError("고를 레퍼런스가 없어요 — '레퍼런스 모으기'를 먼저 눌러 주세요.")
+    idx = _best_look(looks, P.season_of(datetime.now(P.KST).date()))
     look_id = f"lk-{datetime.now(timezone.utc):%Y%m%d}-{secrets.token_hex(3)}"
-    d.rest("ig_looks", "POST", json_body=[{"id": look_id, "ref_video_id": ref["video_id"], "look_index": 0,
-                                            "concept": looks[0].get("concept"), "spec": looks[0], "source": "reference",
+    d.rest("ig_looks", "POST", json_body=[{"id": look_id, "ref_video_id": ref["video_id"], "look_index": idx,
+                                            "concept": looks[idx].get("concept"), "spec": looks[idx], "source": "reference",
                                             "status": "picking"}], prefer="return=minimal")
     job_id = f"cj_{secrets.token_hex(5)}"
     with _LOCK:
         _JOBS[job_id] = {"id": job_id, "look_id": look_id, "outfit_id": None, "mode": "auto", "state": "queued",
-                         "step": "준비", "error": None, "cost": None, "concept": looks[0].get("concept"),
+                         "step": "준비", "error": None, "cost": None, "concept": looks[idx].get("concept"),
                          "ref": ref["video_id"], "_deps": d,
-                         "_args": {"character_id": char["id"], "ref": ref}}
+                         "_args": {"character_id": char["id"], "ref": ref, "look_index": idx}}
     return public_job(_JOBS[job_id])
 
 
@@ -450,7 +473,7 @@ def run_auto(job_id: str, *, rng=None) -> None:
     items: list[dict] = []
     try:
         _set(job_id, step="레퍼런스 룩에 맞는 쿠팡 상품 고르는 중")
-        look = picks.pick_look(look_id, args["ref"], 0, d)
+        look = picks.pick_look(look_id, args["ref"], args.get("look_index", 0), d)
         items = look.get("items") or []
         for it in items:
             it["source"] = "coupang"
@@ -458,6 +481,17 @@ def run_auto(job_id: str, *, rng=None) -> None:
                  for it in items if not it.get("pick")]
         if look.get("status") != "picked":
             raise CoordiError("맞는 쿠팡 상품을 하나도 못 찾았어요 — 다시 누르면 다음 레퍼런스로 해요.")
+        # 레퍼런스 룩이 덜 찼으면(상의만 등) 빈 종류를 채워 코디를 완성 — 가을·겨울엔 아우터 우선
+        season = P.season_of(datetime.now(P.KST).date())
+        picked = [it for it in items if it.get("pick")]
+        need = _auto_need([it["kind"] for it in picked], season)
+        if need:
+            have = [{"kind": it["kind"], "desc": (it["pick"].get("name") or "")} for it in picked]
+            _, filled, _, n3 = _fill(have, season, d, job_id, None, need=need)
+            items = picked + [it for it in filled if it.get("pick")]
+            notes += n3
+        for i, it in enumerate(items):
+            it["index"] = i
         d.rest("ig_looks", "PATCH", params={"id": f"eq.{look_id}"}, prefer="return=minimal", json_body={"items": items})
         _set(job_id, step="입히는 중")
         ensure_images(items, d)

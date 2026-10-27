@@ -70,13 +70,13 @@ WEEKDAYS: dict[int, dict] = {
 # feet: shoes(신발 보임) / socks(양말·맨발, 방 전용) / none(발 안 보임).
 # where: 허용 장소 키 목록, 또는 kinds: 허용 장소 종류. mirror: 거울 필요. face: 얼굴 가림 방식.
 POSES: dict[str, dict] = {
-    "mirror_lean": {"ko": "미러셀카 한쪽 다리 기대기", "cut": "서기", "feet": "shoes", "mirror": True, "face": "phone",
+    "mirror_lean": {"self": True, "ko": "미러셀카 한쪽 다리 기대기", "cut": "서기", "feet": "shoes", "mirror": True, "face": "phone",
                     "kinds": ["entry", "elevator", "fitting"],
                     "en": "taking a mirror selfie with her weight on one leg, full body visible in the mirror"},
-    "mirror_back": {"ko": "거울 앞 반쯤 돌아 뒷모습", "cut": "서기", "feet": "shoes", "mirror": True, "face": "phone",
+    "mirror_back": {"self": True, "ko": "거울 앞 반쯤 돌아 뒷모습", "cut": "서기", "feet": "shoes", "mirror": True, "face": "phone",
                     "kinds": ["entry", "elevator", "fitting"],
                     "en": "standing half-turned away from the mirror to show the back of the outfit, glancing at the phone in the reflection"},
-    "look_down": {"ko": "내려다보기 셀카", "cut": "서기", "feet": "shoes", "face": "out_of_frame",
+    "look_down": {"self": True, "ko": "내려다보기 셀카", "cut": "서기", "feet": "shoes", "face": "out_of_frame",
                   "kinds": ["entry", "elevator", "outdoor", "indoor", "fitting"],
                   "en": "a selfie shot looking straight down at her outfit and shoes from above"},
     "cafe_cross": {"ko": "카페 의자 다리 꼬기", "cut": "앉기", "feet": "shoes", "face": "shoulders", "where": ["cafe"],
@@ -89,7 +89,7 @@ POSES: dict[str, dict] = {
                     "en": "sitting on the entryway step putting on her shoes"},
     "bed_edge": {"ko": "침대 끝(양말)", "cut": "앉기", "feet": "socks", "face": "shoulders", "where": ["room"],
                  "en": "sitting on the edge of the bed wearing socks"},
-    "floor_mirror": {"ko": "바닥 거울 셀카(양말)", "cut": "앉기", "feet": "socks", "mirror": True, "face": "phone", "where": ["room"],
+    "floor_mirror": {"self": True, "ko": "바닥 거울 셀카(양말)", "cut": "앉기", "feet": "socks", "mirror": True, "face": "phone", "where": ["room"],
                      "en": "sitting on the floor in socks taking a mirror selfie in the floor mirror"},
     "crosswalk_walk": {"ko": "횡단보도 걷기", "cut": "걷기", "feet": "shoes", "face": "shoulders", "where": ["crosswalk"],
                        "en": "walking across the crosswalk mid-stride"},
@@ -101,15 +101,30 @@ POSES: dict[str, dict] = {
                 "where": ["rooftop", "gallery_stairs", "subway_stairs"], "en": "resting her forearms on a railing"},
     "tie_laces": {"ko": "신발 끈 묶기", "cut": "쪼그려", "feet": "shoes", "face": "shoulders", "kinds": ["outdoor", "entry"],
                   "en": "crouching down to tie her shoelaces"},
-    "detail_bag": {"ko": "가방·손 클로즈업", "cut": "디테일", "feet": "none", "face": "out_of_frame",
+    "detail_bag": {"self": True, "ko": "가방·손 클로즈업", "cut": "디테일", "feet": "none", "face": "out_of_frame",
                    "kinds": ["outdoor", "indoor", "elevator", "entry", "fitting"],
                    "en": "a close-up of her hand holding the bag at hip height, showing the fabric of the outfit"},
-    "toe_down": {"ko": "발끝 내려다보기", "cut": "디테일", "feet": "shoes", "face": "out_of_frame",
+    "sit_look_down": {"self": True, "ko": "앉아서 무릎·신발 내려다보기", "cut": "앉기", "feet": "shoes", "face": "out_of_frame",
+                      "where": ["cafe", "park_bench", "subway_stairs", "gallery_stairs", "office_lobby"],
+                      "en": "a first-person shot from her own eyes while seated, looking down at her lap, legs and shoes, "
+                            "her hand holding a coffee cup or phone at the edge of the frame"},
+    "glass_reflection": {"self": True, "ko": "가게 유리창에 비친 셀카", "cut": "서기", "feet": "shoes", "face": "phone",
+                         "kinds": ["outdoor"],
+                         "en": "taking a selfie of her reflection in a shop's glass window, phone held up in front of "
+                               "her face, the street faintly visible through the glass"},
+    "mirror_crouch": {"self": True, "ko": "거울 앞 쪼그려 미러셀카", "cut": "쪼그려", "feet": "shoes", "mirror": True, "face": "phone",
+                      "kinds": ["entry", "elevator", "fitting"],
+                      "en": "crouching slightly in front of the mirror taking a mirror selfie, phone covering her face"},
+    "toe_down": {"self": True, "ko": "발끝 내려다보기", "cut": "디테일", "feet": "shoes", "face": "out_of_frame",
                  "kinds": ["outdoor", "entry", "elevator"],
                  "en": "a shot looking down at her feet, showing the shoes and the hem of the bottoms"},
-    "flatlay": {"ko": "플랫레이(사람 없음)", "cut": "디테일", "feet": "none", "face": "none", "person": False,
+    "flatlay": {"self": True, "ko": "플랫레이(사람 없음)", "cut": "디테일", "feet": "none", "face": "none", "person": False,
                 "kinds": ["room", "entry"], "en": "a flat lay of the outfit items arranged neatly"},
 }
+
+# 대표 피드백(2026-10-27): "모델처럼 남이 찍어 준 느낌" 말고 **스스로 찍은 셀카 느낌**만.
+# 미러셀카·유리창 반사·내려다보기(1인칭)·디테일·플랫레이만 쓰고, 제3자 시점 포즈(벤치 옆 보기·걷기·벽 기대기 등)는 끈다.
+SELF_SHOT_ONLY = True
 
 # ── 아이웨어 7종 × 착용 4방식 ─────────────────────────────────────────────
 EYEWEAR: dict[str, dict] = {
@@ -158,6 +173,8 @@ SEASON_KO = {"spring": "봄", "summer": "여름", "autumn": "가을", "winter": 
 def compatible(pose_key: str, loc_key: str) -> bool:
     """포즈 ↔ 장소 상식 규칙. 신발 보이는 포즈는 방 금지, 양말은 방 전용, 거울 포즈는 거울 장소."""
     pose, loc = POSES[pose_key], LOCATIONS[loc_key]
+    if SELF_SHOT_ONLY and not pose.get("self"):
+        return False
     if "where" in pose and loc_key not in pose["where"]:
         return False
     if "kinds" in pose and loc["kind"] not in pose["kinds"]:
@@ -330,6 +347,8 @@ def plan_scene(*, character_id: str, products: list[dict], hair_roles: list[str]
 # ── 프롬프트 ─────────────────────────────────────────────────────────────
 _TAIL = ("Candid iPhone photo, not a professional shoot: slightly uneven exposure, natural skin texture, real fabric "
          "wrinkles, a little everyday clutter, slight wide-angle phone lens distortion, natural color, no retouching.")
+_SELF_TAIL = ("She took this photo herself with her own phone for her Instagram — a casual, unposed self-shot, not a "
+              "photographer's or model shoot: natural relaxed stance, slightly tilted, imperfect off-center framing.")
 _DETAIL = "keep every garment detail identical: color, fabric texture, buttons, pattern, neckline, length and fit"
 
 
@@ -385,6 +404,8 @@ def build(plan: dict, *, face_url: str, body_url: str, hair_url: str | None, pro
         if ew:
             parts.append(EYEWEAR_STYLES[ew["style"]]["en"].format(item=EYEWEAR[ew["item"]]["en"]))
         parts.append(f"{pose['en'][:1].upper()}{pose['en'][1:]}, {loc['en']}, {_face_line(plan)}, {weather}.")
+        if pose.get("self"):
+            parts.append(_SELF_TAIL)
         parts.append(_TAIL)
         prompt = " ".join(parts)
     if fix_hint:

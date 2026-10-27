@@ -123,9 +123,12 @@ def test_choose_prefers_coupang_within_margin():
 
 
 def test_total_score_and_season_penalty():
-    full = {"kind": 10, "color": 10, "fit": 10, "length": 10, "details": 10}
+    full = {"kind": 10, "color": 10, "fit": 10, "length": 10, "details": 10, "style": 10}
     assert K.total_score(full) == 100 and K.total_score(full, season_ok=False) == 80
-    assert K.total_score({"kind": 10, "color": 0, "fit": 10, "length": 10, "details": 10}) == 70
+    assert K.total_score({**full, "color": 0}) == 75
+    # style(2026-10-27) — 응답에 없으면 중간값 6, 싸 보이면(0) 크게 깎임
+    assert K.total_score({k: v for k, v in full.items() if k != "style"}) == 93.3
+    assert K.total_score({**full, "style": 0}) == 83.3
 
 
 # ── 전체 흐름 ────────────────────────────────────────────────────────────

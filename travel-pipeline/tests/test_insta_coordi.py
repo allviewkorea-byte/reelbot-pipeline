@@ -304,3 +304,17 @@ def test_auto_needs_refs_and_coupang(coordi):
 def test_cap_products_keeps_clothes_first():
     ps = [{"kind": k} for k in ("bag", "accessory", "shoes", "outerwear", "top", "bottoms")]
     assert [p["kind"] for p in C._cap_products(ps)] == ["top", "bottoms", "outerwear", "shoes"]
+
+
+def test_auto_need_autumn_outer_first():
+    assert C._auto_need(["top"], "autumn") == ["bottoms", "outerwear", "shoes"]          # 상의만 → 하의·아우터·신발
+    assert C._auto_need(["top", "bottoms"], "autumn") == ["outerwear", "shoes"]
+    assert C._auto_need(["top", "bottoms"], "summer") == ["shoes", "bag"]
+    assert C._auto_need(["dress"], "winter") == ["outerwear", "shoes", "bag"]
+    assert C._auto_need(["top", "bottoms", "outerwear", "shoes"], "autumn") == []
+
+
+def test_best_look_prefers_season_and_fuller_look():
+    looks = [{"seasons": ["summer"], "items": [1, 2, 3, 4]}, {"seasons": ["autumn"], "items": [1]},
+             {"seasons": ["autumn"], "items": [1, 2, 3]}]
+    assert C._best_look(looks, "autumn") == 2
