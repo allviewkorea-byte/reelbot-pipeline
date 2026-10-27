@@ -335,7 +335,7 @@ def test_api_routes(flow, monkeypatch):
     app.include_router(routes.router, prefix="/insta")
     c = TestClient(app)
     opts = c.get("/insta/outfit-options").json()
-    assert len(opts["poses"]) == 14 and len(P.POSES) == 24 and opts["estimate"]["max"] == 0.033
+    assert len(opts["poses"]) == 18 and len(P.POSES) == 28 and opts["estimate"]["max"] == 0.033
     r = c.post("/insta/outfits", json={"character_id": "chaei", "products": PRODS})
     assert r.status_code == 200
     j = c.get(f"/insta/outfit-jobs/{r.json()['id']}").json()
@@ -365,3 +365,66 @@ def test_kkuankku_plan_face_eyewear_and_prompt():
     terrace = {**plan, "pose": "cafe_terrace"}
     prompt, _ = P.build(terrace, face_url="f", body_url="b", hair_url=None, products=[{"url": "u", "kind": "top"}])
     assert "a friend took" in prompt and "took this photo herself" not in prompt
+
+
+def test_face_selfie_is_occasional_and_mood():
+    rng = random.Random(7)
+    faces, moods, prev = 0, 0, []
+    for _ in range(60):
+        plan = P.plan_scene(character_id="chaei", products=PRODS, hair_roles=[], history=prev, now=NOW, rng=rng,
+                            llm=lambda s, u: "{}")
+        if plan["pose"] == "face_selfie":
+            faces += 1
+            assert not (prev and prev[0]["plan"].get("pose") == "face_selfie")           # 얼굴 클로즈업 연속 금지
+        moods += bool(plan.get("mood"))
+        prev = [{"plan": plan, "created_at": NOW.isoformat()}] + prev[:4]
+    assert moods >= 25
+    plan = {**plan, "pose": "face_selfie", "face": "full", "mood": "a big carefree smile", "prop": None, "eyewear": None}
+    prompt, _ = P.build(plan, face_url="f", body_url="b", hair_url=None, products=[{"url": "u", "kind": "top"}])
+    assert "exactly like reference image 1" in prompt and "Free-spirited mood" in prompt and "photo diary" in prompt
+
+
+def test_new_locations_have_self_poses_and_seasons():
+    # 장소 확장(2026-10-27): 모든 장소에 셀카 포즈가 하나 이상, 계절 한정 장소는 그 계절에만
+    for lk in P.LOCATIONS:
+        assert [pk for pk in P.POSES if P.compatible(pk, lk)], lk
+    assert P.compatible("face_selfie", "car") and P.compatible("sit_look_down", "train_window")
+    assert not P.compatible("glass_reflection", "beach") and P.compatible("glass_reflection", "seongsu_street")
+    autumn = datetime(2026, 10, 31, 12, tzinfo=P.KST)   # 토요일
+    winter = datetime(2026, 12, 26, 12, tzinfo=P.KST)   # 토요일
+    la = {l for l, _ in P.candidates(weekday=5, products=PRODS, hair_roles=[], history=[], now=autumn)["pairs"]}
+    lw = {l for l, _ in P.candidates(weekday=5, products=PRODS, hair_roles=[], history=[], now=winter)["pairs"]}
+    assert "autumn_foliage" in la and "snowy_street" not in la
+    assert "snowy_street" in lw and "autumn_foliage" not in lw and "beach" in lw
+
+
+def test_candid_paparazzi_occasional_on_korean_street():
+    rng = random.Random(11)
+    kinds, prev = [], []
+    for _ in range(80):
+        plan = P.plan_scene(character_id="chaei", products=PRODS, hair_roles=[], history=prev, now=NOW, rng=rng,
+                            llm=lambda s, u: "{}", options={"weekday": 6})
+        g = P.POSES[plan["pose"]].get("group", "face" if plan["face"] == "full" else "self")
+        if g == "candid":
+            assert plan["location"] in P.URBAN + ["campus", "han_river", "crosswalk"] and plan["face"] == "profile"
+            assert not (prev and P.POSES[prev[0]["plan"]["pose"]].get("group") == "candid")   # 연속 금지
+        kinds.append(g)
+        prev = [{"plan": plan, "created_at": NOW.isoformat()}] + prev[:4]
+    assert kinds.count("candid") >= 5 and kinds.count("self") >= 30
+    plan = {**plan, "pose": "candid_shutter_lean", "location": "shutter_street", "face": "profile", "eyewear": None}
+    prompt, _ = P.build(plan, face_url="f", body_url="b", hair_url=None, products=[{"url": "u", "kind": "top"}])
+    assert "roller shutter" in prompt and "side profile" in prompt and "without her noticing" in prompt
+    assert "took this photo herself" not in prompt
+
+
+
+def test_face_hidden_only_about_20_percent():
+    rng = random.Random(5)
+    faces = [P.choose_face("mirror_lean", rng) for _ in range(500)]
+    hidden = sum(f in ("phone", "chin_crop") for f in faces) / len(faces)
+    assert 0.12 <= hidden <= 0.28 and faces.count("mirror_full") > 300
+    assert P.choose_face("toe_down", rng) == "out_of_frame" and P.choose_face("paparazzi_walk", rng) == "profile"
+    assert P.choose_face("closeup_sunglasses", rng) == "sunglasses" and P.choose_face("face_selfie", rng) == "full"
+    plan = {"pose": "mirror_lean", "location": "elevator_mirror", "face": "mirror_full", "eyewear": None, "season": "autumn"}
+    prompt, _ = P.build(plan, face_url="f", body_url="b", hair_url=None, products=[{"url": "u", "kind": "top"}])
+    assert "whole face is visible in the mirror" in prompt and "rosy lip tint" in prompt
