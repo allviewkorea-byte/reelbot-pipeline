@@ -208,6 +208,19 @@ def start_coordi(req: CoordiReq, bg: BackgroundTasks):
     return job
 
 
+class AutoReq(BaseModel):
+    character_id: str = "chaei"
+
+
+@router.post("/coordi/auto")
+def start_auto_coordi(req: AutoReq, bg: BackgroundTasks):
+    """오늘의 코디 찾기(완전 자동): 레퍼런스 → 쿠팡 픽 → 착장. 백그라운드."""
+    job = _call(coordi.start_auto, req.character_id)
+    if job["state"] == "queued":
+        bg.add_task(coordi.run_auto, job["id"])
+    return job
+
+
 @router.get("/coordi/jobs/{job_id}")
 def coordi_job(job_id: str):
     return _call(coordi.get_job, job_id)
