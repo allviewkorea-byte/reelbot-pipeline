@@ -428,3 +428,11 @@ def test_face_hidden_only_about_20_percent():
     plan = {"pose": "mirror_lean", "location": "elevator_mirror", "face": "mirror_full", "eyewear": None, "season": "autumn"}
     prompt, _ = P.build(plan, face_url="f", body_url="b", hair_url=None, products=[{"url": "u", "kind": "top"}])
     assert "whole face is visible in the mirror" in prompt and "rosy lip tint" in prompt
+
+
+def test_styling_en_passthrough():
+    assert io._clean_options({"styling_en": "sheer black tights", "evil": 1}) == {"styling_en": "sheer black tights"}
+    plan = P.plan_scene(character_id="chaei", products=PRODS, hair_roles=[], history=[], now=NOW, rng=random.Random(1),
+                        llm=lambda s, u: "{}", options={"styling_en": "sheer black tights"})
+    prompt, _ = P.build(plan, face_url="f", body_url="b", hair_url=None, products=[{"url": "u", "kind": "bottoms"}])
+    assert plan["styling_en"] == "sheer black tights" and "She also wears sheer black tights." in prompt
