@@ -11,7 +11,7 @@ import { jsonOrThrow } from "@/components/studio/studio-lib"
 
 interface Prod { name?: string | null; mall?: string | null; price?: number | null; image_url?: string | null; kind?: string | null }
 interface Scene { pose_ko?: string; location_ko?: string; face?: string }
-interface LookRow { n: number; image_url: string | null; product_image?: string | null; product?: Prod; items?: Prod[]; scene?: Scene; spare?: boolean }
+interface LookRow { idea?: string; n: number; image_url: string | null; product_image?: string | null; product?: Prod; items?: Prod[]; scene?: Scene; spare?: boolean }
 interface Collection {
   id: string; status: "planned" | "making" | "ok" | "failed" | "hidden"; error: string | null; cost_usd: number | null
   theme: { concept?: string; title_ko?: string[]; zip?: string; title_en?: string }
@@ -55,13 +55,13 @@ export function CollectionPanel({ character, ready }: { character: string; ready
     return () => clearInterval(t)
   }, [jobId, running, load])
 
-  async function plan() {
+  async function plan(mode: "theme" | "lookfirst" = "theme") {
     try {
       const j = await jsonOrThrow(await fetch("/api/insta/collections/plan", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ character_id: character, n: 5 }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ character_id: character, n: 5, mode }),
       }))
       setJob(j)
-      toast.message("테마·자세·옷을 고르는 중 — 1~3분 걸려요")
+      toast.message(mode === "lookfirst" ? "스타일리스트처럼 룩을 먼저 설계하고 쿠팡에서 찾는 중 — 2~4분" : "테마·자세·옷을 고르는 중 — 1~3분 걸려요")
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "시작 실패")
     }
@@ -90,7 +90,12 @@ export function CollectionPanel({ character, ready }: { character: string; ready
               : "먼저 테마·자세·옷을 미리 보고, 마음에 들면 01~05 컬렉션 릴스로 만들어요."}
           </p>
         </div>
-        <button onClick={plan} disabled={!ready || running}
+        <button onClick={() => plan("lookfirst")} disabled={!ready || running}
+          title="룩(색·실루엣)을 먼저 설계하고 쿠팡에서 비슷한 옷을 찾아 흰 스튜디오 전신으로 — 실험"
+          className="flex min-h-[44px] shrink-0 items-center justify-center gap-2 rounded-lg border border-primary/40 bg-background px-4 text-sm font-medium text-foreground hover:bg-primary/10 disabled:opacity-50">
+          실험: 스튜디오 룩북
+        </button>
+        <button onClick={() => plan()} disabled={!ready || running}
           className={`flex min-h-[44px] shrink-0 items-center justify-center gap-2 rounded-lg px-5 text-sm font-semibold disabled:opacity-50 ${planned ? "border border-border bg-background text-foreground hover:border-primary/40" : "bg-primary text-primary-foreground hover:bg-primary/90"}`}>
           {running ? <Loader2 className="h-4 w-4 animate-spin" /> : planned ? <RefreshCw className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
           {running ? "진행 중…" : planned ? "다른 기획 보기" : "기획 미리보기"}
@@ -113,7 +118,8 @@ export function CollectionPanel({ character, ready }: { character: string; ready
                     className="aspect-square w-full cursor-zoom-in rounded-md bg-secondary object-cover" />
                 ) : <div className="aspect-square w-full rounded-md bg-secondary" />}
                 <span className="text-[11px] font-medium text-foreground">{String(lk.n).padStart(2, "0")}</span>
-                {lk.scene && <span className="line-clamp-2 text-[11px] text-primary">{lk.scene.location_ko} · {lk.scene.pose_ko}</span>}
+                {lk.idea ? <span className="line-clamp-2 text-[11px] text-primary">{lk.idea}</span>
+                  : lk.scene && <span className="line-clamp-2 text-[11px] text-primary">{lk.scene.location_ko} · {lk.scene.pose_ko}</span>}
                 <span className="line-clamp-2 text-[11px] text-muted-foreground">{lk.product?.name ?? ""}</span>
                 {lk.product?.price ? <span className="text-[11px] text-muted-foreground">{lk.product.price.toLocaleString("ko-KR")}원</span> : null}
                 {(lk.items?.length ?? 0) > 0 && (

@@ -256,3 +256,38 @@ def test_concept_match_rejects_other_items():
     assert CL.concept_match("여성 앙고라 니트 가디건", t) and CL.concept_match("헤어리 루즈핏 가디건", t)
     assert CL.concept_match("빈티지 퍼 카라 자켓", {"concept": "퍼 아우터"})          # 아우터 = 자켓 등
     assert CL.concept_match("카고 미니 스커트", {"concept": "미니스커트"})
+
+
+def test_lookfirst_plan_designs_looks_then_finds_products(coordi, monkeypatch):  # noqa: F811
+    """룩 먼저 설계 → 쿠팡에서 아이템별 1등(엄격) → 옷이 없으면 그 룩은 버림 → 흰 스튜디오 전신 장면."""
+    t = coordi.t
+    t.t["ig_collections"] = []
+    looks = []
+    items = {}
+    scores = {}
+    for k in range(6):
+        q_top, q_bot, q_shoe = f"여성 상의{k}", f"여성 하의{k}", f"여성 신발{k}"
+        looks.append({"idea": f"룩{k}", "items": [
+            {"kind": "top", "color_name": "아이보리", "hex": "#F2EDE3", "queries": [q_top]},
+            {"kind": "bottoms", "color_name": "블랙", "hex": "#111111", "queries": [q_bot]},
+            {"kind": "shoes", "color_name": "블랙", "hex": "#111111", "queries": [q_shoe]}]})
+        if k != 2:   # 룩2는 상의를 못 찾음 → 버림
+            items[q_top] = [_c(f"t{k}", f"여성 니트 {k}", price=59000, ch="coupang")]
+            scores[f"coupang_t{k}"] = (9, "#F2EDE3")
+        items[q_bot] = [_c(f"b{k}", f"여성 스커트 {k}", price=49000, ch="coupang")]
+        items[q_shoe] = [_c(f"s{k}", f"여성 부츠 {k}", price=79000, ch="coupang")]
+        scores |= {f"coupang_b{k}": (9, "#111111"), f"coupang_s{k}": (9, "#111111")}
+    design = {"concept": "가을 룩북", "title_en": "AUTUMN LOOKBOOK", "zip": "가을 룩북.zip", "looks": looks}
+    d = K.Deps(coupang=_Shop("coupang", items), vision=_vision(scores), download=_dl, rest=t)
+    j = CL.start_plan("chaei", n=4, d=d, mode="lookfirst")
+    with CL._LOCK:
+        CL._JOBS[j["id"]]["_args"]["look_llm"] = lambda s, u: json.dumps(design)
+    CL.run(j["id"], rng=random.Random(1))
+    assert CL.get_job(j["id"])["state"] == "done", CL.get_job(j["id"])
+    row = t.t["ig_collections"][0]
+    main = [x for x in row["looks"] if not x.get("spare")]
+    assert row["theme"]["plan"]["mode"] == "lookfirst" and len(main) == 4
+    assert all(x["scene"]["location"] == "white_studio" and x["scene"]["pose"] == "studio_full_body" for x in main)
+    assert "룩2" in row["usage"]["dropped"] and all(x["idea"] != "룩2" for x in row["looks"])
+    assert [x["product"]["kind"] for x in main] == ["top"] * 4 and all(len(x["items"]) == 2 for x in main)
+    assert not [k for k in coordi.s3.objs if k.startswith("insta/products/coupang/")]

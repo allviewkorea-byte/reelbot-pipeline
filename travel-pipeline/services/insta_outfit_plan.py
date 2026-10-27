@@ -29,6 +29,9 @@ MAX_REFS = 10
 LOCATIONS: dict[str, dict] = {
     "entry_mirror": {"ko": "현관 거울", "kind": "entry", "mirror": True,
                      "en": "standing on the entryway tile floor by the shoe cabinet of a Korean apartment, in front of a full-length mirror"},
+    # 스튜디오 룩북(2026-10-28 실험, 레퍼런스 @yproject.ai) — 요일 장소 목록엔 없음: 지정할 때만 쓰인다
+    "white_studio": {"ko": "흰 스튜디오", "kind": "studio", "mirror": False,
+                     "en": "in a clean bright photo studio with a seamless warm-white backdrop and floor"},
     "elevator_mirror": {"ko": "엘리베이터 거울", "kind": "elevator", "mirror": True,
                         "en": "inside a Korean apartment elevator with a mirrored wall"},
     "office_lobby": {"ko": "오피스 로비", "kind": "indoor", "mirror": False, "en": "in a bright modern office building lobby"},
@@ -189,6 +192,13 @@ POSES: dict[str, dict] = {
                         "feet": "shoes", "face": "profile", "where": URBAN,
                         "en": "sitting on a low step at the edge of the street, looking ahead at something, unaware of "
                               "the camera"},
+    "studio_full_body": {"self": True, "group": "studio", "ko": "스튜디오 전신(눈높이)", "cut": "서기", "feet": "shoes",
+                         "face": "full", "kinds": ["studio"],
+                         "en": "standing naturally and relaxed, facing the camera with a slight hip shift, hands loose or "
+                               "in pockets, the whole body from head to toe in frame with space above and below, shot at "
+                               "chest height from a few meters away with a 50mm lens so her proportions look true and long",
+                         "tail": "A clean modern fashion lookbook photo: soft diffused daylight, a gentle shadow on the "
+                                 "floor, natural true-to-life colors, crisp but not oversharpened, no retouching."},
     "paparazzi_walk": {"self": True, "group": "candid", "ko": "길 건너에서 찍힌 파파라치 워킹", "cut": "걷기",
                        "feet": "shoes", "face": "profile", "where": URBAN + ["campus", "han_river", "crosswalk"],
                        "en": "walking mid-stride and glancing to the side, captured from across the street with a "
@@ -519,9 +529,11 @@ LIGHT = {
     "shutter_street": "soft overcast daylight on the colorful roller shutters, asphalt underfoot",
     "subway_car": "cool even fluorescent light inside the train, metal poles and window reflections",
     "subway_stairs": "soft daylight at the station exit, grey stone steps",
+    "white_studio": "large soft diffused light from the front-left, even and flattering, no harsh shadows",
     "amusement_park": "golden late-afternoon sunlight with colorful rides softly out of focus",
 }
 LIGHT_BY_KIND = {
+    "studio": "large soft diffused studio light",
     "outdoor": "soft natural daylight (overcast or late afternoon), gentle shadows",
     "indoor": "soft daylight from large windows mixed with warm interior light",
     "vehicle": "soft daylight through the windows",

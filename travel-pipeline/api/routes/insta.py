@@ -226,6 +226,7 @@ def start_auto_coordi(req: AutoReq, bg: BackgroundTasks):
 class CollectionReq(BaseModel):
     character_id: str = "chaei"
     n: int = 5
+    mode: str = "theme"   # theme(테마 아이템 모음) | lookfirst(룩 먼저 설계 → 스튜디오 전신, 실험)
 
 
 @router.post("/collections")
@@ -240,7 +241,7 @@ def start_collection(req: CollectionReq, bg: BackgroundTasks):
 @router.post("/collections/plan")
 def plan_collection(req: CollectionReq, bg: BackgroundTasks):
     """컬렉션 릴스 1단계(미리보기): 테마·장면·상품만 정한다. 이미지 생성 없음."""
-    job = _call(coll.start_plan, req.character_id, req.n)
+    job = _call(coll.start_plan, req.character_id, req.n, None, req.mode)
     if job["state"] == "queued":
         bg.add_task(coll.run, job["id"])
     return job

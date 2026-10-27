@@ -451,7 +451,7 @@ def _busy(character_id: str) -> dict | None:
     return None
 
 
-def start_plan(character_id: str = "chaei", n: int = N_LOOKS, d: picks.Deps | None = None) -> dict:
+def start_plan(character_id: str = "chaei", n: int = N_LOOKS, d: picks.Deps | None = None, mode: str = "theme") -> dict:
     """1단계(미리보기): 테마·장면·상품만 정한다(이미지 생성 없음). 결과는 ig_collections status=planned."""
     d = d or picks.Deps()
     _guard(character_id, d)
@@ -461,7 +461,8 @@ def start_plan(character_id: str = "chaei", n: int = N_LOOKS, d: picks.Deps | No
     cid = f"cl-{datetime.now(timezone.utc):%Y%m%d}-{secrets.token_hex(3)}"
     d.rest("ig_collections", "POST", json_body=[{"id": cid, "character_id": character_id, "status": "planned"}],
            prefer="return=minimal")
-    return _register("plan", cid, d, {"character_id": character_id, "n": n}, n)
+    return _register("plan", cid, d, {"character_id": character_id, "n": n,
+                                      "mode": "lookfirst" if mode == "lookfirst" else "theme"}, n)
 
 
 def start_make(collection_id: str, d: picks.Deps | None = None) -> dict:
@@ -537,6 +538,114 @@ def _scenes(character_id: str, looks_products: list[list[dict]], rng: random.Ran
 
 
 _SCENE_KEEP = ("pose", "pose_ko", "location", "location_ko", "face", "hair_role", "eyewear", "eyewear_ko", "season")
+
+
+# ── 룩 먼저(스튜디오 룩북) 실험 — 대표 2026-10-28: "옷맵시·몸매가 안 드러나고 스타일리시하지 않다" ──────────
+# 지금 방식(쿠팡에서 아이템 하나 → 나머지 채우기)은 '검색에 걸린 옷의 조합'이라 룩이 약하다. 스타일리스트처럼
+# 완성 룩(색·실루엣·기장 균형)을 먼저 설계하고, 쿠팡에서 비슷한 게 없으면 그 룩은 버린다. 촬영은 흰 스튜디오 전신·눈높이.
+_LOOKFIRST_SYSTEM = (
+    "You are a top Korean fashion stylist for a hip early-20s virtual influencer with a tall, slim, well-proportioned "
+    "figure (172 cm). Design N complete, genuinely stylish outfits worth saving on Instagram — like a lookbook from "
+    "Musinsa or a Seoul street-style editorial. Rules: (1) each outfit has a clear silhouette idea that shows off her "
+    "figure tastefully: e.g. cropped or fitted top + high-waist bottom, oversized outer + short/slim bottom, long boots "
+    "with a mini, defined waist; never boxy-on-boxy or frumpy. (2) a coherent palette of max 3 colors (tonal or one "
+    "accent), each outfit a different palette. (3) season-appropriate, on-trend now, never matronly or office-lady. "
+    "(4) 3-4 items each: top/bottoms or dress, plus outerwear if the season needs it, plus shoes; items must be common "
+    "enough to find on Coupang. Return ONE JSON object: "
+    '{"concept": "<짧은 한글 컬렉션 이름, 10자 이내>", "title_en": "<UPPERCASE english, e.g. AUTUMN LOOKBOOK>", '
+    '"zip": "<○○ 모음.zip>", "looks": [{"idea": "<한국어 한 줄: 실루엣·색 포인트>", "items": [{"kind": '
+    '"top|bottoms|dress|outerwear|shoes|bag", "color_name": "<한글>", "hex": "#RRGGBB", "fit": "slim|regular|over|cropped", '
+    '"length": "<짧게>", "material": "<한글>", "details": "<short English>", "queries": ["<쿠팡 검색어: 여성 + 색 + '
+    '특징 + 종류>", "<다른 표현>"]}]}]}.'
+)
+LOOKFIRST_MIN_SCORE = 60   # 룩 먼저 방식은 '비슷한 게 없으면 버림' — 일반(55)보다 엄격
+_CORE_KINDS = {"top", "bottoms", "dress", "outerwear"}
+
+
+def design_looks(season: str, life: str, n: int, llm=None) -> dict:
+    """Opus가 완성 룩 n개를 설계(아이템 명세 + 쿠팡 검색어)."""
+    from services import music_lyrics
+    llm = llm or (lambda s, u: music_lyrics._call(s, u, max_tokens=3000, task="insta_lookfirst",
+                                                  model=picks.strong_model()))
+    data = music_lyrics._extract_json(llm(_LOOKFIRST_SYSTEM, json.dumps({
+        "N": n, "season": season, "life": life, "style_guide": SG.guide_text(season, life)}, ensure_ascii=False)))
+    looks = []
+    for lk in (data.get("looks") or [])[: n + 2]:
+        items = []
+        for it in lk.get("items") or []:
+            if it.get("kind") in P.PRODUCT_KINDS and it.get("queries"):
+                items.append({"kind": it["kind"], "color_name": str(it.get("color_name") or ""),
+                              "hex": it.get("hex"), "fit": str(it.get("fit") or ""), "length": str(it.get("length") or ""),
+                              "material": str(it.get("material") or ""), "details": str(it.get("details") or "")[:120],
+                              "queries": [str(q)[:40] for q in it["queries"] if str(q).strip()][:2]})
+        if any(i["kind"] in _CORE_KINDS for i in items):
+            looks.append({"idea": str(lk.get("idea") or "")[:80], "items": items[:4]})
+    if not looks:
+        raise CollectionError("룩 설계를 받지 못했어요 — 다시 해 주세요.")
+    return {"concept": str(data.get("concept") or "스튜디오 룩북")[:12],
+            "title_en": str(data.get("title_en") or "LOOKBOOK")[:32].upper(),
+            "zip": str(data.get("zip") or "룩북 모음.zip")[:20], "looks": looks}
+
+
+def find_look(look: dict, d: picks.Deps, usage: dict, season: str, td: Path) -> list[dict] | None:
+    """룩의 아이템마다 쿠팡 1등(엄격 점수). 옷(상·하의·원피스·아우터)이 하나라도 없으면 None(그 룩은 버림)."""
+    got = []
+    for spec in look["items"]:
+        cands, notes = picks.gather(spec, d, usage)
+        usage.setdefault("notes", []).extend(notes)
+        kept, _ = picks.code_filter(cands, spec["kind"])
+        scored, _ = picks.judge(spec, {"seasons": [season]}, kept, d, usage, td) if kept else ([], [])
+        best = next((c for c in scored if c.get("score", 0) >= LOOKFIRST_MIN_SCORE), None)
+        if best is None:
+            if spec["kind"] in _CORE_KINDS:
+                return None
+            continue
+        got.append({**best, "kind": spec["kind"]})
+    return got if any(c["kind"] in _CORE_KINDS for c in got) else None
+
+
+def _plan_lookfirst(job_id: str, d: picks.Deps, cid: str, args: dict, rng: random.Random) -> dict:
+    usage: dict = {"mode": "lookfirst"}
+    products: list[dict] = []
+    try:
+        season, life = _season(), coordi._life_today()
+        n = args["n"]
+        _set(job_id, step="스타일리스트처럼 완성 룩 설계 중")
+        design = design_looks(season, life, n + SPARE_LOOKS, llm=args.get("look_llm"))
+        outfits = []
+        with tempfile.TemporaryDirectory() as td:
+            for k, lk in enumerate(design["looks"]):
+                if len(outfits) >= n + SPARE_LOOKS:
+                    break
+                _set(job_id, step=f"룩 {k + 1}/{len(design['looks'])} — 쿠팡에서 비슷한 옷 찾는 중")
+                found = find_look(lk, d, usage, season, Path(td))
+                if not found:
+                    usage.setdefault("dropped", []).append(lk["idea"])
+                    continue
+                saved = _saved(found, d)
+                for c, src in zip(saved, found):
+                    c["kind"] = src["kind"]
+                products += saved
+                order = {"outerwear": 0, "dress": 1, "top": 2, "bottoms": 3, "shoes": 4, "bag": 5}
+                saved.sort(key=lambda c: order.get(c["kind"], 9))
+                outfits.append((lk, saved))
+        if len(outfits) < MIN_LOOKS:
+            raise CollectionError(f"쿠팡에서 설계대로의 룩을 {len(outfits)}개만 찾았어요 — 다시 해 주세요.")
+        scene = {"pose": "studio_full_body", "pose_ko": P.POSES["studio_full_body"]["ko"], "location": "white_studio",
+                 "location_ko": P.LOCATIONS["white_studio"]["ko"], "face": "full", "season": season}
+        theme = {"kind": outfits[0][1][0]["kind"], "concept": design["concept"], "title_en": design["title_en"],
+                 "title_ko": [design["concept"], outfits[0][0]["idea"][:14]], "zip": design["zip"], "queries": [],
+                 "plan": {"mode": "lookfirst", "season": season}, "source": "lookfirst"}
+        looks = [{"n": i + 1, "product": _keep(o[0]), "items": [_keep(c) for c in o[1:]], "idea": lk["idea"],
+                  "scene": dict(scene), **({"spare": True} if i >= n else {})}
+                 for i, (lk, o) in enumerate(outfits)]
+        _patch(d, cid, {"theme": theme, "looks": looks, "base_items": [], "status": "planned", "usage": usage,
+                        "cost_usd": round(picks.vision_cost_usd(d.meter), 4)})
+        return {"theme": theme, "looks": looks}
+    finally:
+        picks.delete_images(products, d)
+        for c in products:
+            c["image_key"] = None
 
 
 THEME_TRIES = 3   # 테마 상품이 모자라면 테마를 바꿔 다시(대표 2026-10-27: 실패하면 스스로 다시)
@@ -708,7 +817,10 @@ def run(job_id: str, *, llm=None, rng: random.Random | None = None) -> None:
     rng = rng or random.Random()
     try:
         if kind in ("plan", "plan+make"):
-            _plan(job_id, d, cid, args, llm, rng)
+            if args.get("mode") == "lookfirst":
+                _plan_lookfirst(job_id, d, cid, args, rng)
+            else:
+                _plan(job_id, d, cid, args, llm, rng)
         if kind in ("make", "plan+make"):
             if kind == "plan+make":
                 _patch(d, cid, {"status": "making"})
