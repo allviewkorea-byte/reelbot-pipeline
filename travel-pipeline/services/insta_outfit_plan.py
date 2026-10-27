@@ -53,17 +53,49 @@ LOCATIONS: dict[str, dict] = {
              "en": "in her bright bedroom with a full-length floor mirror"},
     "neighborhood_alley": {"ko": "동네 골목", "kind": "outdoor", "mirror": False, "en": "in a quiet residential alley in Seoul"},
     "bakery_front": {"ko": "빵집 앞", "kind": "outdoor", "mirror": False, "en": "in front of a neighborhood bakery"},
+    # 장소 확장(대표 2026-10-27 "산·바다·학교 근처·교실·차 안 등 다양하게") — 학교는 성인 대학 캠퍼스로만
+    "han_river": {"ko": "한강 공원", "kind": "outdoor", "mirror": False,
+                  "en": "at a Han River park in Seoul with the river and bridges behind"},
+    "campus": {"ko": "대학 캠퍼스", "kind": "outdoor", "mirror": False,
+               "en": "on a Seoul university campus with red-brick buildings and trees"},
+    "lecture_hall": {"ko": "대학 강의실", "kind": "indoor", "mirror": False,
+                     "en": "in a university lecture hall with rows of desks, a few students' bags around, adult college setting"},
+    "library": {"ko": "도서관·스터디카페", "kind": "indoor", "mirror": False,
+                "en": "at a quiet library or study cafe desk with books and a laptop"},
+    "bookstore": {"ko": "서점", "kind": "indoor", "mirror": False, "en": "between the shelves of a cozy bookstore"},
+    "subway_car": {"ko": "지하철 안", "kind": "indoor", "mirror": False,
+                   "en": "inside a Seoul subway car, standing by the doors"},
+    "seongsu_street": {"ko": "성수동 골목", "kind": "outdoor", "mirror": False,
+                       "en": "on a trendy Seongsu-dong street with red-brick cafes and pop-up stores"},
+    "convenience_store": {"ko": "편의점 앞", "kind": "outdoor", "mirror": False,
+                          "en": "in front of a Korean convenience store at night, plastic tables outside"},
+    "amusement_park": {"ko": "놀이공원", "kind": "outdoor", "mirror": False,
+                       "en": "at an amusement park with rides and colorful lights behind"},
+    "car": {"ko": "차 안 조수석", "kind": "vehicle", "mirror": False,
+            "en": "in the passenger seat of a car, seatbelt on, daylight through the windows"},
+    "train_window": {"ko": "기차 창가 자리", "kind": "vehicle", "mirror": False,
+                     "en": "in a window seat on a KTX train, scenery passing outside"},
+    "airport": {"ko": "공항", "kind": "indoor", "mirror": False,
+                "en": "in a bright airport departure hall with a small suitcase"},
+    "beach": {"ko": "바닷가", "kind": "outdoor", "mirror": False,
+              "en": "on a Korean east-coast beach with waves and wide sky"},
+    "mountain_view": {"ko": "산 전망대", "kind": "outdoor", "mirror": False, "seasons": ["spring", "summer", "autumn"],
+                      "en": "at a mountain trail viewpoint overlooking the city"},
+    "autumn_foliage": {"ko": "단풍길", "kind": "outdoor", "mirror": False, "seasons": ["autumn"],
+                       "en": "on a path lined with red and yellow autumn leaves"},
+    "snowy_street": {"ko": "눈 내린 거리", "kind": "outdoor", "mirror": False, "seasons": ["winter"],
+                     "en": "on a street covered with fresh snow"},
 }
 
 # 요일(0=월) → 생활 · 장소 후보
 WEEKDAYS: dict[int, dict] = {
-    0: {"ko": "월", "life": "출근", "locations": ["elevator_mirror", "office_lobby", "subway_stairs", "entry_mirror"]},
-    1: {"ko": "화", "life": "출근 + 퇴근 후 약속", "locations": ["elevator_mirror", "evening_alley", "restaurant_front"]},
-    2: {"ko": "수", "life": "출근", "locations": ["elevator_mirror", "office_lobby", "subway_stairs", "entry_mirror"]},
-    3: {"ko": "목", "life": "출근 + 쇼핑", "locations": ["fitting_room", "street"]},
-    4: {"ko": "금", "life": "퇴근 후 데이트", "locations": ["crosswalk", "rooftop", "bar_front"]},
-    5: {"ko": "토", "life": "카페·전시", "locations": ["cafe", "gallery_stairs", "park_bench"]},
-    6: {"ko": "일", "life": "집·동네 산책", "locations": ["room", "neighborhood_alley", "bakery_front"]},
+    0: {"ko": "월", "life": "출근", "locations": ["elevator_mirror", "office_lobby", "subway_stairs", "entry_mirror", "subway_car"]},
+    1: {"ko": "화", "life": "출근 + 퇴근 후 약속", "locations": ["elevator_mirror", "evening_alley", "restaurant_front", "campus", "convenience_store"]},
+    2: {"ko": "수", "life": "출근", "locations": ["elevator_mirror", "office_lobby", "subway_stairs", "entry_mirror", "library", "subway_car"]},
+    3: {"ko": "목", "life": "출근 + 쇼핑", "locations": ["fitting_room", "street", "seongsu_street", "bookstore", "lecture_hall"]},
+    4: {"ko": "금", "life": "퇴근 후 데이트", "locations": ["crosswalk", "rooftop", "bar_front", "han_river", "amusement_park"]},
+    5: {"ko": "토", "life": "카페·전시 · 나들이", "locations": ["cafe", "gallery_stairs", "park_bench", "beach", "mountain_view", "car", "autumn_foliage", "train_window", "airport", "snowy_street"]},
+    6: {"ko": "일", "life": "집·동네 산책", "locations": ["room", "neighborhood_alley", "bakery_front", "han_river", "car", "campus"]},
 }
 
 # ── 포즈(17) ─────────────────────────────────────────────────────────────
@@ -105,11 +137,13 @@ POSES: dict[str, dict] = {
                    "kinds": ["outdoor", "indoor", "elevator", "entry", "fitting"],
                    "en": "a close-up of her hand holding the bag at hip height, showing the fabric of the outfit"},
     "sit_look_down": {"self": True, "ko": "앉아서 무릎·신발 내려다보기", "cut": "앉기", "feet": "shoes", "face": "out_of_frame",
-                      "where": ["cafe", "park_bench", "subway_stairs", "gallery_stairs", "office_lobby"],
+                      "where": ["cafe", "park_bench", "subway_stairs", "gallery_stairs", "office_lobby", "car",
+                                "train_window", "library", "lecture_hall", "han_river", "beach"],
                       "en": "a first-person shot from her own eyes while seated, looking down at her lap, legs and shoes, "
                             "her hand holding a coffee cup or phone at the edge of the frame"},
     "glass_reflection": {"self": True, "faces": ["phone", "chin_crop"], "ko": "가게 유리창에 비친 셀카", "cut": "서기", "feet": "shoes", "face": "phone",
-                         "kinds": ["outdoor"],
+                         "where": ["street", "evening_alley", "restaurant_front", "neighborhood_alley", "bakery_front",
+                                   "bar_front", "seongsu_street", "convenience_store", "crosswalk"],
                          "en": "taking a selfie of her reflection in a shop's glass window, phone held up in front of "
                                "her face, the street faintly visible through the glass"},
     "mirror_crouch": {"self": True, "faces": ["phone", "chin_crop"], "ko": "거울 앞 쪼그려 미러셀카", "cut": "쪼그려", "feet": "shoes", "mirror": True, "face": "phone",
@@ -117,11 +151,11 @@ POSES: dict[str, dict] = {
                       "en": "crouching slightly in front of the mirror taking a mirror selfie, phone covering her face"},
     # 대표 레퍼런스(2026-10-27) — 꾸안꾸 셀카 앵글
     "arm_selfie_high": {"self": True, "ko": "팔 뻗어 위에서 찍는 셀카", "cut": "서기", "feet": "none", "face": "chin_crop",
-                        "kinds": ["outdoor", "indoor", "elevator", "entry", "fitting"],
+                        "kinds": ["outdoor", "indoor", "elevator", "entry", "fitting", "vehicle"],
                         "en": "a high-angle selfie with one arm stretched up toward the camera, looking down over her outfit "
                               "to about the knees, slightly tilted"},
     "closeup_sunglasses": {"self": True, "ko": "선글라스 클로즈업 셀카", "cut": "디테일", "feet": "none", "face": "sunglasses",
-                           "force_eyewear": "sun", "kinds": ["outdoor", "indoor"],
+                           "force_eyewear": "sun", "kinds": ["outdoor", "indoor", "vehicle"],
                            "en": "a close-up selfie from the chest up, chin resting lightly on her hand, relaxed expression"},
     "wall_knee_camera": {"self": True, "ko": "벽에 기대 한쪽 무릎 들기(디카 들고)", "cut": "기대기", "feet": "shoes",
                          "face": "chin_crop", "kinds": ["indoor", "entry", "elevator", "fitting"],
@@ -133,7 +167,7 @@ POSES: dict[str, dict] = {
                      "en": "sitting at an outdoor cafe table holding an iced americano, looking away down the street"},
     # 얼굴 셀카(대표 2026-10-27 "가끔은 이쁜 얼굴도, 셀카는 얼굴만 가까이도 찍잖아") — 가끔만(FACE_SHOT_RATE)
     "face_selfie": {"self": True, "ko": "얼굴 가까이 셀카", "cut": "얼굴", "feet": "none", "face": "full",
-                    "kinds": ["room", "indoor", "outdoor", "elevator", "entry", "fitting"],
+                    "kinds": ["room", "indoor", "outdoor", "elevator", "entry", "fitting", "vehicle"],
                     "en": "a close-up front-camera selfie of her face and shoulders, phone held at arm's length slightly "
                           "above eye level, head tilted a little, soft natural light on her face"},
     "toe_down": {"self": True, "ko": "발끝 내려다보기", "cut": "디테일", "feet": "shoes", "face": "out_of_frame",
@@ -280,6 +314,8 @@ def candidates(*, weekday: int, products: list[dict], hair_roles: list[str], his
     has_shoes = any(p.get("kind") == "shoes" for p in products)
     locs = [location] if location in LOCATIONS else list(WEEKDAYS[weekday]["locations"])
     if not location:
+        season = season_of(now.astimezone(KST).date())
+        locs = [x for x in locs if season in LOCATIONS[x].get("seasons", [season])] or locs   # 단풍길은 가을만 등
         blocked = _blocked_by_streak(history, "location")
         if _entry_mirror_week(history, now) >= 2:
             blocked.add("entry_mirror")
@@ -320,7 +356,8 @@ _PLAN_SYSTEM = (
     '"weather_en": "<short English weather/light phrase matching the season>", '
     '"reason": "<한국어 한 줄: 왜 이 장소·포즈·헤어인지>"}. '
     "Match the outfit to the day's life (commute look → office places, date → evening places), the season, and "
-    "the product types. Prefer variety versus the recent history."
+    "the product types. Prefer variety versus the recent history — mix city, campus, nature (beach, mountain, "
+    "river), transport (car, train, subway) and home across the week."
 )
 
 

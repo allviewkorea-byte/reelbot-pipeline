@@ -382,3 +382,17 @@ def test_face_selfie_is_occasional_and_mood():
     plan = {**plan, "pose": "face_selfie", "face": "full", "mood": "a big carefree smile", "prop": None, "eyewear": None}
     prompt, _ = P.build(plan, face_url="f", body_url="b", hair_url=None, products=[{"url": "u", "kind": "top"}])
     assert "exactly like reference image 1" in prompt and "Free-spirited mood" in prompt and "photo diary" in prompt
+
+
+def test_new_locations_have_self_poses_and_seasons():
+    # 장소 확장(2026-10-27): 모든 장소에 셀카 포즈가 하나 이상, 계절 한정 장소는 그 계절에만
+    for lk in P.LOCATIONS:
+        assert [pk for pk in P.POSES if P.compatible(pk, lk)], lk
+    assert P.compatible("face_selfie", "car") and P.compatible("sit_look_down", "train_window")
+    assert not P.compatible("glass_reflection", "beach") and P.compatible("glass_reflection", "seongsu_street")
+    autumn = datetime(2026, 10, 31, 12, tzinfo=P.KST)   # 토요일
+    winter = datetime(2026, 12, 26, 12, tzinfo=P.KST)   # 토요일
+    la = {l for l, _ in P.candidates(weekday=5, products=PRODS, hair_roles=[], history=[], now=autumn)["pairs"]}
+    lw = {l for l, _ in P.candidates(weekday=5, products=PRODS, hair_roles=[], history=[], now=winter)["pairs"]}
+    assert "autumn_foliage" in la and "snowy_street" not in la
+    assert "snowy_street" in lw and "autumn_foliage" not in lw and "beach" in lw
