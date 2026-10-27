@@ -202,7 +202,8 @@ def test_generate_reviewed_retry_then_pass(monkeypatch, tmp_path):
     assert [a["pass"] for a in res["attempts"]] == [False, True]
 
 
-def test_generate_reviewed_gives_up_after_three_attempts(monkeypatch, tmp_path):
+def test_generate_reviewed_gives_up_after_four_attempts(monkeypatch, tmp_path):
+    """운동: 인물 2회 + 인물 없는 장면 2회 = 4회 후 포기(2026-10-27)."""
     monkeypatch.setattr(mai, "build_prompt", lambda a, avoid=None: "p")
     calls = {"gen": 0}
 
@@ -216,7 +217,8 @@ def test_generate_reviewed_gives_up_after_three_attempts(monkeypatch, tmp_path):
     monkeypatch.setattr(mai, "generate_image", _gen)
     monkeypatch.setattr(mai, "review_image", lambda p: {"pass": False, "reasons": ["글자 보임"]})
     res = mai.generate_reviewed(None, str(tmp_path / "bg.png"))
-    assert res["ok"] is False and res["path"] is None and calls["gen"] == 3
+    assert res["ok"] is False and res["path"] is None and calls["gen"] == 4
+    assert [bool(a.get("no_people")) for a in res["attempts"]] == [False, False, True, True]
     assert "403" in res["summary"] and "글자 보임" in res["summary"]
     assert not list(tmp_path.glob("*.png"))  # 불합격 후보는 남기지 않는다
 
