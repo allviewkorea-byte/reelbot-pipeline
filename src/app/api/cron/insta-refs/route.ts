@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server"
 import { isAuthorizedCron } from "@/lib/cron-auth"
 import { API_BASE } from "@/lib/proxy"
 
-// 인스타 레퍼런스 하루 1회 수집(cron-job.org, CRON_SECRET). 백엔드가 백그라운드로 돌리고 바로 응답 →
-// Hobby 10초 안전. 멱등: 오늘 이미 모았으면 수집은 건너뛰고 새 레퍼런스 분석만.
+// 인스타 레퍼런스 하루 1회 수집 — vercel.json 크론(00:37 UTC = 09:37 KST, Vercel 이 CRON_SECRET 을 자동 헤더로).
+// 백엔드가 백그라운드로 돌리고 바로 응답 → Hobby 10초 안전. 멱등: 오늘 이미 모았으면 수집은 건너뛰고 분석만.
 export const dynamic = "force-dynamic"
 
 export async function GET(req: NextRequest) {
