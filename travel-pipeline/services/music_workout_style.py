@@ -75,12 +75,12 @@ _STYLE_BOOST: dict[str, str] = {
     "strength": (
         "bright clean dance-pop energy, memorable catchy melody, analog synth arpeggios, punchy drums, "
         "steady straight four-on-the-floor kick and snappy snare, clean electric guitar accents in the chorus, "
-        "polished radio-ready mix with headroom, refreshing summer hype, powerful and confident, 150-160 BPM"
+        "polished radio-ready mix with headroom, refreshing summer hype, powerful and confident"
     ),
     "cardio": (
         "bright clean dance-pop energy, memorable catchy melody, analog synth arpeggios, punchy drums, "
         "steady straight four-on-the-floor kick, propulsive bassline, clean electric guitar accents in the chorus, "
-        "polished radio-ready mix with headroom, running cadence, uplifting drive, 150-160 BPM"
+        "polished radio-ready mix with headroom, running cadence, uplifting drive"
     ),
     "warmup": (
         "warm rounded bass, smooth steady groove, clean percussion, "
@@ -153,11 +153,29 @@ def refine_combo(combo: dict | None, *, channel: str | None = None) -> dict | No
     return out
 
 
-def style_booster(action: str | None, *, channel: str | None = None) -> str:
-    """Suno style 뒤에 붙일 구체 음악 용어. 운동 채널이 아니면 빈 문자열."""
+# 템포 섞기(2026-10-28 대표: "매번 BPM이 같으면 지루 — 중간중간 템포 늦춘 곡도 섞어"). 곡마다 뽑는다.
+# 기본은 그대로 150-160(60%), 가끔 128-135(25%)·115-122 미드템포(15%). warmup 은 원래대로 고정.
+TEMPO_MIX: dict[str, list[tuple[str, int]]] = {
+    "strength": [("150-160 BPM", 60), ("128-135 BPM", 25), ("115-122 BPM, mid-tempo groove", 15)],
+    "cardio": [("150-160 BPM", 60), ("128-135 BPM", 25), ("115-122 BPM, mid-tempo groove", 15)],
+    "warmup": [("90-100 BPM", 100)],
+}
+
+
+def pick_tempo(axis: str, rng=None) -> str:
+    import random as _random
+    r = rng or _random
+    opts = TEMPO_MIX.get(axis) or TEMPO_MIX["strength"]
+    return r.choices([t for t, _ in opts], weights=[w for _, w in opts], k=1)[0]
+
+
+def style_booster(action: str | None, *, channel: str | None = None, rng=None) -> str:
+    """Suno style 뒤에 붙일 구체 음악 용어 + 곡별 템포. 운동 채널이 아니면 빈 문자열."""
     if not is_workout_channel(channel):
         return ""
-    return _STYLE_BOOST[axis_for_action(action)]
+    axis = axis_for_action(action)
+    base = _STYLE_BOOST[axis]
+    return base if "BPM" in base else f"{base}, {pick_tempo(axis, rng)}"
 
 
 def boost_style(style: str, action: str | None, *, channel: str | None = None) -> str:
@@ -169,15 +187,20 @@ def boost_style(style: str, action: str | None, *, channel: str | None = None) -
     if not boost:
         return style
     base = (style or "").strip().strip(",").strip()
-    if boost in base:
+    if _STYLE_BOOST[axis_for_action(action)] in base:   # 이미 부스터가 붙어 있으면(템포 무관) 그대로
         return base
     return f"{base}, {boost}" if base else boost
 
 
+# where(루프탑 시티팝·로파이) — 2026-10-28 대표 "where 도 채널 성격 유지하고 동일하게 점검·반영".
+# 찢어지는 소리만 막는다. 로파이의 바이닐 크래클·잔잔함(mellow·lo-fi)은 채널 성격이라 막지 않는다.
+WHERE_NEGATIVE = "distorted, harsh, clipping, overdriven, distorted vocals, screaming, shouting, muddy mix"
+
+
 def negative_tags(action: str | None, *, channel: str | None = None) -> str | None:
-    """Suno negativeTags. 운동 채널이 아니면 None → music_suno 가 전송하지 않는다."""
+    """Suno negativeTags. 운동은 축별, where(그 밖의 음악 채널)는 거친 소리만(WHERE_NEGATIVE)."""
     if not is_workout_channel(channel):
-        return None
+        return WHERE_NEGATIVE if channel else None
     return _NEGATIVE[axis_for_action(action)]
 
 

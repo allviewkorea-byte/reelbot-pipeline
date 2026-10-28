@@ -38,12 +38,12 @@ def test_lock_respects_1000_chars():
     long_llm = ", ".join(f"layer{i} synth texture" for i in range(200))
     st = ws.lock_vocal_style("for workout, energetic, house", long_llm, "workout", finalize=lambda s: s + ", male vocals")
     assert len(st) <= ws.SUNO_STYLE_MAX
-    assert st.startswith("house") and "150-160 BPM" in st and st.endswith(ws.VOCAL_QUALITY)  # 꼬리만 덜고 부스터·보컬 꼬리 유지
+    assert st.startswith("house") and "BPM" in st and st.endswith(ws.VOCAL_QUALITY)  # 꼬리만 덜고 부스터·보컬 꼬리 유지
 
 
 def test_lock_empty_llm_style_is_tag_plus_booster():
     st = ws.lock_vocal_style("for running, upbeat, electronic", "", "running")
-    assert st.startswith("electronic, for running, upbeat") and "150-160 BPM" in st
+    assert st.startswith("electronic, for running, upbeat") and "BPM" in st
 
 
 def test_pools_and_tone():
@@ -101,4 +101,6 @@ def test_vocal_melody_and_no_chopped_vocals():
     for action in ("weight", "running", "stretching"):
         neg = ws.negative_tags(action, channel="workout_music")
         assert "rapid-fire vocals" in neg and "vocal chops" in neg
-    assert ws.negative_tags("weight", channel="rooftop_music") is None   # where 는 그대로 미전송
+    where_neg = ws.negative_tags("weight", channel="rooftop_music")          # where: 거친 소리만(2026-10-28)
+    assert "distorted" in where_neg and "clipping" in where_neg
+    assert "lo-fi" not in where_neg and "mellow" not in where_neg and "vinyl" not in where_neg   # 채널 성격 유지
