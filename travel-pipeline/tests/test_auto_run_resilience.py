@@ -507,7 +507,7 @@ def test_axis_only_changes_background_action(monkeypatch):
 def _fail_all(monkeypatch, scenes_seen=None):
     from services import music_image_prompts as mip
 
-    def _gen_prompt(examples, avoid_recent=None):
+    def _gen_prompt(examples, avoid_recent=None, **kw):
         if scenes_seen is not None:
             scenes_seen.append(list(avoid_recent or []))
         raise RuntimeError("no llm")
@@ -559,7 +559,7 @@ def test_recent_scenes_go_into_prompt_writer_and_pool_fallback(monkeypatch, tmp_
 
 def test_passed_image_records_scene_and_key(monkeypatch, tmp_path, s3):
     from services import music_image_prompts as mip
-    monkeypatch.setattr(mip, "_generate_workout_prompt", lambda ex, avoid_recent=None: "햇살 드는 러닝트랙 위를 달리는 러너, 낮은 앵글")
+    monkeypatch.setattr(mip, "_generate_workout_prompt", lambda ex, avoid_recent=None, **kw: "햇살 드는 러닝트랙 위를 달리는 러너, 낮은 앵글")
     monkeypatch.setattr(mai, "generate_image", lambda prompt, path: Path(path).write_bytes(b"N") and {})
     monkeypatch.setattr(mai, "review_image", lambda p: {"pass": True, "reasons": []})
     path, summary = mai.prepare_for_render("j", "running", str(tmp_path))

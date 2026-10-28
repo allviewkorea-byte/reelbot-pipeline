@@ -70,15 +70,17 @@ _STYLE_BOOST: dict[str, str] = {
     # 2026-10-20 대표 결정: 레퍼런스(청량한 K 댄스팝, 약 160 BPM) 결 위주. 비트를 잘게 쪼개는
     # 트랩·808 하프타임 대신 빠르지만 정박으로 밀고 가는 드럼. 보컬 단어는 넣지 않는다
     # (연주곡에도 같은 부스터가 붙는다 — 성별은 _assign_genders 가 곡별로 정한다).
+    # 2026-10-28 대표: "소리가 찢어진다, 보컬이 듣기 좋고 멜로디가 기억에 남아야" → 'fizzy'(지글거리는 질감)와
+    # 기타 리프 강조를 빼고, 기억에 남는 멜로디·깨끗한 믹스를 앞에 둔다. 템포·정박 드럼 결은 그대로.
     "strength": (
-        "bright fizzy dance-pop energy, analog synth arpeggios, retro punchy drumline, "
-        "steady straight four-on-the-floor kick and snappy snare, electric guitar riffs in the chorus, "
-        "refreshing summer hype, gym workout energy, powerful and confident, 150-160 BPM"
+        "bright clean dance-pop energy, memorable catchy melody, analog synth arpeggios, punchy drums, "
+        "steady straight four-on-the-floor kick and snappy snare, clean electric guitar accents in the chorus, "
+        "polished radio-ready mix with headroom, refreshing summer hype, powerful and confident, 150-160 BPM"
     ),
     "cardio": (
-        "bright fizzy dance-pop energy, analog synth arpeggios, retro punchy drumline, "
-        "steady straight four-on-the-floor kick, propulsive bassline, electric guitar riffs in the chorus, "
-        "running cadence, uplifting drive, 150-160 BPM"
+        "bright clean dance-pop energy, memorable catchy melody, analog synth arpeggios, punchy drums, "
+        "steady straight four-on-the-floor kick, propulsive bassline, clean electric guitar accents in the chorus, "
+        "polished radio-ready mix with headroom, running cadence, uplifting drive, 150-160 BPM"
     ),
     "warmup": (
         "warm rounded bass, smooth steady groove, clean percussion, "
@@ -92,10 +94,12 @@ _STYLE_BOOST: dict[str, str] = {
 _CHOPPY = "trap hi-hat rolls, glitchy chopped beats, stutter edits, breakbeat, drum and bass, halftime trap"
 # 2026-10-21 대표 결정: 보컬은 쪼개지 않고 비트보다 여유 있게 — 속사포·잘게 자른 보컬 금지.
 _CHOPPY_VOCALS = "rap, rapid-fire vocals, chopped vocals, vocal chops"
+# 2026-10-28 대표: 소리가 찢어짐 — 거친·찌그러진 소리를 막는다(모든 축 공통).
+_HARSH = "distorted, harsh, clipping, overdriven, distorted vocals, screaming, shouting, muddy mix, noisy"
 _NEGATIVE: dict[str, str] = {
-    "strength": f"soft, mellow, ambient, lo-fi, sleepy, drowsy, acoustic ballad, slow ballad, {_CHOPPY}, {_CHOPPY_VOCALS}",
-    "cardio": f"soft, mellow, ambient, lo-fi, sleepy, drowsy, acoustic ballad, slow ballad, {_CHOPPY}, {_CHOPPY_VOCALS}",
-    "warmup": f"sleepy, drowsy, lullaby, droning ambient, sad ballad, gloomy, {_CHOPPY_VOCALS}",
+    "strength": f"soft, mellow, ambient, lo-fi, sleepy, drowsy, acoustic ballad, slow ballad, {_CHOPPY}, {_CHOPPY_VOCALS}, {_HARSH}",
+    "cardio": f"soft, mellow, ambient, lo-fi, sleepy, drowsy, acoustic ballad, slow ballad, {_CHOPPY}, {_CHOPPY_VOCALS}, {_HARSH}",
+    "warmup": f"sleepy, drowsy, lullaby, droning ambient, sad ballad, gloomy, {_CHOPPY_VOCALS}, {_HARSH}",
 }
 
 # 근력·유산소 영상의 첫 장르 — 댄스팝(pop) 위주(대표 결정 70%). 나머지는 풀에서 변화.
@@ -256,6 +260,11 @@ def _clean_tail(llm_style: str, axis: str, tag_style: str) -> list[str]:
     return out
 
 
+# 보컬 곡 공통 꼬리(2026-10-28 대표: "보컬이 듣기 좋아야, 멜로디가 기억에 남아야"). 연주곡엔 안 붙는다.
+VOCAL_QUALITY = ("smooth, clear and pleasant lead vocals sitting upfront in the mix, catchy singable chorus hook, "
+                 "memorable melody")
+
+
 def lock_vocal_style(
     tag_style: str, llm_style: str | None, action: str | None, *, finalize=None,
     channel: str | None = WORKOUT_CHANNEL,
@@ -268,11 +277,14 @@ def lock_vocal_style(
     """
     finalize = finalize or (lambda s: s)
     axis = axis_for_action(action)
+    vocal = VOCAL_QUALITY
     head = _genre_first((tag_style or "").strip().strip(",").strip())
     tail = _clean_tail(llm_style or "", axis, head)
     while True:
         body = ", ".join([p for p in [head, *tail] if p])
         style = boost_style(finalize(body), action, channel=channel)
+        if vocal not in style:
+            style = f"{style}, {vocal}"
         if len(style) <= SUNO_STYLE_MAX or not tail:
             break
         tail.pop()

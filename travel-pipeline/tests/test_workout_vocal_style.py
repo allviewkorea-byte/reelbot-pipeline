@@ -23,7 +23,7 @@ def test_lock_starts_with_genre_and_strips_foreign():
     assert st.startswith("hip-hop, for workout, energetic")
     assert not BAD.search(st)
     assert "electric piano" in st and "punchy drums" in st  # 변주 꼬리는 남는다
-    assert "gym workout energy" in st                          # 운동 부스터 그대로
+    assert "memorable catchy melody" in st and st.endswith(ws.VOCAL_QUALITY)   # 운동 부스터 + 보컬 꼬리(2026-10-28)
     assert ", vocals," not in st                               # "soft vocals" 잔여물 제거
 
 
@@ -38,7 +38,7 @@ def test_lock_respects_1000_chars():
     long_llm = ", ".join(f"layer{i} synth texture" for i in range(200))
     st = ws.lock_vocal_style("for workout, energetic, house", long_llm, "workout", finalize=lambda s: s + ", male vocals")
     assert len(st) <= ws.SUNO_STYLE_MAX
-    assert st.startswith("house") and st.endswith("150-160 BPM")  # 꼬리만 덜고 부스터는 유지
+    assert st.startswith("house") and "150-160 BPM" in st and st.endswith(ws.VOCAL_QUALITY)  # 꼬리만 덜고 부스터·보컬 꼬리 유지
 
 
 def test_lock_empty_llm_style_is_tag_plus_booster():

@@ -553,17 +553,47 @@ WORKOUT_SUFFIX: dict[str, str] = {
 }
 
 # 새 프롬프트 생성 LLM 지시(운동 전용). _GEN_SYSTEM 과 별개 상수 — where 무수정.
+# 인물 구성 로테이션(2026-10-28 대표: "한 명·두 명·단체 러닝·단체 운동·헬스·에어로빅 등 다양하게").
+# 장면마다 하나를 정해 LLM 에 넘기고(폴백도 붙인다) 최근 기록에 같이 남겨 겹치지 않게 한다.
+WORKOUT_PEOPLE_MIX: dict[str, list[str]] = {
+    "strength": [
+        "한 명 — 웨이트를 드는 순간의 전신",
+        "두 명 — 서로 보조해 주는 파트너 운동(스쿼트·벤치프레스 스파팅)",
+        "3~5명 — 크로스핏 박스에서 함께 케틀벨·박스점프를 하는 단체 운동",
+        "여러 명 — 야외 부트캠프 단체 서킷 트레이닝(줄 맞춰 런지·버피)",
+        "두 명 — 복싱 미트를 잡아 주는 코치와 펀치하는 사람",
+        "인물 없음 — 원색 기구와 햇살만",
+    ],
+    "cardio": [
+        "한 명 — 달리는 순간의 역동적인 전신",
+        "두 명 — 나란히 달리는 러닝 메이트",
+        "여러 명 — 러닝 크루 단체 러닝(도시·강변·트랙)",
+        "여러 명 — 밝은 스튜디오의 에어로빅·댄스 피트니스 단체 수업, 같은 동작으로 점프",
+        "여러 명 — 실내 사이클(스피닝) 단체 수업",
+        "여러 명 — 공원 잔디에서 단체 줄넘기·점핑잭",
+    ],
+    "warmup": [
+        "한 명 — 매트 위 스트레칭",
+        "두 명 — 마주 보고 파트너 스트레칭",
+        "여러 명 — 햇살 드는 스튜디오의 단체 요가·필라테스 수업",
+        "인물 없음 — 매트·폼롤러와 햇살만",
+    ],
+}
+
+
 _WORKOUT_GEN_SYSTEM = (
     "너는 운동·피트니스 유튜브 음악 채널의 배경/썸네일용 한국어 이미지 프롬프트 작가다. "
     "주어진 같은 축 예시들의 느낌을 살려 **새로운 이미지 프롬프트 1개**만 만든다. "
     f"톤 규칙: {WORKOUT_TONE} "
     "소재: 햇살 드는 헬스장·원색 기구·러닝트랙·해변·도시·밝은 스트레칭 스튜디오 중심. "
+    "'인물 구성'이 주어지면 반드시 그 인원·운동으로 장면을 만든다(단체면 여러 사람이 함께 같은 운동을 하는 모습). "
     "현장감 있는 요소(원판·덤벨·땀·트랙)를 허용한다 — 완벽하게 정돈하지 말 것. "
     "수영복 화보·운동과 무관한 카페·거리 풍경은 금지. "
     "한 줄, 한국어, 따옴표·번호·접두어 없이 프롬프트 문장만 출력한다."
 )
 
-def _generate_workout_prompt(examples: list[str], avoid_recent: list[str] | None = None) -> str:
+def _generate_workout_prompt(examples: list[str], avoid_recent: list[str] | None = None,
+                             people: str | None = None) -> str:
     """운동 축 예시 → 같은 결의 새 프롬프트 1개. 실패 시 예외(호출부 폴백).
 
     where 의 _generate_new_prompt 와 구조는 같으나 system 프롬프트가 정반대라
@@ -580,6 +610,8 @@ def _generate_workout_prompt(examples: list[str], avoid_recent: list[str] | None
             "\n\n최근 영상에 이미 쓴 장면(장소·운동 동작·구도가 겹치지 않게 전혀 다른 장면으로):\n"
             + "\n".join(f"- {e[:160]}" for e in avoid_recent[-10:])
         )
+    if people:
+        user += f"\n\n이번 장면 인물 구성(반드시 이대로): {people}"
     user += "\n\n새 프롬프트 1개:"
     raw = music_lyrics._call(_WORKOUT_GEN_SYSTEM, user, max_tokens=200)
     out = (raw or "").strip().splitlines()[0].strip().strip('"').strip("'").lstrip("-").strip()
@@ -597,12 +629,17 @@ def workout_core(action: str | None, *, avoid_recent: list[str] | None = None) -
 
     axis = axis_for_action(action)
     pool = WORKOUT_IMAGE_PROMPTS[axis]
+    recent_text = " ".join(avoid_recent or [])
+    mixes = WORKOUT_PEOPLE_MIX[axis]
+    people = random.choice([m for m in mixes if m.split(" — ")[1] not in recent_text] or mixes)
     try:
-        scene = _generate_workout_prompt(pool, avoid_recent) if avoid_recent else _generate_workout_prompt(pool)
+        scene = _generate_workout_prompt(pool, avoid_recent, people=people)
     except Exception as e:  # noqa: BLE001 - LLM 실패는 고정 풀 폴백
         logger.debug("[image-prompt] 운동 LLM 생성 실패(풀 폴백): %s", e)
         recent = set(avoid_recent or [])
         scene = random.choice([p for p in pool if p not in recent] or pool)
+        if not people.startswith("인물 없음"):
+            scene = f"{scene} 인물 구성: {people}."
     return f"{scene} {WORKOUT_SUFFIX[axis]}".rstrip(), scene
 
 

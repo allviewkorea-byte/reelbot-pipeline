@@ -64,7 +64,7 @@ def s3(monkeypatch):
 def _gen_and_review(monkeypatch, verdicts):
     """generate_image 는 받은 프롬프트를 기록, review_image 는 verdicts 를 차례로 돌려준다."""
     from services import music_image_prompts as mip
-    monkeypatch.setattr(mip, "_generate_workout_prompt", lambda ex: (_ for _ in ()).throw(RuntimeError("no llm")))
+    monkeypatch.setattr(mip, "_generate_workout_prompt", lambda ex, *a, **k: (_ for _ in ()).throw(RuntimeError("no llm")))
     prompts: list[str] = []
 
     def _gen(prompt, path):
@@ -182,3 +182,15 @@ def test_people_prompt_names_concrete_outfit(monkeypatch, tmp_path):
     assert any(o in prompts[0] for o in mip.WORKOUT_OUTFITS)
     assert "크롭탑·스포츠브라·민소매 크롭 금지" in prompts[0]
     assert "탱크탑" not in mip.WORKOUT_TONE
+
+
+def test_people_mix_rotates_and_goes_to_writer(monkeypatch):
+    """인물 구성(한 명·두 명·단체 러닝·에어로빅 등)을 장면마다 정해 LLM에 넘긴다(대표 2026-10-28)."""
+    from services import music_image_prompts as mip
+    seen = []
+    monkeypatch.setattr(mip, "_generate_workout_prompt", lambda ex, avoid_recent=None, people=None: seen.append(people) or "장면")
+    for _ in range(30):
+        mip.workout_core("running")
+    assert set(seen) <= set(mip.WORKOUT_PEOPLE_MIX["cardio"]) and len(set(seen)) >= 3
+    assert any("에어로빅" in m for m in mip.WORKOUT_PEOPLE_MIX["cardio"])
+    assert any("러닝 크루" in m for m in mip.WORKOUT_PEOPLE_MIX["cardio"])
