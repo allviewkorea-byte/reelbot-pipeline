@@ -44,10 +44,22 @@ def test_female_vocal_about_70_percent_on_workout_only():
 
 
 def test_tempo_mix_varies_per_song():
-    """2026-10-28: 매번 같은 BPM은 지루 — 기본 150-160 + 가끔 느린 템포. warmup 은 고정."""
+    """2026-10-28: 매번 같은 BPM은 지루 — 빠름·중간·미드템포 섞기. warmup 은 고정."""
     import random
     rng = random.Random(7)
-    got = [ws.pick_tempo("strength", rng) for _ in range(200)]
-    assert got.count("150-160 BPM") > 90 and any("128-135" in g for g in got) and any("115-122" in g for g in got)
+    got = [ws.pick_tempo("strength", rng) for _ in range(300)]
+    assert len(set(got)) == 3 and got.count("150-160 BPM") < 180
     assert {ws.pick_tempo("warmup", rng) for _ in range(20)} == {"90-100 BPM"}
     assert ws.style_booster("stretching", channel="workout_music").endswith("90-100 BPM")
+
+
+def test_tempo_plan_spreads_within_one_video():
+    """영상 1개 안에서 비율대로 나눠 배정, 같은 템포 연달아 안 놓음, where 는 None."""
+    import random
+    plan = ws.tempo_plan(6, "weight", channel="workout_music", rng=random.Random(3))
+    fast = "150-160 BPM"
+    assert len(plan) == 6 and 2 <= plan.count(fast) <= 3 and len(set(plan)) == 3
+    assert all(plan[i] != plan[i + 1] for i in range(5))                 # 같은 템포 연달아 없음
+    assert ws.tempo_plan(3, "weight", channel="rooftop_music") == [None, None, None]
+    st = ws.lock_vocal_style("house, for workout", None, "weight", tempo="110-118 BPM, mid-tempo groove")
+    assert "110-118 BPM" in st and "unhurried vocal delivery" in st and "150-160" not in st
