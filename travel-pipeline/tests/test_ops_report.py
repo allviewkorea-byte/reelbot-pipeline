@@ -149,3 +149,25 @@ def test_rule_summary_when_llm_fails(rest, monkeypatch):
 def test_analytics_scope_only_in_music_auth():
     from services import music_youtube_oauth as mo, youtube_oauth as yo
     assert mo.ANALYTICS_SCOPE in mo.AUTH_SCOPES and mo.ANALYTICS_SCOPE not in yo.SCOPES
+
+
+def test_music_oauth_rejects_wrong_channel(monkeypatch):
+    """구글에서 다른 채널을 고르면 저장하지 않는다(2026-10-29 업로드 전부 '채널 불일치' 사고)."""
+    from services import music_youtube_oauth as mo
+    saved = []
+    monkeypatch.setattr(mo, "_client", lambda: ("cid", "cs"))
+    monkeypatch.setattr(mo, "music_channel_id", lambda ch=None: "UC_WORKOUT")
+    monkeypatch.setattr(mo, "save_refresh_token", lambda k, t: saved.append((k, t)) or {"stored": True})
+
+    class R:
+        status_code = 200
+
+        def json(self):
+            return {"refresh_token": "rt", "access_token": "at"}
+    monkeypatch.setattr(mo.requests, "post", lambda *a, **k: R())
+    monkeypatch.setattr(mo, "token_channel", lambda at: {"id": "UC_ALLVIEW", "title": "올뷰코리아"})
+    out = mo.exchange_code("code", "https://x/cb", channel="workout_music")
+    assert out["mismatch"]["selected_id"] == "UC_ALLVIEW" and not saved and "다른 채널" in out["error"]
+    monkeypatch.setattr(mo, "token_channel", lambda at: {"id": "UC_WORKOUT", "title": "2주안에몸매만들기"})
+    out = mo.exchange_code("code", "https://x/cb", channel="workout_music")
+    assert saved == [("UC_WORKOUT", "rt")] and out["selected_title"] == "2주안에몸매만들기"
