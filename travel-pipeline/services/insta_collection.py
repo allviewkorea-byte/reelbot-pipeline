@@ -843,7 +843,40 @@ def view(row: dict) -> dict:
                        "product_image": (lk.get("product") or {}).get("image_url")} for lk in (row.get("looks") or [])]}
 
 
+# 서버 재시작(배포)으로 끊긴 작업 정리(2026-10-28: 아침에 누른 기획이 오후까지 '만드는 중').
+# 잡은 메모리에만 있어서 재배포하면 사라지고 행은 making/빈 planned 로 남는다.
+STALE_PLAN_MIN = 15     # 기획: 이 시간 넘게 테마가 비어 있으면
+STALE_MAKE_MIN = 25     # 만들기: 이 시간 넘게 진행 기록(updated_at)이 없으면(룩 하나 ≤ 약 5분)
+STALE_MSG = "서버가 다시 시작돼 작업이 중단됐어요 — 다시 해 주세요."
+
+
+def _live(cid: str) -> bool:
+    with _LOCK:
+        return any(j.get("collection_id") == cid and j.get("state") in ("queued", "running") for j in _JOBS.values())
+
+
+def _stale(row: dict, now: datetime) -> bool:
+    status = row.get("status")
+    plan_empty = status == "planned" and not (row.get("theme") or {}).get("plan")
+    if not (plan_empty or status == "making") or _live(row["id"]):
+        return False
+    try:
+        ts = datetime.fromisoformat(str(row.get("updated_at") or row.get("created_at")).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    limit = STALE_PLAN_MIN if plan_empty else STALE_MAKE_MIN
+    return (now - ts).total_seconds() > limit * 60
+
+
 def list_collections(limit: int = 10, d: picks.Deps | None = None) -> list[dict]:
     d = d or picks.Deps()
     rows = d.rest("ig_collections", "GET", params={"select": "*", "order": "created_at.desc", "limit": str(limit)})
+    now = datetime.now(timezone.utc)
+    for r in rows:
+        if _stale(r, now):
+            try:
+                _patch(d, r["id"], {"status": "failed", "error": STALE_MSG})
+                r["status"], r["error"] = "failed", STALE_MSG
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[insta-collection] 끊긴 작업 정리 실패 %s: %s", r.get("id"), str(e)[:120])
     return [view(r) for r in rows]

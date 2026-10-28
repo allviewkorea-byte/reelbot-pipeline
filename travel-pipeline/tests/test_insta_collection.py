@@ -291,3 +291,27 @@ def test_lookfirst_plan_designs_looks_then_finds_products(coordi, monkeypatch): 
     assert "룩2" in row["usage"]["dropped"] and all(x["idea"] != "룩2" for x in row["looks"])
     assert [x["product"]["kind"] for x in main] == ["top"] * 4 and all(len(x["items"]) == 2 for x in main)
     assert not [k for k in coordi.s3.objs if k.startswith("insta/products/coupang/")]
+
+
+def test_stale_jobs_after_restart_are_marked_failed(coordi):  # noqa: F811
+    """재배포로 메모리 잡이 사라져 making/빈 planned 로 남은 행 → 목록을 열 때 실패로 정리(2026-10-28)."""
+    from datetime import datetime, timedelta, timezone
+    t = coordi.t
+    old = (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()
+    fresh = datetime.now(timezone.utc).isoformat()
+    t.t["ig_collections"] = [
+        {"id": "cl-20261028-aaaa", "character_id": "chaei", "status": "making", "theme": {"plan": {}}, "looks": [],
+         "created_at": old, "updated_at": old},
+        {"id": "cl-20261028-bbbb", "character_id": "chaei", "status": "planned", "theme": {}, "looks": [],
+         "created_at": old, "updated_at": old},
+        {"id": "cl-20261028-cccc", "character_id": "chaei", "status": "making", "theme": {"plan": {}}, "looks": [],
+         "created_at": fresh, "updated_at": fresh},
+        {"id": "cl-20261028-dddd", "character_id": "chaei", "status": "planned", "theme": {"plan": {"mode": "varied"}},
+         "looks": [], "created_at": old, "updated_at": old},
+    ]
+    d = K.Deps(coupang=_Shop("coupang", {}), vision=_vision({}), download=_dl, rest=t)
+    rows = {r["id"]: r for r in CL.list_collections(d=d)}
+    assert rows["cl-20261028-aaaa"]["status"] == "failed" and rows["cl-20261028-bbbb"]["status"] == "failed"
+    assert rows["cl-20261028-cccc"]["status"] == "making"                  # 방금 시작한 건 그대로
+    assert rows["cl-20261028-dddd"]["status"] == "planned"                 # 기획 끝난 미리보기는 그대로
+    assert rows["cl-20261028-aaaa"]["error"] == CL.STALE_MSG
