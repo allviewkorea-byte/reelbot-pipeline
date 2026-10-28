@@ -4,7 +4,7 @@
 ffmpeg loudnorm 2-pass(측정 → 적용)로 라우드니스를 통일하고 마스터본을
 music-masters/{slug}/mastered/{audio_id}.mp3 에 올린다(멱등 — 이미 있으면 skip).
 
-타깃: I=-14 LUFS, TP=-1.0 dBTP, LRA=11 (유튜브 음악 기준). 출력 mp3 320k.
+타깃: I=-14 LUFS, TP=-1.5 dBTP, LRA=11 (유튜브 음악 기준). 출력 mp3 320k.
 EQ 레퍼런스 매칭(Matchering)은 이번 범위 밖.
 
 ffmpeg 헬퍼는 백곰 엔진(sayeon_*)과 결합하지 않도록 이 모듈에 소량 복제한다
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 # 마스터 타깃 — 측정·적용 패스 공통.
 TARGET_I = -14.0
-TARGET_TP = -1.0
+TARGET_TP = -1.5   # 2026-10-28: -1.0 은 mp3→영상 AAC 재인코딩에서 순간 피크가 넘어 찢어지는 소리 — 여유 0.5dB
 TARGET_LRA = 11.0
 _MP3_BITRATE = "320k"
 

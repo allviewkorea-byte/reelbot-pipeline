@@ -35,7 +35,7 @@ def _png_bytes(tmp_path: Path, color: str = "red") -> bytes:
 # ── 프롬프트 ──────────────────────────────────────────────────────────
 def test_build_prompt_strips_tag_and_uses_bright_tone(monkeypatch):
     from services import music_image_prompts as mip
-    monkeypatch.setattr(mip, "_generate_workout_prompt", lambda ex: (_ for _ in ()).throw(RuntimeError("no llm")))
+    monkeypatch.setattr(mip, "_generate_workout_prompt", lambda ex, *a, **k: (_ for _ in ()).throw(RuntimeError("no llm")))
     p = mai.build_prompt("running")
     assert "[WORKOUT]" not in p
     for phrase in (
