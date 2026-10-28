@@ -10,7 +10,6 @@ import {
   DEFAULT_MUSIC_CHANNEL,
   MUSIC_CHANNELS,
   WORKOUT_CHANNEL_ID,
-  channelParam,
   resolveMusicChannel,
   withChannel,
 } from "@/lib/music"
@@ -82,34 +81,6 @@ function useSystemIssue(): boolean {
   return hasIssue
 }
 
-// 음악 채널 검토 대기 수(주황 배지). /api/music/queue 길이. 채널별로 갈린다.
-function useMusicQueueCount(channel: string): number {
-  const [count, setCount] = useState(0)
-  useEffect(() => {
-    let alive = true
-    const load = () => {
-      const qp = channelParam(channel)
-      fetch(`/api/music/queue${qp ? `?${qp}` : ""}`)
-        .then((r) => r.json())
-        .then((d) => {
-          if (alive) setCount(Array.isArray(d?.queue) ? d.queue.length : 0)
-        })
-        .catch(() => {
-          /* 실패 → 기존 값 유지 */
-        })
-    }
-    load()
-    const timer = setInterval(load, 20000)
-    const onFocus = () => load()
-    window.addEventListener("focus", onFocus)
-    return () => {
-      alive = false
-      clearInterval(timer)
-      window.removeEventListener("focus", onFocus)
-    }
-  }, [channel])
-  return count
-}
 
 type DotStatus = "live" | "idle" | "error"
 
@@ -205,8 +176,6 @@ function SidebarBody({ activeChannel }: { activeChannel: string }) {
   const pathname = usePathname()
   const baekgomLive = useChannelActive(BAEKGOM_CHANNEL_ID)
   // 채널별 검토 대기 수 — music_uploads.channel 로 갈린다(2단계 SQL).
-  const whereQueue = useMusicQueueCount(DEFAULT_MUSIC_CHANNEL)
-  const workoutQueue = useMusicQueueCount(WORKOUT_CHANNEL_ID)
   const systemIssue = useSystemIssue()
   const [mobileOpen, setMobileOpen] = useState(false)
 
@@ -285,7 +254,6 @@ function SidebarBody({ activeChannel }: { activeChannel: string }) {
               name={MUSIC_CHANNELS[WORKOUT_CHANNEL_ID].name}
               status="idle"
               statusText="유튜브 · 검토 대기"
-              badge={workoutQueue > 0 ? { label: `검토 ${workoutQueue}`, tone: "review" } : undefined}
               onNavigate={closeMobile}
             />
             <ChannelCard
@@ -304,7 +272,6 @@ function SidebarBody({ activeChannel }: { activeChannel: string }) {
               name={MUSIC_CHANNEL_NAME}
               status="idle"
               statusText="유튜브 · 검토 대기"
-              badge={whereQueue > 0 ? { label: `검토 ${whereQueue}`, tone: "review" } : undefined}
               onNavigate={closeMobile}
             />
             {/* 인스타 쇼핑(A2-3a) — 착장 만들기 화면. 자동 게시(B단계) 전이라 상태는 '테스트'. */}
