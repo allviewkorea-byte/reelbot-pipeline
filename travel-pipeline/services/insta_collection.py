@@ -161,6 +161,36 @@ def material_of(name: str) -> str:
     return "other"
 
 
+# 테마 이름의 일반 단어 → 상품명에서 같이 인정할 말(예: 아우터 = 자켓·코트…)
+_SYNONYMS = {
+    "아우터": ["아우터", "자켓", "재킷", "코트", "점퍼", "블루종", "패딩", "무스탕", "가디건"],
+    "니트": ["니트", "스웨터", "풀오버", "가디건"], "가디건": ["가디건"], "스커트": ["스커트", "치마"],
+    "치마": ["스커트", "치마"], "바지": ["팬츠", "바지", "슬랙스", "데님", "진"], "팬츠": ["팬츠", "바지", "슬랙스"],
+    "패딩": ["패딩", "푸퍼", "다운"], "원피스": ["원피스", "드레스"], "부츠": ["부츠"], "가방": ["백", "가방"],
+    "미니스커트": ["스커트", "치마"], "숏패딩": ["패딩", "푸퍼"], "나시": ["나시", "슬리브리스", "민소매", "탱크"],
+    "데님": ["데님", "청", "진"],
+}
+_GENERIC = {"여성", "여자", "모음", "코디", "컬렉션", "룩", "데일리"}
+
+
+def concept_terms(theme: dict) -> list[list[str]]:
+    """테마 이름 → 상품명에 하나라도 들어가야 하는 말 묶음. (대표 2026-10-28: '앙고라 가디건' 테마에 후드 집업·
+    자켓이 섞임 — 점수 미달이어도 그대로 쓰던 것 + 종류(아우터)만 맞으면 통과하던 것)"""
+    words = [w for w in str(theme.get("concept") or "").replace(".zip", "").split() if w and w not in _GENERIC]
+    return [_SYNONYMS.get(w, [w]) for w in words]
+
+
+def concept_match(name: str, theme: dict) -> bool:
+    """상품명에 테마의 아이템 말(마지막 단어 또는 그 동의어)이 있거나, 앞 단어(예: 앙고라)가 있으면 통과."""
+    terms = concept_terms(theme)
+    if not terms:
+        return True
+    low = (name or "").replace(" ", "").lower()
+    if any(t.replace(" ", "").lower() in low for t in terms[-1]):
+        return True
+    return any(t.lower() in low for g in terms[:-1] for t in g if len(t) >= 2)
+
+
 def pick_variants(theme: dict, d: picks.Deps, usage: dict, n: int = N_LOOKS,
                   rng: random.Random | None = None) -> list[dict]:
     """테마 종류 상품 n개 — 색 계열·소재가 겹치지 않게(1차: 둘 다 새로움, 2차: 하나라도 새로움, 3차: 나머지).
@@ -181,7 +211,8 @@ def pick_variants(theme: dict, d: picks.Deps, usage: dict, n: int = N_LOOKS,
         kept, _ = picks.code_filter(cands, spec["kind"])
         scored, _ = picks.judge(spec, {"seasons": [_season()]}, kept, d, usage, Path(td),
                                 top=VARIANT_SCORE_TOP) if kept else ([], [])
-    scored = [c for c in scored if c.get("score", 0) >= picks.MIN_SCORE] or scored
+    # 점수 미달은 버린다(예전엔 모자라면 미달도 썼음) + 테마 아이템이 맞는지 상품명으로 한 번 더
+    scored = [c for c in scored if c.get("score", 0) >= picks.MIN_SCORE and concept_match(c.get("name", ""), theme)]
     def key(c: dict) -> tuple[str, str]:
         return picks.color_family((c.get("scores") or {}).get("hex"))[0], material_of(c.get("name", ""))
 
@@ -513,10 +544,10 @@ THEME_TRIES = 3   # 테마 상품이 모자라면 테마를 바꿔 다시(대표
 
 def broaden_queries(theme: dict) -> list[str]:
     """테마 상품이 모자랄 때 더 넓은 검색어 — 컨셉 그대로 / 종류 일반명. 브랜드는 안 붙인다."""
-    noun = P.PRODUCT_KINDS.get(theme["kind"], ("", ""))[0]
     concept = str(theme.get("concept") or "").replace("모음", "").strip()
-    out = []
-    for q in (f"여성 {concept}", f"여성 {noun}" if noun else ""):
+    last = concept.split()[-1] if concept.split() else ""
+    out = []   # 종류 일반명(여성 아우터)은 테마와 다른 옷이 섞여서 안 씀 — 컨셉 / 컨셉 마지막 단어만
+    for q in (f"여성 {concept}", f"여성 {last}" if last and last != concept else ""):
         q = q.strip()
         if q and q != "여성" and q not in theme.get("queries", []) and q not in out:
             out.append(q)

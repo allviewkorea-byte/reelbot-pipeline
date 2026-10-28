@@ -236,6 +236,8 @@ _REVIEW_SYSTEM = (
     "differences are fine.\n"
     "8. body: (only if a body reference is given) her figure is noticeably different from the body reference — "
     "clearly slimmer or flatter chest, narrower hips, a smaller or boxier frame, or shorter legs.\n"
+    "9. ref_clothes: (only if a body reference is given) she is wearing the plain grey ribbed top or grey leggings "
+    "from the body reference instead of the outfit products.\n"
     'Return ONE JSON object only: {"pass": true|false, "violations": [{"type": "<one of the keys above>", '
     '"detail": "짧은 한국어 설명"}], "fix_en": "<one short English instruction to fix it in the next attempt, '
     'or empty>"}.'

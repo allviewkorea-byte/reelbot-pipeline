@@ -201,12 +201,12 @@ POSES: dict[str, dict] = {
 }
 
 # 자유분방(대표 2026-10-27 "좀 더 자유분방했으면") — 컷마다 하나 섞는 순간·연출(70%).
+# 머리카락이 얼굴·화면을 덮는 '바람 머리'도 뺐다(2026-10-28, 03번 컷).
 # 흔들림·초점 나간 연출은 뺐다(대표 2026-10-27: 팔·다리가 흐려 옷이 안 보임).
 # face: 얼굴(입술 포함)이 보일 때만 쓰는 표정.
 MOODS = [
     {"en": "caught mid-laugh in a spontaneous moment"},
     {"en": "making a playful peace sign with her free hand"},
-    {"en": "her hair blowing across the frame in the wind"},
     {"en": "shot with the on-camera flash at night, a little overexposed, Y2K party-snapshot feel"},
     {"en": "a tilted, carefree angle like she snapped it in a hurry"},
     {"en": "a cute pouty lips expression", "face": True},
@@ -616,6 +616,8 @@ def build(plan: dict, *, face_url: str, body_url: str, hair_url: str | None, pro
             "Her face is exactly the woman in reference image 1 — same eyes, nose, lips, jawline, face shape and moles, "
             f"clearly recognisable as the same person; only the hairstyle may differ ({hair_part}, black hair color).",
             *([] if safe else [body_line(measurements)]),
+            "Reference image 2 shows only her body shape — never copy the plain grey ribbed top or grey leggings "
+            "she wears there; she wears only the outfit described here.",
             "Take only the clothing from the product images — ignore the body and face of any model wearing them. "
             f"She is wearing exactly {wear} — {_DETAIL}.",
             _YOUTH,

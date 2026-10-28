@@ -445,7 +445,9 @@ def test_body_line_and_identity_review_refs(tmp_path):
     from services import character_studio_gen as gen
     assert "172 cm tall" in line and "90" not in line and gen.strip_unsafe(line) == line   # 3사이즈 숫자는 필터에 걸려 뺌
     assert "(" not in P.body_line(None)
-    assert "identity" in io._REVIEW_SYSTEM and "body reference" in io._REVIEW_SYSTEM
+    assert "identity" in io._REVIEW_SYSTEM and "body reference" in io._REVIEW_SYSTEM and "ref_clothes" in io._REVIEW_SYSTEM
+    assert not any("hair blowing" in m["en"] for m in P.MOODS) and "ref_clothes" in io._REVIEW_SYSTEM
+    assert not any("hair blowing" in m["en"] for m in P.MOODS)
 
 
 def test_night_locations_are_rare():
