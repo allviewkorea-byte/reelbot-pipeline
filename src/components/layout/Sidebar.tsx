@@ -175,7 +175,9 @@ function SidebarWithChannel() {
 function SidebarBody({ activeChannel }: { activeChannel: string }) {
   const pathname = usePathname()
   const baekgomLive = useChannelActive(BAEKGOM_CHANNEL_ID)
-  // 채널별 검토 대기 수 — music_uploads.channel 로 갈린다(2단계 SQL).
+  // 음악 채널도 같은 channel_status 의 가동 토글(대표 2026-10-28: 검토 대기 대신 가동 중/중단).
+  const workoutLive = useChannelActive(WORKOUT_CHANNEL_ID)
+  const whereLive = useChannelActive(DEFAULT_MUSIC_CHANNEL)
   const systemIssue = useSystemIssue()
   const [mobileOpen, setMobileOpen] = useState(false)
 
@@ -237,7 +239,7 @@ function SidebarBody({ activeChannel }: { activeChannel: string }) {
           </button>
         </div>
 
-        {/* 내 채널 — 운동 + 백곰 + 음악(검토 대기 큐) + 인스타 쇼핑. 카드 스타일 통일(데이터·동작 무변경).
+        {/* 내 채널 — 운동 + 백곰 + 음악 + 인스타 쇼핑. 상태 = 가동 중 / 중단(channel_status.is_active). 카드 스타일 통일(데이터·동작 무변경).
             순서는 대표 지시(2주안에몸매만들기 → 백곰 → where). 링크·배지·active 판정은 그대로. */}
         <div className="flex min-h-0 flex-1 flex-col px-3 pt-4">
           <div className="px-3 pb-1">
@@ -252,8 +254,8 @@ function SidebarBody({ activeChannel }: { activeChannel: string }) {
               active={workoutActive}
               icon={MUSIC_CHANNELS[WORKOUT_CHANNEL_ID].icon}
               name={MUSIC_CHANNELS[WORKOUT_CHANNEL_ID].name}
-              status="idle"
-              statusText="유튜브 · 검토 대기"
+              status={workoutLive ? "live" : "idle"}
+              statusText={`유튜브 · ${workoutLive ? "가동 중" : "중단"}`}
               onNavigate={closeMobile}
             />
             <ChannelCard
@@ -262,7 +264,7 @@ function SidebarBody({ activeChannel }: { activeChannel: string }) {
               icon="🐻"
               name="백곰의 실화보고서"
               status={baekgomLive ? "live" : "idle"}
-              statusText={`유튜브 · ${baekgomLive ? "가동 중" : "대기 중"}`}
+              statusText={`유튜브 · ${baekgomLive ? "가동 중" : "중단"}`}
               onNavigate={closeMobile}
             />
             <ChannelCard
@@ -270,18 +272,18 @@ function SidebarBody({ activeChannel }: { activeChannel: string }) {
               active={musicActive}
               icon="🎵"
               name={MUSIC_CHANNEL_NAME}
-              status="idle"
-              statusText="유튜브 · 검토 대기"
+              status={whereLive ? "live" : "idle"}
+              statusText={`유튜브 · ${whereLive ? "가동 중" : "중단"}`}
               onNavigate={closeMobile}
             />
-            {/* 인스타 쇼핑(A2-3a) — 착장 만들기 화면. 자동 게시(B단계) 전이라 상태는 '테스트'. */}
+            {/* 인스타 쇼핑(A2-3a) — 착장 만들기 화면. 자동 게시(B단계)·가동 토글 전이라 '중단'. */}
             <ChannelCard
               href="/insta/outfit"
               active={instaActive}
               icon="🛍️"
               name="인스타 쇼핑"
               status="idle"
-              statusText="인스타 · 테스트"
+              statusText="인스타 · 중단"
               onNavigate={closeMobile}
             />
 
