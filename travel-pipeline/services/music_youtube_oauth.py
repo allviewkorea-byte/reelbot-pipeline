@@ -29,6 +29,10 @@ from services.youtube_tokens import load_refresh_token, save_refresh_token
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = 30.0
+# 2026-10-28 시청 지속률(YouTube Analytics) — 음악 채널 **연결 화면에서만** 추가로 요청한다.
+# 업로드용 Credentials(scopes=SCOPES)·백곰 연결은 그대로(기존 토큰 갱신에 영향 없음). 재연결해야 적용.
+ANALYTICS_SCOPE = "https://www.googleapis.com/auth/yt-analytics.readonly"
+AUTH_SCOPES = [*SCOPES, ANALYTICS_SCOPE]
 
 # ── 채널별 env 매핑(운동 채널 3단계) ────────────────────────────────────
 # **기존 키 이름은 절대 바꾸지 않는다** — where 가 즉시 깨진다.
@@ -114,7 +118,7 @@ def build_auth_url(redirect_uri: str | None = None, *, channel: str | None = Non
     params = {
         "client_id": cid,
         "redirect_uri": redir,
-        "scope": " ".join(SCOPES),
+        "scope": " ".join(AUTH_SCOPES),
         "response_type": "code",
         "access_type": "offline",
         "prompt": "consent",
