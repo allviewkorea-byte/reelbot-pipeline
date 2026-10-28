@@ -2,6 +2,8 @@
 
 GET /api/system/status  → 서비스별 상태(읽기 전용, 변경 없음)
 GET /api/system/errors   → 최근 실패 작업 목록(music_jobs 테이블)
+POST /api/system/daily-report/run → 매일 점검 실행(크론, CRON_SECRET) — 백그라운드
+GET  /api/system/daily-report     → 최신 점검 리포트(요약 + 유튜브 성과)
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ import time
 from datetime import datetime, timezone
 
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
 
 logger = logging.getLogger(__name__)
 
@@ -208,3 +210,35 @@ def system_errors(limit: int = 20):
         }
     except Exception as e:  # noqa: BLE001
         return {"errors": [], "message": str(e)[:200]}
+
+
+# ── 매일 점검(대표 2026-10-28 A 방식) ─────────────────────────────────────
+def _cron_ok(authorization: str | None) -> bool:
+    secret = (os.getenv("CRON_SECRET") or "").strip()
+    return bool(secret) and authorization == f"Bearer {secret}"
+
+
+def _run_daily_report() -> None:
+    try:
+        from services import ops_report
+        ops_report.run()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[ops-report] 실행 실패: %s", str(e)[:300])
+
+
+@router.post("/daily-report/run")
+def daily_report_run(bg: BackgroundTasks, authorization: str | None = Header(default=None)):
+    if not _cron_ok(authorization):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    bg.add_task(_run_daily_report)
+    return {"ok": True, "queued": True}
+
+
+@router.get("/daily-report")
+def daily_report():
+    try:
+        from services import ops_report
+        row = ops_report.latest()
+    except Exception as e:  # noqa: BLE001
+        return {"report": None, "message": str(e)[:200]}
+    return {"report": row}

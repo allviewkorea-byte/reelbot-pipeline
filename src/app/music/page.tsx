@@ -16,6 +16,7 @@ import { MusicTrendPanel } from "@/components/music/MusicTrendPanel"
 import { MusicQueuePreview } from "@/components/music/MusicQueuePreview"
 import { MusicStatusBoard, MusicStatusLight, useMusicSummary } from "@/components/music/MusicStatusBoard"
 import type { MusicJob } from "@/lib/music-jobs"
+import { DailyReportCard } from "@/components/system/DailyReportCard"
 
 interface ChannelStatus {
   isActive: boolean
@@ -115,6 +116,8 @@ function MusicDashboardPageInner() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-auto p-4">
+      {/* 오늘의 점검(09:30 자동, 펼치기) — 2026-10-28 */}
+      <div className="pl-10 md:pl-0"><DailyReportCard compact /></div>
       {/* 헤더 — 채널명+뱃지 / 토글들. 백곰 레이아웃 1:1 */}
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div className="min-w-0 pl-10 md:pl-0">

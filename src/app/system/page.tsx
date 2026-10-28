@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { RefreshCw } from "lucide-react"
+import { DailyReportCard } from "@/components/system/DailyReportCard"
 
 type ServiceStatus = {
   status: "ok" | "warn" | "error"
@@ -147,6 +148,9 @@ export default function SystemPage() {
           새로고침
         </button>
       </div>
+
+      {/* 매일 점검(09:30 자동) */}
+      <div className="mb-4"><DailyReportCard /></div>
 
       {/* 서비스 상태 카드 */}
       <div className="rounded-xl border border-border bg-card overflow-hidden">
