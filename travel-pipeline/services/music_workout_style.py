@@ -75,12 +75,12 @@ _STYLE_BOOST: dict[str, str] = {
     "strength": (
         "bright clean dance-pop energy, memorable catchy melody, analog synth arpeggios, punchy drums, "
         "steady straight four-on-the-floor kick and snappy snare, clean electric guitar accents in the chorus, "
-        "polished radio-ready mix with headroom, refreshing summer hype, powerful and confident, 150-160 BPM"
+        "polished radio-ready mix with headroom, refreshing summer hype, powerful and confident"
     ),
     "cardio": (
         "bright clean dance-pop energy, memorable catchy melody, analog synth arpeggios, punchy drums, "
         "steady straight four-on-the-floor kick, propulsive bassline, clean electric guitar accents in the chorus, "
-        "polished radio-ready mix with headroom, running cadence, uplifting drive, 150-160 BPM"
+        "polished radio-ready mix with headroom, running cadence, uplifting drive"
     ),
     "warmup": (
         "warm rounded bass, smooth steady groove, clean percussion, "
@@ -153,31 +153,84 @@ def refine_combo(combo: dict | None, *, channel: str | None = None) -> dict | No
     return out
 
 
-def style_booster(action: str | None, *, channel: str | None = None) -> str:
-    """Suno style 뒤에 붙일 구체 음악 용어. 운동 채널이 아니면 빈 문자열."""
+# 템포 섞기(2026-10-28 대표: "매번 BPM이 같으면 지루 — 템포 늦춘 곡도 섞어", "보컬도 다 빨라서 영상 하나가
+# 지루"). 영상 1개(한 번에 만드는 곡 묶음) 안에서 비율대로 **나눠 배정**(tempo_plan) — 무작위로 다 빠르게
+# 나오는 일이 없게. 빠름 40% · 중간 35% · 미드템포 25%, 같은 템포끼리 연달아 놓지 않음. warmup 은 고정.
+TEMPO_MIX: dict[str, list[tuple[str, int]]] = {
+    "strength": [("150-160 BPM", 40), ("124-132 BPM, laid-back groove", 35),
+                 ("110-118 BPM, mid-tempo groove", 25)],
+    "cardio": [("150-160 BPM", 40), ("124-132 BPM, laid-back groove", 35),
+               ("110-118 BPM, mid-tempo groove", 25)],
+    "warmup": [("90-100 BPM", 100)],
+}
+# 템포별 보컬 결 — 빠른 곡도 보컬은 반박자로 여유 있게(하프타임 보컬), 느린 곡은 더 느긋하게.
+TEMPO_VOCAL: dict[str, str] = {
+    "150-160 BPM": "vocals phrased in half-time over the fast beat, breathing space between lines",
+    "124-132 BPM, laid-back groove": "laid-back relaxed vocal delivery, sustained notes",
+    "110-118 BPM, mid-tempo groove": "warm unhurried vocal delivery, long sustained notes, emotional build to the chorus",
+}
+
+
+def tempo_plan(n: int, action: str | None, *, channel: str | None = None, rng=None) -> list[str | None]:
+    """영상 1개의 곡 n개에 템포를 비율대로 나눠 준다(운동 채널만, 아니면 None 목록)."""
+    import random as _random
+    if not is_workout_channel(channel) or n <= 0:
+        return [None] * max(n, 0)
+    r = rng or _random
+    opts = TEMPO_MIX.get(axis_for_action(action)) or TEMPO_MIX["strength"]
+    total = sum(w for _, w in opts)
+    counts = [int(n * w / total) for _, w in opts]
+    for k in sorted(range(len(opts)), key=lambda k: -(n * opts[k][1] / total - counts[k])):
+        if sum(counts) >= n:
+            break
+        counts[k] += 1
+    plan = [t for (t, _), c in zip(opts, counts) for _ in range(c)]
+    for _ in range(50):   # 같은 템포끼리 연달아 놓지 않기(빠름·중간·느림이 번갈아)
+        r.shuffle(plan)
+        if all(plan[i] != plan[i + 1] for i in range(len(plan) - 1)) or len(set(plan)) == 1:
+            break
+    return plan
+
+
+def pick_tempo(axis: str, rng=None) -> str:
+    import random as _random
+    r = rng or _random
+    opts = TEMPO_MIX.get(axis) or TEMPO_MIX["strength"]
+    return r.choices([t for t, _ in opts], weights=[w for _, w in opts], k=1)[0]
+
+
+def style_booster(action: str | None, *, channel: str | None = None, rng=None, tempo: str | None = None) -> str:
+    """Suno style 뒤에 붙일 구체 음악 용어 + 곡별 템포(tempo 를 주면 그대로). 운동 채널이 아니면 빈 문자열."""
     if not is_workout_channel(channel):
         return ""
-    return _STYLE_BOOST[axis_for_action(action)]
+    axis = axis_for_action(action)
+    base = _STYLE_BOOST[axis]
+    return base if "BPM" in base else f"{base}, {tempo or pick_tempo(axis, rng)}"
 
 
-def boost_style(style: str, action: str | None, *, channel: str | None = None) -> str:
+def boost_style(style: str, action: str | None, *, channel: str | None = None, tempo: str | None = None) -> str:
     """style + 부스터. 원본 style(LLM 이 지은 곡별 변주)은 **버리지 않고 뒤에 붙인다**.
 
     이미 부스터가 붙어 있으면 그대로(중복 방지). where 는 인자 그대로 반환.
     """
-    boost = style_booster(action, channel=channel)
+    boost = style_booster(action, channel=channel, tempo=tempo)
     if not boost:
         return style
     base = (style or "").strip().strip(",").strip()
-    if boost in base:
+    if _STYLE_BOOST[axis_for_action(action)] in base:   # 이미 부스터가 붙어 있으면(템포 무관) 그대로
         return base
     return f"{base}, {boost}" if base else boost
 
 
+# where(루프탑 시티팝·로파이) — 2026-10-28 대표 "where 도 채널 성격 유지하고 동일하게 점검·반영".
+# 찢어지는 소리만 막는다. 로파이의 바이닐 크래클·잔잔함(mellow·lo-fi)은 채널 성격이라 막지 않는다.
+WHERE_NEGATIVE = "distorted, harsh, clipping, overdriven, distorted vocals, screaming, shouting, muddy mix"
+
+
 def negative_tags(action: str | None, *, channel: str | None = None) -> str | None:
-    """Suno negativeTags. 운동 채널이 아니면 None → music_suno 가 전송하지 않는다."""
+    """Suno negativeTags. 운동은 축별, where(그 밖의 음악 채널)는 거친 소리만(WHERE_NEGATIVE)."""
     if not is_workout_channel(channel):
-        return None
+        return WHERE_NEGATIVE if channel else None
     return _NEGATIVE[axis_for_action(action)]
 
 
@@ -267,7 +320,7 @@ VOCAL_QUALITY = ("smooth, clear and pleasant lead vocals sitting upfront in the 
 
 def lock_vocal_style(
     tag_style: str, llm_style: str | None, action: str | None, *, finalize=None,
-    channel: str | None = WORKOUT_CHANNEL,
+    channel: str | None = WORKOUT_CHANNEL, tempo: str | None = None,
 ) -> str:
     """운동 채널 보컬 곡 최종 style. 태그 style 이 맨 앞, LLM style(정리본)은 꼬리 변주.
 
@@ -277,12 +330,13 @@ def lock_vocal_style(
     """
     finalize = finalize or (lambda s: s)
     axis = axis_for_action(action)
-    vocal = VOCAL_QUALITY
+    tempo = tempo or (pick_tempo(axis) if axis != "warmup" else None)
+    vocal = VOCAL_QUALITY + (f", {TEMPO_VOCAL[tempo]}" if tempo in TEMPO_VOCAL else "")
     head = _genre_first((tag_style or "").strip().strip(",").strip())
     tail = _clean_tail(llm_style or "", axis, head)
     while True:
         body = ", ".join([p for p in [head, *tail] if p])
-        style = boost_style(finalize(body), action, channel=channel)
+        style = boost_style(finalize(body), action, channel=channel, tempo=tempo)
         if vocal not in style:
             style = f"{style}, {vocal}"
         if len(style) <= SUNO_STYLE_MAX or not tail:

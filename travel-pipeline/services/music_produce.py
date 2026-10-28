@@ -200,8 +200,10 @@ def _gen_vocal(
     if len(valid) < len(songs):
         logger.warning("[produce] 가사 빈 곡 %d개 건너뜀", len(songs) - len(valid))
     genders = _assign_genders(len(valid), channel)
+    from services import music_workout_style as _wst
+    tempos = _wst.tempo_plan(len(valid), action, channel=channel)   # 운동: 영상 안에서 템포 나눠 배정(2026-10-28)
     seen = seen if seen is not None else set()
-    for i, (s, gender) in enumerate(zip(valid, genders), 1):
+    for i, (s, gender, tempo) in enumerate(zip(valid, genders, tempos), 1):
         lyric = s["lyrics"].strip()
         from services import music_workout_style as _ws  # 5단계 B (지연 import)
         if _ws.is_workout_channel(channel):
@@ -210,7 +212,7 @@ def _gen_vocal(
             # 장르를 덮어쓰던 문제(2026-10 실측) 차단. 부스터·1000자 한도는 함수 안에서.
             _style = _ws.lock_vocal_style(
                 base_style, s.get("style"), action,
-                finalize=lambda st, _g=gender: _vocal_style(st, _g), channel=channel,
+                finalize=lambda st, _g=gender: _vocal_style(st, _g), channel=channel, tempo=tempo,
             )
         else:
             # where: 기존 그대로(LLM style 우선, boost_style 은 where 에서 인자 그대로 반환).
@@ -301,6 +303,8 @@ def _gen_instrumental(
     except Exception as e:  # noqa: BLE001
         logger.warning("[produce] 연주곡 변주 생성 실패(공통 style 폴백): %s", e)
 
+    from services import music_workout_style as _wst
+    inst_tempos = _wst.tempo_plan(n, action, channel=channel)   # 운동: 영상 안에서 템포 나눠 배정(2026-10-28)
     for i in range(1, n + 1):
         var = variations[i - 1] if i <= len(variations) else {}
         title = var.get("title", "")
@@ -324,7 +328,7 @@ def _gen_instrumental(
         theme = {
             "theme_slug": theme_slug,
             "instrumental": True,
-            "style": _ws.boost_style(track_style, action, channel=channel),
+            "style": _ws.boost_style(track_style, action, channel=channel, tempo=inst_tempos[i - 1]),
             "title": title,
             "language": "inst",
             "genre_id": genre_id,  # #46: 둘째 클립이 used=false 로 적립 → 다음에 재활용
