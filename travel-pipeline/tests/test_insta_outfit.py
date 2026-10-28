@@ -336,7 +336,7 @@ def test_api_routes(flow, monkeypatch):
     app.include_router(routes.router, prefix="/insta")
     c = TestClient(app)
     opts = c.get("/insta/outfit-options").json()
-    assert len(opts["poses"]) == 18 and len(P.POSES) == 28 and opts["estimate"]["max"] == 0.033
+    assert len(opts["poses"]) == 19 and len(P.POSES) == 29 and opts["estimate"]["max"] == 0.033
     r = c.post("/insta/outfits", json={"character_id": "chaei", "products": PRODS})
     assert r.status_code == 200
     j = c.get(f"/insta/outfit-jobs/{r.json()['id']}").json()
