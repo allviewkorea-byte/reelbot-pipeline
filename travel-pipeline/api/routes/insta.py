@@ -13,6 +13,7 @@ from services import insta_collection as coll
 from services import insta_outfit as io
 from services import insta_outfit_plan as P
 from services import insta_picks as picks
+from services import insta_pose_lib as pose_lib
 from services import insta_refs as refs
 
 router = APIRouter()
@@ -305,3 +306,25 @@ async def add_screenshot(file: UploadFile = File(...)):
         return refs.add_screenshot(data, file.filename or "")
     except (refs.RefsError, ValueError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+# ── 포즈 라이브러리(2026-10-30) — 착장 생성에 포즈 참고 이미지(설정은 대표가 화면에서) ──────────
+class PoseSettingsReq(BaseModel):
+    enabled: bool | None = None
+    cats: list[str] | None = None
+    angles: list[str] | None = None
+    excluded: list[str] | None = None
+
+
+@router.get("/poses")
+def pose_listing():
+    """카테고리·포즈(원본은 작가 사이트 주소)·설정."""
+    return pose_lib.listing()
+
+
+@router.post("/poses/settings")
+def pose_settings(req: PoseSettingsReq):
+    try:
+        return pose_lib.save_settings(req.model_dump(exclude_none=True))
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
