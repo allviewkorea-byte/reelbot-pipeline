@@ -188,9 +188,36 @@ def exchange_code(code: str, redirect_uri: str | None = None, *, channel: str | 
         logger.warning("[music-yt-oauth] %s", out["error"])
         return out
     out["refresh_token"] = refresh_token
+    # 2026-10-29: 구글 화면에서 다른 채널(같은 계정의 기본 채널 등)을 고르면 저장은 성공해 보이지만
+    # 업로드가 "채널 불일치"로 전부 실패했다 → 저장 전에 토큰의 실제 채널을 확인하고, 다르면 저장하지 않는다.
+    actual = token_channel(tok.get("access_token")) if tok.get("access_token") else None
+    if actual and actual.get("id") and actual["id"] != ch:
+        out["mismatch"] = {"selected_id": actual["id"], "selected_title": actual.get("title"), "expected_id": ch}
+        out["error"] = (
+            f"다른 채널을 골랐어요: 고른 채널={actual.get('title')}({actual['id']}) ≠ 이 카드 채널={ch}. "
+            "저장하지 않았어요 — 다시 연결하면서 구글 '채널 선택' 화면에서 올바른 채널을 고르세요."
+        )
+        logger.warning("[music-yt-oauth] %s", out["error"])
+        return out
+    out["selected_title"] = (actual or {}).get("title")
     out["save"] = save_refresh_token(ch, refresh_token)
     logger.info("[music-yt-oauth] 저장 결과: %s", out["save"])
     return out
+
+
+def token_channel(access_token: str) -> dict | None:
+    """토큰이 실제로 연결된 유튜브 채널 {id, title}. 확인 실패면 None(저장은 막지 않음)."""
+    try:
+        r = requests.get("https://www.googleapis.com/youtube/v3/channels",
+                         params={"part": "id,snippet", "mine": "true"},
+                         headers={"Authorization": f"Bearer {access_token}"}, timeout=_TIMEOUT)
+        items = r.json().get("items") or [] if r.status_code == 200 else []
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[music-yt-oauth] 토큰 채널 확인 실패: %s", e)
+        return None
+    if not items:
+        return None
+    return {"id": items[0].get("id"), "title": (items[0].get("snippet") or {}).get("title")}
 
 
 def _refresh_access_token(refresh_token: str) -> str:

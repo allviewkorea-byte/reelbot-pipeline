@@ -100,6 +100,12 @@ def callback(
             content={"ok": False, "step": "exchange_code", "error": repr(e), "redirect_uri": redir},
         )
 
+    if result.get("mismatch"):
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "step": "channel_mismatch", "error": result.get("error"),
+                     "channel": result.get("channel"), **result["mismatch"]},
+        )
     if not result.get("refresh_token"):
         return JSONResponse(
             status_code=400,
@@ -118,6 +124,7 @@ def callback(
         content={"ok": True, "step": "saved", "backend": save.get("backend"),
                  "channel": result.get("channel"),
                  "channel_id": result.get("channel_id"),
+                 "selected_channel": result.get("selected_title"),   # 구글에서 실제로 고른 채널 이름
                  "warning": save.get("supabase_error") and "Supabase 실패 — 로컬 폴백(휘발성)"},
     )
 
