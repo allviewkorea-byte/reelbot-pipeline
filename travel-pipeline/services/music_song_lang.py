@@ -8,6 +8,7 @@
      MUSIC_LYRICS_KO_ENABLED(기본 off)가 켜져 있을 때만 2) 비율로 한국어가 나온다.
      꺼져 있으면 보컬 영상은 전부 영어 → 영어 75 · 연주 25.
 원래 연주인 영상(장소 BGM 장르·연주 format)은 이 모듈을 쓰지 않는다(전부 연주 그대로).
+  ✅ 2026-10-29 예외: 발라드·K-시티팝(MUSIC_LYRICS_KO_GENRES)은 항상 한국어 보컬 — "발라드는 한국어도 잘 들린다".
 결정값 ko|en|inst 는 곡 메타 language(music_tracks.language·체크포인트·믹스 JSON)에 남는다.
 """
 
@@ -52,10 +53,30 @@ def pick_video_language(*, rng: random.Random | None = None) -> str:
     return EN if r.random() < en_rate() else KO
 
 
-def assign(n: int, *, rng: random.Random | None = None, lang: str | None = None) -> list[str]:
-    """N곡의 language 목록 — 영상 단위로 통일(전 곡 같은 값). lang 을 주면 그 값(보충 D 용)."""
+def ko_genres() -> frozenset[str]:
+    """항상 한국어 보컬로 만드는 장르(대표 결정 2026-10-29 "발라드는 한국어로 나와도 잘 들린다").
+
+    env MUSIC_LYRICS_KO_GENRES(쉼표 구분, 기본 "ballad,kcitypop" — K-발라드·K-시티팝). 빈 값("none")이면 예외 없음.
+    MUSIC_LYRICS_KO_ENABLED(전체 한국어 허용)와 별개 — 이 장르는 그 스위치가 꺼져 있어도 한국어.
+    """
+    raw = os.getenv("MUSIC_LYRICS_KO_GENRES")
+    raw = "ballad,kcitypop" if raw is None else raw
+    return frozenset(g.strip().lower() for g in raw.split(",") if g.strip() and g.strip().lower() != "none")
+
+
+def assign(n: int, *, rng: random.Random | None = None, lang: str | None = None,
+           genre_id: str | None = None) -> list[str]:
+    """N곡의 language 목록 — 영상 단위로 통일(전 곡 같은 값). lang 을 주면 그 값(보충 D 용).
+
+    genre_id 가 ko_genres()(기본 발라드)면 연주·영어 없이 전부 한국어 보컬(K-발라드).
+    """
     n = max(0, int(n))
-    v = lang if lang in (KO, EN, INST) else pick_video_language(rng=rng)
+    if lang in (KO, EN, INST):
+        v = lang
+    elif (genre_id or "").strip().lower() in ko_genres():
+        v = KO
+    else:
+        v = pick_video_language(rng=rng)
     return [v] * n
 
 

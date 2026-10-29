@@ -25,6 +25,11 @@ GENRES: list[dict] = [
     {"id": "citypop", "label_kr": "시티팝", "label_en": "City Pop",
      "suno_tags": "city pop, 80s japanese funk, warm analog synth, slap bass, groovy, nostalgic summer",
      "instrumental": False, "bpm_range": "95-110"},
+    # K-시티팝(대표 2026-10-29 "120bpm 신나는 시티팝(한국어)") — 항상 한국어 보컬(music_song_lang.ko_genres).
+    {"id": "kcitypop", "label_kr": "K-시티팝", "label_en": "K-City Pop",
+     "suno_tags": "korean city pop, upbeat, bright funky groove, slap bass, shimmering synth, crisp drums, "
+                  "catchy chorus, clear warm vocal, summer drive",
+     "instrumental": False, "bpm_range": "118-122"},
     {"id": "sunset_drive", "label_kr": "선셋 드라이브", "label_en": "Sunset Drive",
      "suno_tags": "synthwave, sunset drive, retro wave, warm pads, electric guitar, dreamy, nostalgic cruise",
      "instrumental": False, "bpm_range": "85-100"},
@@ -101,6 +106,7 @@ def label_kr(genre_id: str) -> str:
 # ⚠️ substring 매칭이라 너무 짧은 단어 금지("pop" 은 citypop/kpop 을 오염, "비" 는 비트 오염).
 GENRE_KEYWORDS: dict[str, list[str]] = {
     "citypop": ["시티팝", "citypop", "city pop", "시티 팝", "네온", "neon"],
+    "kcitypop": ["k-시티팝", "k시티팝", "kcitypop", "k-city pop", "korean city pop"],
     "sunset_drive": ["선셋", "sunset", "석양", "노을", "드라이브", "drive", "운전", "cruise", "해질", "신스웨이브", "synthwave"],
     "morning_drive": ["모닝", "morning", "출근", "아침", "commute", "산뜻", "상쾌"],
     "cafe": ["카페", "cafe", "café", "커피", "coffee", "브런치", "brunch", "라운지", "lounge", "보사노바", "bossa", "어쿠스틱", "acoustic"],
@@ -156,6 +162,12 @@ PRESETS: dict[str, dict] = {
         "title_kr": "시티팝", "tracks": ["City Lights", "Neon Drive"],
         "style_prompt": "city pop, 80s japanese funk, warm analog synth, slap bass, groovy, nostalgic",
         "lyric_tone": "네온이 흐르는 도시의 세련된 밤",
+    },
+    "kcitypop": {
+        "genre": "K-시티팝", "situation": "여름 도시 드라이브", "mood": "신나는", "type": "vocal",
+        "title_kr": "K-시티팝", "tracks": ["Summer Signal", "Blue Hour Drive"],
+        "style_prompt": "korean city pop, upbeat, bright funky groove, slap bass, shimmering synth, catchy chorus",
+        "lyric_tone": "햇살 가득한 도시를 달리는 설레고 신나는 여름 연애",
     },
     "sunset_drive": {
         "genre": "선셋 드라이브", "situation": "해질녘 드라이브", "mood": "몽환적인", "type": "instrumental",

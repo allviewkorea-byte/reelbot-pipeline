@@ -239,6 +239,7 @@ def _translate_one_meta(base_title: str, base_desc: str, src: str, target: str) 
 # where 장르별 해시태그(영어 3 + 한국어 3). 공통 #playlist #플레이리스트 + 장소·무드는 함수에서 붙인다.
 _WHERE_GENRE_TAGS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "citypop": (("citypop", "cityPopPlaylist", "80sJapanesePop"), ("시티팝", "시티팝플레이리스트", "드라이브음악")),
+    "kcitypop": (("kcitypop", "koreancitypop", "summerdrive"), ("시티팝", "신나는노래", "드라이브음악")),
     "sunset_drive": (("sunsetdrive", "drivingmusic", "synthwave"), ("드라이브음악", "노을", "드라이브플리")),
     "morning_drive": (("morningdrive", "morningmusic", "commutemusic"), ("출근길음악", "아침음악", "드라이브음악")),
     "cafe": (("cafemusic", "acoustic", "coffeeshopmusic"), ("카페음악", "카페플리", "어쿠스틱")),

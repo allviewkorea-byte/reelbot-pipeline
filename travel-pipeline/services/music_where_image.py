@@ -21,6 +21,7 @@ WHERE_GENRES: tuple[str, ...] = (
     "citypop", "sunset_drive", "morning_drive", "cafe", "jazz", "ballad", "breakup",
     "sleep_study", "lofi", "rnb_soul", "hotel_lobby", "cafe_bgm", "bar_lounge",
     "spa_meditation", "library_study",
+    "kcitypop",  # 2026-10-29 K-시티팝(한국어·120bpm)
 )
 
 PERSON_RATE = 0.30  # 인물 등장 비율 목표
@@ -149,17 +150,39 @@ STREET_GENRES: frozenset[str] = frozenset({
 })
 
 
-def street_rate() -> float:
+STYLE_BRIGHT = "bright"  # 청량 서울(대표 결정 2026-10-29) — 주력 스타일
+
+STREET_RATE_DEFAULT = 0.5   # 청량 서울이 아닌 회차 안에서의 거리 스냅 비율(허용 장르만)
+BRIGHT_RATE_DEFAULT = 0.7   # 회차 전체 중 청량 서울 비율
+
+
+def _rate_env(key: str, default: float) -> float:
     try:
-        v = float((os.getenv("MUSIC_WHERE_STREET_RATE") or "").strip() or 0.4)
+        v = float((os.getenv(key) or "").strip() or default)
     except ValueError:
-        v = 0.4
+        v = default
     return max(0.0, min(1.0, v))
 
 
+def street_rate() -> float:
+    """청량 서울이 **아닌** 회차 중 거리 스냅 비율(허용 장르만). 기본 0.5."""
+    return _rate_env("MUSIC_WHERE_STREET_RATE", STREET_RATE_DEFAULT)
+
+
+def bright_rate() -> float:
+    """회차 전체 중 청량 서울 비율. 기본 0.7 → 청량 70 · 거리 15 · 건축 15(허용 장르 기준)."""
+    return _rate_env("MUSIC_WHERE_BRIGHT_RATE", BRIGHT_RATE_DEFAULT)
+
+
 def pick_style(genre: str | None, *, rng: random.Random | None = None) -> str:
-    """회차 배경 스타일. 허용 장르만 street_rate 확률로 거리 스냅, 나머지는 항상 건축 공간."""
+    """회차 배경 스타일.
+
+    1) bright_rate 확률로 청량 서울(전 장르).
+    2) 나머지 중 거리 스냅 허용 장르는 street_rate 확률로 거리 스냅, 그 외는 건축 공간.
+    """
     r = rng or random
+    if r.random() < bright_rate():
+        return STYLE_BRIGHT
     if (genre or "").strip() in STREET_GENRES and r.random() < street_rate():
         return STYLE_STREET
     return STYLE_SPACE
@@ -306,6 +329,130 @@ STREET_REVIEW_SYSTEM = (
     "6. 인물이 화면 가로 가운데(로고 자리)에 있다.\n"
     "7. 화면 중앙이 하얗게 날아가 있다 — 중앙의 흰 로고가 안 보일 정도로 중앙이 희거나 과노출이면 불합격.\n"
     "8. 너무 어둡거나 탁해서 장면이 잘 보이지 않는다.\n"
+    "애매하면 불합격으로 판단한다.\n"
+    '반드시 JSON 한 개만 출력한다: {"pass": true 또는 false, "reasons": ["불합격 사유(한국어, 짧게)"]}. '
+    "합격이면 reasons 는 빈 배열."
+)
+
+
+# ══ 세 번째 스타일: 청량 서울(대표 결정 2026-10-29, 주력) ═══════════════════════════════
+# "where 배경이 너무 다운된 느낌" → 예전 업로드(옥상 농구장·한강 노을·서울 골목 노을·하얀 건물과
+# 파란 하늘·아치 창 카페)처럼 밝고 청량한 결로. 노래 장르에 맞는 장면을 고른다.
+# 위 건축 공간·거리 스냅 상수는 한 글자도 바꾸지 않고 추가만 한다.
+BRIGHT_TONE = (
+    "밝고 청량한 사진. 맑은 파란 하늘과 흰 구름, 또는 선명한 주황·분홍빛 노을. 선명하고 맑은 색감, "
+    "깨끗한 자연광, 여행 가고 싶어지는 기분. 서울·한국 도심의 실제 같은 장소 — 한강·옥상·주택가 언덕길·"
+    "하얀 모던 건물·아치 창 카페·탁 트인 도로. 실존하는 특정 랜드마크는 그대로 그리지 말 것. "
+    "채도 낮은 필름 톤·회색빛·어둡고 탁한 화면·밤 장면 금지. 과도한 HDR·인공적인 광택 금지. "
+    "직선·건물은 곧게, 원근은 정확하게. "
+    "화면 중앙은 하얗게 날리지 말 것 — 영상 중앙에 흰 로고가 올라가므로 중앙에도 톤과 디테일이 살아 있게. "
+    "간판·표지판·포스터 글자·로고 등 읽히는 문구 금지."
+)
+
+BRIGHT_PERSON_RATE = 0.5
+_BRIGHT_PERSON_LINE = (
+    "작은 인물 1~2명이 장면 속에 자연스럽게(걷기·앉기·농구·자전거 등), 화면의 작은 부분만 차지. "
+    "인물은 화면 가로 가운데를 피해 좌우 한쪽에. 얼굴 정면 클로즈업·화보 연출 금지, 노출 과한 옷 금지."
+)
+_BRIGHT_NO_PERSON_LINE = "사람 없이 장소만."
+
+_BRIGHT_SCENES: dict[str, list[str]] = {
+    "morning": [  # citypop · morning_drive — 파란 하늘·하얀 건물·탁 트인 길
+        "맑은 파란 하늘 아래 하얀 곡면 모던 건물, 둥근 창이 줄지어 있고 앞으로 깨끗한 도로가 뻗어 있다.",
+        "뭉게구름이 뜬 파란 하늘, 하얀 건물 옥상 난간 너머로 펼쳐진 도시와 먼 산.",
+        "아침 햇살이 드는 한강변 자전거길, 파란 하늘과 반짝이는 강물, 멀리 다리.",
+        "파란 하늘 아래 야자수 화분이 놓인 하얀 건물 모퉁이, 선명한 그림자.",
+        "탁 트인 해안 도로, 파란 하늘과 바다가 맞닿은 수평선, 깨끗한 아스팔트.",
+    ],
+    "sunset": [  # sunset_drive · ballad — 노을 지는 서울 골목·언덕
+        "노을빛이 쏟아지는 서울 주택가 언덕길, 길 끝으로 해가 지고 전봇대 실루엣, 따뜻한 주황 하늘.",
+        "해 질 녘 오래된 서울 골목, 화분과 나무 대문, 길 위로 길게 드리운 황금빛.",
+        "언덕 위 계단에서 내려다본 지붕들과 붉게 물든 하늘, 멀리 도시 스카이라인.",
+        "노을 지는 한강 다리 위, 분홍과 주황이 섞인 하늘이 강물에 비친다.",
+        "해 질 녘 한적한 주택가 사거리, 따뜻한 빛을 받은 나무와 낮은 건물들.",
+    ],
+    "river": [  # breakup — 해 질 녘 물가·여운
+        "해 질 녘 한강 물가, 잔잔한 수면에 비친 노을과 멀리 산 능선, 물가에 선 작은 인물의 옆모습.",
+        "노을빛이 번지는 강변 산책로, 빈 벤치와 반짝이는 강물, 분홍빛 하늘.",
+        "해가 산 너머로 넘어가는 호숫가, 하늘이 주황에서 보라로 물들고 수면이 고요하다.",
+        "노을 진 방파제 끝, 바다와 하늘이 같은 색으로 물든 장면.",
+    ],
+    "rooftop": [  # lofi · sleep_study 낮 — 옥상·도심 공원
+        "파란 하늘 아래 서울 옥상 농구장, 철망 너머로 한강과 아파트 스카이라인, 선명한 코트 라인.",
+        "건물 옥상 정원, 초록 화분과 나무 데크, 뒤로 펼쳐진 맑은 하늘과 도시.",
+        "투명한 유리 지붕 아래 밝은 실내 코트, 햇살이 바닥에 격자 그림자를 만든다.",
+        "도심 공원 잔디밭과 가로수, 뒤로 하얀 건물들과 파란 하늘.",
+    ],
+    "cafe": [  # cafe · cafe_bgm · jazz 낮
+        "하얀 아치 창 너머로 파란 바다가 보이는 밝은 카페, 원목 테이블과 화분, 햇살 가득.",
+        "통유리창으로 오후 햇살이 쏟아지는 하얀 카페, 테이블 위 커피잔, 창밖 초록 나무.",
+        "하얀 벽과 아치형 입구가 있는 지중해풍 카페 테라스, 파란 하늘과 올리브 나무.",
+        "골목 모퉁이 하얀 카페 외관, 큰 창과 나무 문, 맑은 오후 햇살.",
+    ],
+    "lounge": [  # jazz · bar_lounge · hotel_lobby · rnb_soul — 밤 대신 매직아워·자연광 로비
+        "해가 막 진 매직아워의 루프탑 라운지, 분홍·보라빛 하늘과 하나둘 켜지는 도시 불빛, 밝은 하늘이 화면 대부분.",
+        "통유리로 오후 햇살이 쏟아지는 밝은 호텔 로비, 석재 바닥과 큰 화분, 창밖 파란 하늘.",
+        "노을빛이 비스듬히 드는 루프탑 바 테라스, 따뜻한 주황 하늘과 도시 전경.",
+        "바다가 보이는 밝은 리조트 라운지, 하얀 소파와 열린 창, 맑은 하늘.",
+    ],
+    "calm": [  # spa_meditation · library_study — 햇살 가득한 실내
+        "큰 창으로 햇살이 쏟아지는 밝은 도서관, 원목 책상과 초록 나무가 보이는 창.",
+        "하얀 벽과 원목 바닥의 고요한 실내, 창으로 들어온 햇살이 바닥에 사각형을 그린다.",
+        "햇살 드는 온실 카페, 유리 지붕과 초록 식물, 밝고 맑은 공기.",
+        "맑은 아침, 창가 쿠션 자리와 그 너머 파란 하늘과 나무.",
+    ],
+}
+
+_BRIGHT_GENRE_GROUP: dict[str, list[str]] = {
+    "citypop": ["morning", "sunset"], "kcitypop": ["morning", "rooftop"], "morning_drive": ["morning"],
+    "sunset_drive": ["sunset"],
+    "ballad": ["sunset", "river"], "breakup": ["river"],
+    "lofi": ["rooftop", "calm"], "sleep_study": ["calm"], "library_study": ["calm"],
+    "cafe": ["cafe"], "cafe_bgm": ["cafe"], "jazz": ["cafe", "lounge"],
+    "bar_lounge": ["lounge"], "hotel_lobby": ["lounge"], "rnb_soul": ["lounge", "sunset"],
+    "spa_meditation": ["calm"],
+}
+
+
+def bright_scene_pool(genre: str | None) -> list[str]:
+    """장르 → 청량 서울 장면 풀. 미등록 장르는 파란 하늘·노을 풀."""
+    out: list[str] = []
+    for grp in _BRIGHT_GENRE_GROUP.get((genre or "").strip(), ["morning", "sunset"]):
+        out.extend(_BRIGHT_SCENES[grp])
+    return out
+
+
+def build_bright_prompt(
+    genre: str | None, avoid: list[str] | None = None, *, rng: random.Random | None = None,
+) -> str:
+    """청량 서울 최종 프롬프트. avoid: 직전 시도 검수 불합격 사유."""
+    r = rng or random
+    scene = r.choice(bright_scene_pool(genre))
+    person = _BRIGHT_PERSON_LINE if r.random() < BRIGHT_PERSON_RATE else _BRIGHT_NO_PERSON_LINE
+    prompt = (
+        "실제 사진작가가 고급 카메라로 촬영한 가로 16:9 비율 사진. 고해상도, 선명하고 디테일이 풍부하게. "
+        "AI가 만든 느낌 절대 없이. 텍스트, 글자, 워터마크 없이. "
+        f"{BRIGHT_TONE} 장면: {scene} {person}"
+    )
+    if avoid:
+        prompt += " 이번엔 반드시 피할 것(직전 시도 검수 불합격 사유): " + "; ".join(avoid) + "."
+    return prompt
+
+
+BRIGHT_REVIEW_SYSTEM = (
+    "너는 감성 음악 플레이리스트 유튜브 채널(where;)의 배경 이미지 검수자다. 이 이미지는 영상 전체 배경과 "
+    "썸네일로 그대로 쓰이고, 화면 중앙에 흰 로고가, 왼쪽 아래에 곡 제목이 올라간다.\n"
+    "합격 기준: 밝고 청량한 사진 — 맑은 파란 하늘이나 선명한 노을, 서울·한국 도심 같은 장소(한강·옥상·골목·"
+    "하얀 건물·밝은 카페·탁 트인 도로). 선명하고 맑은 색감. 인물은 없거나 작게 1~2명이면 정상이다.\n"
+    "아래 불합격 기준 중 하나라도 해당하면 불합격이다.\n"
+    "1. 간판·표지판·포스터 문구·큰 글자·로고·워터마크가 보인다.\n"
+    "2. 실존하는 유명 랜드마크·특정 건물로 바로 알아볼 수 있다.\n"
+    "3. AI 티: 휘거나 비틀린 직선·건물, 맞지 않는 원근, 녹아내린 구조물, 손·관절·얼굴 왜곡, 과도한 광택·HDR.\n"
+    "4. 어둡거나 탁하다 — 밤 장면, 회색빛 흐린 하늘, 채도 낮은 필름 톤, 전체가 칙칙한 느낌.\n"
+    "5. 얼굴 정면 클로즈업이나 화보처럼 인물이 주인공인 사진, 노출이 과한 옷.\n"
+    "6. 인물이 화면 가로 가운데(로고 자리)에 크게 있다.\n"
+    "7. 화면 중앙이 하얗게 날아가 있다 — 중앙의 흰 로고가 안 보일 정도로 희거나 과노출.\n"
+    "8. 지저분하거나 어수선하다(쓰레기·빨래·엉킨 전선이 눈에 띔).\n"
     "애매하면 불합격으로 판단한다.\n"
     '반드시 JSON 한 개만 출력한다: {"pass": true 또는 false, "reasons": ["불합격 사유(한국어, 짧게)"]}. '
     "합격이면 reasons 는 빈 배열."

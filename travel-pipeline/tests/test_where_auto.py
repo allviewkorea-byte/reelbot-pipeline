@@ -52,7 +52,7 @@ def test_busy_waits_until_T(monkeypatch):
 
 # ── B 장르 ────────────────────────────────────────────────────────────
 def test_where_genres_are_15_without_excluded():
-    assert len(mwi.WHERE_GENRES) == 15
+    assert len(mwi.WHERE_GENRES) == 16   # 15 + K-시티팝(2026-10-29)
     assert not {"workout", "hiphop", "kpop", "pop"} & set(mwi.WHERE_GENRES)
 
 
