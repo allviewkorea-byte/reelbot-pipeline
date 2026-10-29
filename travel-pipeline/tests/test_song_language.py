@@ -121,7 +121,7 @@ def env(monkeypatch):
 def test_mixed_video_instrumental_path(monkeypatch, env):
     mp, st = env
     from services import music_suno
-    monkeypatch.setattr(sl, "assign", lambda n, rng=None: ["inst", "en", "ko", "inst", "en"][:n])
+    monkeypatch.setattr(sl, "assign", lambda n, rng=None, genre_id=None: ["inst", "en", "ko", "inst", "en"][:n])
     events = []
     out = mp.produce("s", n=5, base_style="city pop, silky female vocals, warm synths",
                      do_master=False, do_mix=False, checkpoint=events.append)
@@ -141,7 +141,7 @@ def test_mixed_video_instrumental_path(monkeypatch, env):
 
 def test_all_instrumental_assignment_skips_lyrics(monkeypatch, env):
     mp, st = env
-    monkeypatch.setattr(sl, "assign", lambda n, rng=None: ["inst"] * n)
+    monkeypatch.setattr(sl, "assign", lambda n, rng=None, genre_id=None: ["inst"] * n)
     out = mp.produce("s", n=2, do_master=False, do_mix=False)
     assert st["lyrics_calls"] == [] and len(out["produced"]) == 2 and all(t["instrumental"] for t in st["suno"])
 
@@ -152,7 +152,7 @@ def test_top_up_uses_same_rule(monkeypatch, env):
     asked = []
     real = sl.assign
 
-    def _spy(n, rng=None, lang=None):
+    def _spy(n, rng=None, lang=None, genre_id=None):
         asked.append((n, lang))
         return real(n, rng=random.Random(n), lang=lang) if lang else ["en"] * n
     monkeypatch.setattr(sl, "assign", _spy)

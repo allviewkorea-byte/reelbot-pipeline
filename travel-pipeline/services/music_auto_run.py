@@ -389,7 +389,7 @@ AWAIT_MAX_SEC = 3 * 3600
 
 
 def pick_where_genre(channel: str, *, rng=None) -> str:
-    """where 장르 균등 랜덤(15개). 직전 2회차가 같은 장르면 그 장르는 뺀다(연속 3회 금지).
+    """where 장르 랜덤(15개, 발라드만 2배 가중). 직전 2회차가 같은 장르면 그 장르는 뺀다(연속 3회 금지).
 
     직전 장르는 자동 회차 claim 행(metadata.genre, DB)에서 읽는다 — 재시작해도 이어진다.
     """
@@ -401,7 +401,12 @@ def pick_where_genre(channel: str, *, rng=None) -> str:
     pool = list(WHERE_GENRES)
     if len(recent) == 2 and recent[0] and recent[0] == recent[1] and recent[0] in pool:
         pool.remove(recent[0])
-    return r.choice(pool)
+    # K-발라드 가중치(대표 2026-10-29 "K-발라드도 넣어줘") — 발라드는 다른 장르의 2배 확률.
+    weights = [WHERE_GENRE_WEIGHT.get(g, 1.0) for g in pool]
+    return r.choices(pool, weights=weights, k=1)[0]
+
+
+WHERE_GENRE_WEIGHT: dict[str, float] = {"ballad": 2.0}   # kcitypop 은 1(새 장르로 추가만)
 
 
 def _await_recovered(r: dict, job_id: str, *, sleep) -> str:

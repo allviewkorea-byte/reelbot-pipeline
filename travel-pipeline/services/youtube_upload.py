@@ -393,7 +393,7 @@ def _legacy_playlist(theme: dict) -> str | None:
     from services import music_genres
     genre_id = (theme.get("genre_id") or music_genres.classify_theme(theme) or "").strip().lower()
     _LEGACY_MAP = {
-        "citypop": "drive", "sunset_drive": "drive", "morning_drive": "drive",
+        "citypop": "drive", "kcitypop": "drive", "sunset_drive": "drive", "morning_drive": "drive",
         "cafe": "cafe", "cafe_bgm": "cafe", "lofi": "cafe",
         "jazz": "latenight", "rnb_soul": "latenight", "ballad": "latenight",
         "breakup": "latenight", "bar_lounge": "latenight",
