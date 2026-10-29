@@ -39,6 +39,7 @@ from services import character_measurements as cm
 from services import character_studio as cs
 from services import character_studio_gen as gen
 from services import insta_outfit_plan as P
+from services import insta_pose_lib as poses
 from services import shorts_cast_upload as up
 from services.music_store import _http_err, _supabase_cfg
 
@@ -399,6 +400,30 @@ def _download(url: str, dest: Path) -> Path:
     return dest
 
 
+def _pick_pose(plan: dict, history: list[dict], tmp: Path, rng) -> tuple[dict | None, str | None]:
+    """포즈 라이브러리(설정 enabled 일 때만) — 1장 골라 받아 둔다. 실패하면 기존 포즈 문장 그대로(None)."""
+    if (P.POSES.get(plan.get("pose")) or {}).get("person") is False:   # 플랫레이는 사람 없음
+        return None, None
+    try:
+        recent = [((h.get("plan") or {}).get("pose_ref") or {}).get("key") for h in history]
+        pose = poses.pick(recent=[k for k in recent if k], rng=rng)
+        if not pose:
+            return None, None
+        local = poses.download(pose, tmp / "pose_ref.png")
+        plan["pose_ref"] = {k: pose[k] for k in ("key", "id", "cat_ko", "angle", "ko", "url")}
+        return pose, local
+    except Exception as e:  # noqa: BLE001 - 포즈 참고는 부가 기능 — 실패해도 생성은 계속
+        logger.warning("[insta-outfit] 포즈 참고 이미지 실패(기존 포즈 문장으로): %s", str(e)[:160])
+        return None, None
+
+
+def _local_pose(ref_urls: list[str], pose: dict | None, local: str | None) -> list[str]:
+    """Muse 로 보낼 때만 포즈 원본 주소를 받아 둔 파일로 바꾼다(data URI — 작가 사이트 핫링크 안 함)."""
+    if not (pose and local):
+        return ref_urls
+    return [local if u == pose["url"] else u for u in ref_urls]
+
+
 def run(job_id: str, *, rng: random.Random | None = None) -> None:
     """BackgroundTasks 진입점: 기획 → 생성 → 검수(최대 2회 재생성) → 후처리 → 저장."""
     with _LOCK:
@@ -429,23 +454,28 @@ def run(job_id: str, *, rng: random.Random | None = None) -> None:
         except Exception:  # noqa: BLE001
             measurements = None
         hair_url = refs[plan["hair_role"]]["url"] if plan.get("hair_role") in refs else None
+        pose_ref, pose_local = _pick_pose(plan, history, tmp, rng)
+        if pose_ref:
+            _patch(outfit_id, {"plan": plan})
         adapter = get_muse_adapter()
         fix, last_review, reviews = None, None, []
         out = tmp / "result.png"
         for attempt in range(1 + MAX_REGEN):
             prompt, ref_urls = P.build(plan, face_url=refs[gen.FACE_ROLE]["url"], body_url=refs[gen.BODY_ROLE]["url"],
-                                       hair_url=hair_url, products=prods, fix_hint=fix, measurements=measurements)
+                                       hair_url=hair_url, products=prods, fix_hint=fix, measurements=measurements,
+                                       pose_ref=pose_ref)
             prompt = gen.strip_unsafe(prompt)
             _job(job_id, step=f"생성 {attempt + 1}회차")
             try:
-                res = asyncio.run(adapter.generate(ImageGenerationRequest(prompt=prompt, reference_images=ref_urls,
+                res = asyncio.run(adapter.generate(ImageGenerationRequest(prompt=prompt, reference_images=_local_pose(ref_urls, pose_ref, pose_local),
                                                                           aspect_ratio="9:16", output_path=str(out))))
             except RefBlocked:  # 안전 필터 → 체형·피부·분위기 문장을 뺀 단순 프롬프트 + 안전 문구로 1회 재시도
                 logger.warning("[insta-outfit] %s 안전 필터 → 단순 프롬프트로 재시도", outfit_id)
                 prompt, ref_urls = P.build(plan, face_url=refs[gen.FACE_ROLE]["url"], body_url=refs[gen.BODY_ROLE]["url"],
-                                           hair_url=hair_url, products=prods, fix_hint=None, safe=True)
+                                           hair_url=hair_url, products=prods, fix_hint=None, safe=True,
+                                           pose_ref=pose_ref)
                 prompt = gen.sanitize(gen.strip_unsafe(prompt))
-                res = asyncio.run(adapter.generate(ImageGenerationRequest(prompt=prompt, reference_images=ref_urls,
+                res = asyncio.run(adapter.generate(ImageGenerationRequest(prompt=prompt, reference_images=_local_pose(ref_urls, pose_ref, pose_local),
                                                                           aspect_ratio="9:16", output_path=str(out))))
             attempts = attempt + 1
             cost += res.cost_usd
