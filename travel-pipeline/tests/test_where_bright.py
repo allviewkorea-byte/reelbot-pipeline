@@ -85,12 +85,39 @@ def test_ko_genres_env(monkeypatch):
 
 
 def test_ballad_weighted_double(monkeypatch):
+    """잔잔한 그룹(12개, 발라드 2배 → 가중 합 13) 안에서 발라드는 다른 장르의 2배."""
     from services import music_jobs
     monkeypatch.setattr(music_jobs, "list_recent_by_type", lambda *a, **k: [])
+    monkeypatch.delenv("MUSIC_WHERE_BRIGHT_GENRE_RATE", raising=False)
     r = random.Random(7)
     c = Counter(ar.pick_where_genre("rooftop_music", rng=r) for _ in range(16000))
-    assert abs(c["ballad"] / 16000 - 2 / 17) < 0.012
-    assert abs(c["jazz"] / 16000 - 1 / 17) < 0.01 and c["kcitypop"] > 0
+    assert abs(c["ballad"] / 16000 - 0.5 * 2 / 13) < 0.012
+    assert abs(c["jazz"] / 16000 - 0.5 * 1 / 13) < 0.01 and c["kcitypop"] > 0
+
+
+def test_bright_genres_half_by_default(monkeypatch):
+    """대표 2026-11-08: 밝은 그룹(모닝 드라이브·시티팝·선셋 드라이브·K-시티팝) 합계 50%."""
+    from services import music_jobs
+    monkeypatch.setattr(music_jobs, "list_recent_by_type", lambda *a, **k: [])
+    monkeypatch.delenv("MUSIC_WHERE_BRIGHT_GENRE_RATE", raising=False)
+    r = random.Random(11)
+    picks = [ar.pick_where_genre("rooftop_music", rng=r) for _ in range(16000)]
+    bright = sum(g in ar.WHERE_BRIGHT_GENRES for g in picks) / len(picks)
+    assert abs(bright - 0.5) < 0.015
+    assert abs(Counter(picks)["morning_drive"] / len(picks) - 0.125) < 0.01
+
+
+def test_bright_rate_env_and_group_fallback(monkeypatch):
+    monkeypatch.setenv("MUSIC_WHERE_BRIGHT_GENRE_RATE", "0.7")
+    pool = list(mwi.WHERE_GENRES)
+    w = ar.where_genre_weights(pool)
+    bright = sum(x for g, x in zip(pool, w) if g in ar.WHERE_BRIGHT_GENRES) / sum(w)
+    assert abs(bright - 0.7) < 1e-9
+    monkeypatch.setenv("MUSIC_WHERE_BRIGHT_GENRE_RATE", "abc")
+    assert ar.where_bright_rate() == 0.5
+    # 한쪽 그룹만 남으면 그 그룹 기본 가중치 그대로
+    assert ar.where_genre_weights(["jazz", "ballad"]) == [1.0, 2.0]
+    assert ar.WHERE_BRIGHT_GENRES <= set(mwi.WHERE_GENRES)
 
 
 def test_kcitypop_genre_korean_120bpm():

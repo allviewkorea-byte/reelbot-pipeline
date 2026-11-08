@@ -389,7 +389,8 @@ AWAIT_MAX_SEC = 3 * 3600
 
 
 def pick_where_genre(channel: str, *, rng=None) -> str:
-    """where 장르 랜덤(15개, 발라드만 2배 가중). 직전 2회차가 같은 장르면 그 장르는 뺀다(연속 3회 금지).
+    """where 장르 랜덤(16개). 밝은 그룹이 전체의 BRIGHT_RATE(기본 50%), 나머지는 잔잔한 그룹.
+    그룹 안에서는 WHERE_GENRE_WEIGHT(발라드 2배)로 나눈다. 직전 2회차가 같은 장르면 그 장르는 뺀다(연속 3회 금지).
 
     직전 장르는 자동 회차 claim 행(metadata.genre, DB)에서 읽는다 — 재시작해도 이어진다.
     """
@@ -401,12 +402,37 @@ def pick_where_genre(channel: str, *, rng=None) -> str:
     pool = list(WHERE_GENRES)
     if len(recent) == 2 and recent[0] and recent[0] == recent[1] and recent[0] in pool:
         pool.remove(recent[0])
-    # K-발라드 가중치(대표 2026-10-29 "K-발라드도 넣어줘") — 발라드는 다른 장르의 2배 확률.
-    weights = [WHERE_GENRE_WEIGHT.get(g, 1.0) for g in pool]
-    return r.choices(pool, weights=weights, k=1)[0]
+    return r.choices(pool, weights=where_genre_weights(pool), k=1)[0]
 
 
+# K-발라드 가중치(대표 2026-10-29 "K-발라드도 넣어줘") — 같은 그룹 안에서 발라드는 2배 확률.
 WHERE_GENRE_WEIGHT: dict[str, float] = {"ballad": 2.0}   # kcitypop 은 1(새 장르로 추가만)
+
+# 밝은 그룹(대표 2026-11-08 "출근길 노동요처럼 밝은 노래 비중을 키워줘") — 잔잔한 장르(카페·호텔·스파·수면…)가
+# 13개라 균등 랜덤이면 밝은 곡이 ~13%뿐이었다. 그룹 합계로 비율을 고정한다.
+WHERE_BRIGHT_GENRES: frozenset[str] = frozenset({"morning_drive", "citypop", "sunset_drive", "kcitypop"})
+
+
+def where_bright_rate() -> float:
+    """밝은 그룹 합계 비율(env MUSIC_WHERE_BRIGHT_GENRE_RATE, 기본 0.5, 0~1)."""
+    try:
+        v = float((os.getenv("MUSIC_WHERE_BRIGHT_GENRE_RATE") or "").strip() or 0.5)
+    except ValueError:
+        v = 0.5
+    return max(0.0, min(1.0, v))
+
+
+def where_genre_weights(pool: list[str]) -> list[float]:
+    """pool 순서대로 가중치. 밝은 그룹 합 = rate, 잔잔한 그룹 합 = 1-rate(그룹 안은 WHERE_GENRE_WEIGHT 비례).
+    한쪽 그룹이 비면(연속 금지로 빠지는 등) 남은 그룹만으로 고른다."""
+    base = [WHERE_GENRE_WEIGHT.get(g, 1.0) for g in pool]
+    bright_sum = sum(w for g, w in zip(pool, base) if g in WHERE_BRIGHT_GENRES)
+    calm_sum = sum(w for g, w in zip(pool, base) if g not in WHERE_BRIGHT_GENRES)
+    if not bright_sum or not calm_sum:
+        return base
+    rate = where_bright_rate()
+    return [w * (rate / bright_sum if g in WHERE_BRIGHT_GENRES else (1 - rate) / calm_sum)
+            for g, w in zip(pool, base)]
 
 
 def _await_recovered(r: dict, job_id: str, *, sleep) -> str:
