@@ -292,3 +292,39 @@ def test_upload_quota_log(caplog):
     line = next(r.getMessage() for r in caplog.records if "[yt-quota]" in r.getMessage())
     assert "자막 성공 2 / 실패 1 / 건너뜀 1" in line and "ja(quotaExceeded)" in line
     assert md._log_upload_quota("m", {"video_id": "v"}, {"localizations": {"ok": False}, "captions": {}}) == 1601
+
+
+# ── 영상 형식과 어긋나는 제목 차단(2026-11-04 사고: 연주 영상 제목 "하우스 보컬 모음") ──
+_FMT_POOL = {"ko": [{"kw": k, "score": 9 - i} for i, k in enumerate(["하우스 보컬 모음", "운동할 때 듣는 노래", "연주곡 모음"])],
+             "en": [{"kw": k, "score": 5 - i} for i, k in enumerate(["House Vocal Mix", "Workout Music Playlist", "Instrumental Workout"])]}
+
+
+@pytest.fixture
+def fmt_pool(monkeypatch, s3):
+    monkeypatch.setattr(kp, "get_pool", lambda ch: _FMT_POOL)
+    return s3
+
+
+def test_keywords_drop_conflicting_format(fmt_pool):
+    ko, en = kp.keywords(kp.WORKOUT, language="inst")
+    assert "하우스 보컬 모음" not in ko and "House Vocal Mix" not in en and ko[0] == "연주곡 모음"
+    ko, en = kp.keywords(kp.WORKOUT, language="en")
+    assert "연주곡 모음" not in ko and "Instrumental Workout" not in en and "하우스 보컬 모음" in ko
+    ko, _ = kp.keywords(kp.WORKOUT)                       # 언어 모름 → 거르지 않음
+    assert len(ko) == 3
+    assert kp.conflicts_format("피아노 비트 운동 노래", "en") is False   # 피아노·비트는 보컬 곡에도 쓰임
+
+
+def test_inst_video_title_never_vocal(monkeypatch, fmt_pool):
+    """태그 조합이 보컬이어도 영상 언어가 inst 면 연주곡으로 안내하고, 보컬 단어 제목은 재생성·폴백."""
+    from services import music_lyrics, music_meta, music_tags
+    calls = []
+    monkeypatch.setattr(music_lyrics, "_call",
+                        lambda *a, **k: calls.append(a[1]) or "불꽃 튀는 하우스 보컬 모음 | Fiery House Vocal Mix")
+    combo = music_tags.smart_random({"action": "workout"})
+    combo["format"] = ["vocal"]
+    theme = {"slug": "inst1", "channel": kp.WORKOUT, "tag_combo": combo, "video_language": "inst"}
+    ko, en = music_meta._generate_title_copy_tag(theme)
+    assert "형식: 연주곡(instrumental)" in calls[0]
+    assert not kp.VOCAL_WORD.search(f"{ko} {en}"), (ko, en)
+    assert len(calls) == 2                                # 보컬 단어 → 1회 재생성 후 폴백

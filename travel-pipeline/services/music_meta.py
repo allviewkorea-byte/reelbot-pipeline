@@ -419,9 +419,14 @@ def _kw_key(s: str) -> str:
 
 
 def _kw_validator(ctx: dict):
-    """한국어 카피에 검색 키워드 1개 이상(없으면 재생성). 영어 카피에 없으면 첫 영어 키워드로 바꾼다."""
+    """한국어 카피에 검색 키워드 1개 이상(없으면 재생성). 영어 카피에 없으면 첫 영어 키워드로 바꾼다.
+    영상 형식과 어긋나는 단어(연주 영상에 '보컬' 등)가 있으면 재생성."""
+    from services.music_keyword_pool import conflicts_format
+
     def check(got: tuple[str, str]) -> tuple[str, str] | None:
         ko, en = got
+        if conflicts_format(f"{ko} {en}", ctx.get("lang")):
+            return None
         if ctx["ko"] and not any(_kw_key(k) in _kw_key(ko) for k in ctx["ko"]):
             return None
         if ctx["en"] and not any(_kw_key(k) in _kw_key(en) for k in ctx["en"]):
@@ -483,7 +488,8 @@ def _generate_title_copy_tag(theme: dict) -> tuple[str, str]:
     labels = music_tags.combo_labels_kr(combo)
     summary = music_tags.combo_summary_kr(combo)
     style_en = music_tags.tags_to_suno_style(combo)
-    instrumental = music_tags.is_instrumental(combo)
+    # 태그 조합이 보컬이어도 영상 언어 결정(music_song_lang)이 연주(inst)면 연주 영상이다(2026-11-04 사고).
+    instrumental = music_tags.is_instrumental(combo) or video_language(theme) == "inst"
     title_type = "검색형" if _rnd.random() < 0.85 else "감성형"
     inst_hint = ""
     if instrumental:
