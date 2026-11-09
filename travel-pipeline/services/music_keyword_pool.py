@@ -409,6 +409,19 @@ def _merged(channel: str | None, genre: str | None) -> tuple[list[dict], list[di
 
 
 _INST = re.compile(r"instrumental|no lyrics|가사\s*없|연주|piano|피아노|beats?\b|비트", re.IGNORECASE)
+# 형식이 확실한 단어만(2026-11-04 사고: 연주 영상 제목에 "하우스 보컬"이 들어감).
+# 보컬 단어는 연주 영상에서, 연주 확정 단어는 보컬 영상에서 뺀다. 피아노·비트는 보컬 곡에도 쓰여 거르지 않는다.
+VOCAL_WORD = re.compile(r"보컬|vocal|singer|싱어", re.IGNORECASE)
+INST_WORD = re.compile(r"instrumental|no lyrics|가사\s*없|연주곡|연주", re.IGNORECASE)
+
+
+def conflicts_format(text: str, language: str | None) -> bool:
+    """제목·키워드가 영상 형식과 어긋나는지 — 연주 영상에 보컬 단어, 보컬 영상(ko|en)에 연주 확정 단어."""
+    if language == "inst":
+        return bool(VOCAL_WORD.search(text or ""))
+    if language in ("ko", "en"):
+        return bool(INST_WORD.search(text or ""))
+    return False
 
 
 def keywords(channel: str | None, genre: str | None = None, language: str | None = None,
@@ -418,7 +431,7 @@ def keywords(channel: str | None, genre: str | None = None, language: str | None
     used = {_key(x) for x in (recent or [])}
 
     def order(items: list[dict]) -> list[str]:
-        kws = [x["kw"] for x in items]
+        kws = [x["kw"] for x in items if not conflicts_format(x["kw"], language)]
         if language == "inst":
             kws = [k for k in kws if _INST.search(k)] + [k for k in kws if not _INST.search(k)]
         fresh = [k for k in kws if not any(_key(k) in u for u in used)]
