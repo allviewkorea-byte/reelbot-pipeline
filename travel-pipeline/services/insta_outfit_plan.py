@@ -601,8 +601,10 @@ def _face_line(plan: dict) -> str:
 
 
 def build(plan: dict, *, face_url: str, body_url: str, hair_url: str | None, products: list[dict],
-          fix_hint: str | None = None, measurements: dict | None = None, safe: bool = False) -> tuple[str, list[str]]:
-    """safe=True: 안전 필터에 걸린 뒤 다시 보낼 때 — 체형·피부·분위기 문장을 빼고 단순하게."""
+          fix_hint: str | None = None, measurements: dict | None = None, safe: bool = False,
+          pose_ref: dict | None = None) -> tuple[str, list[str]]:
+    """safe=True: 안전 필터에 걸린 뒤 다시 보낼 때 — 체형·피부·분위기 문장을 빼고 단순하게.
+    pose_ref(포즈 라이브러리, 2026-10-30): {"url", "en"} — 마네킹 선화를 참고 이미지로 넣고 포즈 문장을 대체."""
     """(prompt, refs). 참조 순서 고정 ① face ② body ③ hair ④~ 상품. 방(양말) 컷은 신발 상품을 뺀다."""
     loc = LOCATIONS[plan["location"]]
     pose = POSES[plan["pose"]]
@@ -617,6 +619,10 @@ def build(plan: dict, *, face_url: str, body_url: str, hair_url: str | None, pro
                   f"Take only the items from the product images — {_DETAIL}. {_TAIL}")
     else:
         refs = [face_url, body_url] + ([hair_url] if hair_url else [])
+        pose_idx = None
+        if pose_ref and pose_ref.get("url"):
+            refs.append(pose_ref["url"])
+            pose_idx = len(refs)
         start = len(refs) + 1
         room = MAX_REFS - len(refs)
         use = use[:room]
@@ -647,7 +653,15 @@ def build(plan: dict, *, face_url: str, body_url: str, hair_url: str | None, pro
             parts.append(f"She is {plan['prop']}.")
         if plan.get("mood") and not safe:
             parts.append(f"Free-spirited mood: {plan['mood']}.")
-        parts.append(f"{pose['en'][:1].upper()}{pose['en'][1:]}, {loc['en']}, {_face_line(plan)}, {weather}.")
+        if pose_idx:
+            desc = f" ({pose_ref['en'].strip().rstrip('.')})" if pose_ref.get("en") else ""
+            parts.append(
+                f"Her body pose copies the grey faceless mannequin sketch in reference image {pose_idx}{desc} — "
+                "same arm, leg, torso and head positions and the same camera angle. Take only the pose from that "
+                "image: never its grey colour, outlines, blank face, bare body or plain background.")
+            parts.append(f"{loc['en'][:1].upper()}{loc['en'][1:]}, {_face_line(plan)}, {weather}.")
+        else:
+            parts.append(f"{pose['en'][:1].upper()}{pose['en'][1:]}, {loc['en']}, {_face_line(plan)}, {weather}.")
         parts.append(light_line(plan["location"]))
         if not safe:
             parts.append(_SKIN)
