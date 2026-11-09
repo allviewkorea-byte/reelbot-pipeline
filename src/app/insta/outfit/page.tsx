@@ -9,6 +9,7 @@ import { prepareFile } from "@/components/shorts/FamilyCastPanel"
 import { CollectionPanel } from "@/components/insta/CollectionPanel"
 import { CoordiProducts, HideButton, type CoordiLook } from "@/components/insta/CoordiProducts"
 import { PicksPanel } from "@/components/insta/PicksPanel"
+import { PosePanel } from "@/components/insta/PosePanel"
 import { RefsPanel } from "@/components/insta/RefsPanel"
 import { useFold } from "@/components/insta/useFold"
 import { jsonOrThrow, usd, type View } from "@/components/studio/studio-lib"
@@ -308,6 +309,7 @@ function InstaOutfitPage() {
 
       {/* 컬렉션 릴스(A3) — 메인 포맷(롤모델 @yxyxeon) */}
       <CollectionPanel character={CHARACTER} ready={ready} />
+      <PosePanel />
 
       {/* 오늘의 코디 찾기 — 완전 자동(2026-10-27 대표: 반자동 아님). 아래 "내 상품으로 코디"는 선택 기능. */}
       <section className="flex min-w-0 flex-col gap-2 rounded-xl border border-primary/30 bg-card p-4 sm:flex-row sm:items-center">
