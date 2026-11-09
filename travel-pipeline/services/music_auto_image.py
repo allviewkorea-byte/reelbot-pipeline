@@ -397,6 +397,8 @@ def _profile(
         g = (genre or "").strip() or "citypop"
         if style == mwi.STYLE_STREET:
             return (lambda avoid: mwi.build_street_prompt(g, avoid)), mwi.STREET_REVIEW_SYSTEM, f"{_STREET_PREFIX}/{g}"
+        if style == mwi.STYLE_BRIGHT:
+            return (lambda avoid: mwi.build_bright_prompt(g, avoid)), mwi.BRIGHT_REVIEW_SYSTEM, f"{_BRIGHT_PREFIX}/{g}"
         return (lambda avoid: mwi.build_prompt(g, avoid)), mwi.REVIEW_SYSTEM, f"where/{g}"
     from services.music_workout_style import axis_for_action
 
@@ -702,6 +704,21 @@ def pick_where_legacy(dest: str, *, tries: int = 5) -> dict | None:
 
 # 거리 스냅 보관함 — where/ 와 접두사를 분리해 건축 공간 재사용·전 장르 폴백(#343)에 섞이지 않게 한다.
 _STREET_PREFIX = "where-street"
+# 청량 서울 보관함(2026-10-29) — 역시 접두사 분리.
+_BRIGHT_PREFIX = "where-bright"
+
+
+def _bright_fallback(genre: str | None, dest: str) -> dict | None:
+    """청량 서울 장르 보관함이 비었을 때 — 청량 전 장르(기간 무제한) → 기존 where 업로드 배경(예전 밝은 배경)
+    → 건축 체인. 거리 스냅(필름 톤)으로는 떨어지지 않는다."""
+    picked = pick_reuse(_BRIGHT_PREFIX, dest, max_age_sec=None)
+    if picked:
+        return {**picked, "source": "where_bright_all"}
+    legacy = pick_where_legacy(dest)
+    if legacy:
+        return legacy
+    g = (genre or "").strip() or "citypop"
+    return _where_fallback(f"where/{g}", dest)
 
 
 def _street_fallback(genre: str | None, dest: str) -> dict | None:
@@ -856,7 +873,7 @@ def prepare_for_render(
 ) -> tuple[str | None, dict]:
     """렌더 직전 — 생성·검수 후 (배경 경로 또는 None, 요약). 요약은 music_jobs.metadata 에 남긴다.
 
-    style: where 배경 스타일("street" 거리 스냅 / None·"space" 건축 공간). 운동은 무시된다.
+    style: where 배경 스타일("bright" 청량 서울 / "street" 거리 스냅 / None·"space" 건축 공간). 운동은 무시된다.
 
     합격 → 축별 보관함에 보관. 전부 불합격·시간 초과 → reuse 면 같은 축 합격본 재사용
     (요약에 reused). 그것도 없으면 None → 호출부는 지금까지처럼 블랙 배경으로 렌더한다.
@@ -873,6 +890,7 @@ def prepare_for_render(
     box: dict = {}
     where = is_where_auto(channel)
     street = where and style == "street"
+    bright = where and style == "bright"
     axis = _profile(action, channel, genre, style=style)[2]  # 운동: 축, where: where/{장르} · where-street/{장르}
     recent = {} if where else read_recent()      # 운동만 — 최근 장면·키 10개 피하기
 
@@ -905,7 +923,8 @@ def prepare_for_render(
         dest = str(Path(workdir) / "reuse_bg.png")
         picked = pick_reuse(axis, dest, exclude=None if where else recent_for(recent, "keys", axis))
         if not picked and where:
-            picked = _street_fallback(genre, dest) if street else _where_fallback(axis, dest)
+            picked = (_bright_fallback(genre, dest) if bright else
+                      _street_fallback(genre, dest) if street else _where_fallback(axis, dest))
             if picked:
                 logger.warning("[auto-image] where 장르 보관함 비어 있음 → 폴백 배경(%s) job=%s key=%s",
                                picked["source"], job_id, picked["key"])
@@ -925,7 +944,7 @@ def prepare_for_render(
     )
     summary = job_summary(res)
     if where:
-        summary["bg_style"] = "street" if street else "space"
+        summary["bg_style"] = "bright" if bright else ("street" if street else "space")
     try:
         from services import music_jobs
         music_jobs.merge_metadata(job_id, {"auto_image": summary})

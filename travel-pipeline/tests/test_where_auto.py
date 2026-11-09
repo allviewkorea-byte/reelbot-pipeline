@@ -52,7 +52,7 @@ def test_busy_waits_until_T(monkeypatch):
 
 # ── B 장르 ────────────────────────────────────────────────────────────
 def test_where_genres_are_15_without_excluded():
-    assert len(mwi.WHERE_GENRES) == 15
+    assert len(mwi.WHERE_GENRES) == 16   # 15 + K-시티팝(2026-10-29)
     assert not {"workout", "hiphop", "kpop", "pop"} & set(mwi.WHERE_GENRES)
 
 
@@ -65,7 +65,7 @@ def test_genre_pick_uniform_and_no_three_in_a_row(monkeypatch):
     for _ in range(30):
         history.append(ar.pick_where_genre(WHERE, rng=rng))
     assert all(not (a == b == c) for a, b, c in zip(history, history[1:], history[2:]))
-    assert len(set(history)) >= 10                                   # 30회에 15개 중 대부분 등장(균등)
+    assert len(set(history)) >= 8                                    # 30회에 고르게 등장(밝은 그룹 50% 가중 후에도)
     # 강제로 직전 2회가 같으면 그 장르는 절대 안 나온다
     history[:] = ["jazz", "jazz"]
     assert all(ar.pick_where_genre(WHERE, rng=random.Random(i)) != "jazz" for i in range(200))

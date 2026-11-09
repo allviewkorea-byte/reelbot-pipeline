@@ -28,6 +28,8 @@ ALLOWED = {"jazz", "cafe", "ballad", "breakup", "morning_drive", "citypop", "sun
 @pytest.fixture(autouse=True)
 def _rate(monkeypatch):
     monkeypatch.delenv("MUSIC_WHERE_STREET_RATE", raising=False)
+    # 이 파일은 거리 스냅/건축 공간 분기만 본다 — 청량 서울(2026-10-29)은 test_where_bright.py.
+    monkeypatch.setenv("MUSIC_WHERE_BRIGHT_RATE", "0")
 
 
 # ── A 스타일 결정 ─────────────────────────────────────────────────────
@@ -37,15 +39,15 @@ def test_allowed_genres_as_approved():
 
 
 def test_style_distribution_100_rounds():
-    """where 회차 100회(장르 균등 랜덤) — 허용 장르 ≈40% 거리 스냅, 불허 장르 0%."""
+    """where 회차 100회(청량 끔) — 허용 장르 ≈50% 거리 스냅, 불허 장르 0%."""
     rng = random.Random(3)
     rounds = [(g, mwi.pick_style(g, rng=rng)) for g in (rng.choice(mwi.WHERE_GENRES) for _ in range(100))]
     allowed = [s for g, s in rounds if g in ALLOWED]
     assert all(s == "space" for g, s in rounds if g not in ALLOWED)
-    assert 0.28 <= allowed.count("street") / len(allowed) <= 0.52, Counter(allowed)
+    assert 0.36 <= allowed.count("street") / len(allowed) <= 0.64, Counter(allowed)
     r9 = random.Random(9)
     big = Counter(mwi.pick_style("jazz", rng=r9) for _ in range(5000))
-    assert abs(big["street"] / 5000 - 0.4) < 0.02
+    assert abs(big["street"] / 5000 - 0.5) < 0.02
 
 
 def test_rate_env(monkeypatch):
@@ -54,7 +56,7 @@ def test_rate_env(monkeypatch):
     monkeypatch.setenv("MUSIC_WHERE_STREET_RATE", "0")
     assert mwi.pick_style("cafe") == "space"
     monkeypatch.setenv("MUSIC_WHERE_STREET_RATE", "x")
-    assert mwi.street_rate() == 0.4
+    assert mwi.street_rate() == 0.5
 
 
 def test_round_records_bg_style_and_injects(monkeypatch, caplog):
@@ -155,10 +157,12 @@ def test_space_style_constants_unchanged():
         pytest.skip("git 이력 없음")
     ns: dict = {}
     exec(compile(old, "old_mwi", "exec"), ns)
-    for name in ("WHERE_GENRES", "PERSON_RATE", "WHERE_TONE", "_PERSON_LINE", "_NO_PERSON_LINE",
+    # WHERE_GENRES 는 2026-10-29 K-시티팝 추가만 허용(기존 15개 순서·값 그대로).
+    assert tuple(g for g in mwi.WHERE_GENRES if g != "kcitypop") == ns["WHERE_GENRES"]
+    for name in ("PERSON_RATE", "WHERE_TONE", "_PERSON_LINE", "_NO_PERSON_LINE",
                  "_SCENES", "_GENRE_GROUP", "REVIEW_SYSTEM"):
         assert getattr(mwi, name) == ns[name], name
-    for g in mwi.WHERE_GENRES:
+    for g in ns["WHERE_GENRES"]:
         assert mwi.build_prompt(g, ["x"], rng=random.Random(4)) == ns["build_prompt"](g, ["x"], rng=random.Random(4))
 
 

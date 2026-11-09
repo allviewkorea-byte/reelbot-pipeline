@@ -500,7 +500,7 @@ def produce(
                 checkpoint=checkpoint,
             )
         else:
-            video_langs = music_song_lang.assign(n)
+            video_langs = music_song_lang.assign(n, genre_id=genre_id)
             logger.warning("[lyrics] 영상 언어=%s slug=%s 곡수=%d", video_langs[0] if video_langs else "-", theme_slug, n)
             songs, produced, lyrics_by_id = _gen_mixed(video_langs, **mixed_kw)
 
