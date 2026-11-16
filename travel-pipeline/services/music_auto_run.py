@@ -28,7 +28,7 @@
     10분 < T" 일 때만 예약하고, 다시 띄울 때는 실패 행을 조건부 PATCH 로 재선점(중복 실행 0).
     Suno 호출 뒤 실패는 기존 복구 A~G 에 맡긴다.
   - 실패 사유 코드: claim 행 metadata.fail_reason — llm_unavailable / image_failed / upload_gate /
-    upload / suno / render / busy / unknown.
+    upload / suno / suno_credit(잔액 부족, T 전까지 재시도) / render / busy / unknown.
   - 운동 배경 축: 회차마다 근력/유산소/워밍업 50/30/20 가중 랜덤(3연속 금지). 배경만 바꾼다.
 
 모든 로그 접두사 [auto-run] — 채널·회차·T 포함.
@@ -350,9 +350,12 @@ def _retry_due(meta: dict, r: dict, now: datetime) -> bool | None:
     return now >= at
 
 
-def next_retry_at(r: dict, retries: int, early: bool, now: datetime) -> datetime | None:
-    """이른 실패면 10분 뒤 재시도 시각. 최대 3회, 그리고 "다음 시도 + 10분 < T" 일 때만."""
-    if not early or retries >= MAX_RETRIES:
+CREDIT_REASON = "suno_credit"   # Suno 크레딧 부족 — 충전하면 같은 날 회차를 살릴 수 있게 T 전까지 계속 재시도
+
+
+def next_retry_at(r: dict, retries: int, early: bool, now: datetime, reason: str | None = None) -> datetime | None:
+    """이른 실패면 10분 뒤 재시도 시각. 최대 3회(크레딧 부족은 횟수 제한 없음), "다음 시도 + 10분 < T" 일 때만."""
+    if not early or (retries >= MAX_RETRIES and reason != CREDIT_REASON):
         return None
     at = now + timedelta(minutes=RETRY_GAP_MIN)
     if at + timedelta(minutes=RETRY_GAP_MIN) >= r["publish_at"]:
@@ -385,7 +388,7 @@ def _run_round_safe(r: dict, st: dict, resume: dict | None) -> None:
         early = bool(getattr(e, "early", r.get("phase") == "pre_produce"))
         meta = (music_jobs.get_job(r["key"]) or {}).get("metadata") or {}
         retries = int(meta.get("retries") or 0) if isinstance(meta, dict) else 0
-        nxt = next_retry_at(r, retries, early, datetime.now(KST))
+        nxt = next_retry_at(r, retries, early, datetime.now(KST), reason)
         patch = {"state": "failed", "error": str(e)[:300], "fail_reason": reason,
                  "retry_at": nxt.isoformat() if nxt else None}
         if nxt:
@@ -393,7 +396,8 @@ def _run_round_safe(r: dict, st: dict, resume: dict | None) -> None:
         logger.warning("[auto-run] 회차 실패 %s reason=%s early=%s 재시도=%s: %s", _fmt(r), reason, early,
                        nxt.strftime("%H:%M") if nxt else "없음", e)
         music_jobs.merge_metadata(r["key"], patch)
-        tail = f" — {nxt.strftime('%H:%M')} 재시도 {retries + 1}/{MAX_RETRIES}" if nxt else ""
+        tail = (f" — {nxt.strftime('%H:%M')} 재시도"
+                + ("(충전되면 진행)" if reason == CREDIT_REASON else f" {retries + 1}/{MAX_RETRIES}")) if nxt else ""
         music_jobs.show_failed(
             r["key"], f"[자동 회차 {r['slot']} · T {r['publish_at'].strftime('%m-%d %H:%M')} · {reason}] {e}{tail}",
         )
@@ -495,6 +499,18 @@ def _await_recovered(r: dict, job_id: str, *, sleep) -> str:
     raise RoundFailed("끊긴 제작 복구 대기 시간 초과", "render")
 
 
+def _check_suno_credits(r: dict, st: dict) -> None:
+    """새 곡 회차 시작 전 Suno 잔액 확인(대표 2026-11-16 크레딧 소진으로 하루 회차가 날아감).
+    모자라면 곡 생성 전 실패(early) → 10분마다 T 전까지 재시도 — 그 사이 충전하면 그날 회차가 산다.
+    잔액 조회 실패(None)면 막지 않는다(기존처럼 진행)."""
+    from services import music_dashboard_summary as mds
+    bal = mds.fetch_suno_balance()
+    need = max(1, int(st.get("track_count") or 1)) * mds.CREDITS_PER_CALL
+    if bal is not None and bal < need:
+        raise RoundFailed(f"Suno 크레딧 부족(잔액 {bal}, 필요 {need}) — 충전하면 다음 재시도에 진행",
+                          CREDIT_REASON, early=True)
+
+
 def _produce(r: dict, st: dict, *, sleep) -> str:
     """수동 "곡 만들기" 경로로 1편 제작 → mix_id. 폴백 렌더·비 http 영상이면 예외."""
     from services import music_manual
@@ -515,6 +531,8 @@ def _produce(r: dict, st: dict, *, sleep) -> str:
         genre = pick_where_genre(r["channel"])
     else:
         genre = pick_where_genre(r["channel"]) if r["channel"] == WHERE_CHANNEL else None
+    if not twin:
+        _check_suno_credits(r, st)
     if twin:
         from services import music_jobs as _mjt
         _mjt.merge_metadata(r["key"], {"twin_audio_id": twin["audio_id"]})
