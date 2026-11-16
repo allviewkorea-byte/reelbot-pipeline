@@ -37,7 +37,7 @@ def test_busy_waits_until_T(monkeypatch):
     r = ar.rounds_for_day(WHERE, date.today() + timedelta(days=1), [8, 21], 2)[0]
     tries = {"n": 0}
 
-    def _start(mood, tc, combo, *, channel=None, auto_image=None):
+    def _start(mood, tc, combo, *, channel=None, auto_image=None, **_kw):
         tries["n"] += 1
         if tries["n"] <= 40:                                          # 80분 동안 busy(옛 상한 60분 초과)
             return {"ok": False, "error": "busy"}
@@ -78,7 +78,7 @@ def test_where_round_passes_genre_as_mood(monkeypatch):
     monkeypatch.setattr(music_jobs, "list_recent_by_type", lambda *a, **k: [])
     got = {}
 
-    def _start(mood, tc, combo, *, channel=None, auto_image=None):
+    def _start(mood, tc, combo, *, channel=None, auto_image=None, **_kw):
         got.update(mood=mood, channel=channel, auto_image=auto_image, combo=combo, tc=tc)
         music_manual._JOBS["jw"] = {"status": "done", "mix_id": "m", "video_url": "https://x", "frame_thumb_key": "f"}
         return {"ok": True, "job_id": "jw"}
@@ -95,7 +95,7 @@ def test_workout_round_unchanged(monkeypatch):
     monkeypatch.setattr(music_jobs, "merge_metadata", lambda *a, **k: None)
     got = {}
 
-    def _start(mood, tc, combo, *, channel=None, auto_image=None):
+    def _start(mood, tc, combo, *, channel=None, auto_image=None, **_kw):
         got.update(mood=mood, channel=channel)
         music_manual._JOBS["jw"] = {"status": "done", "mix_id": "m", "video_url": "https://x", "frame_thumb_key": "f"}
         return {"ok": True, "job_id": "jw"}

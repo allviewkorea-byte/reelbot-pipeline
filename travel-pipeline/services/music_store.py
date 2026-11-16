@@ -281,6 +281,36 @@ def find_unused_track(
         return None
 
 
+def list_aged_unused(channel: str | None, *, older_than_iso: str, limit: int = 20) -> list[dict]:
+    """채널의 미사용(used=false, SUCCESS) 트랙 중 older_than_iso 이전에 만든 것, 오래된 순.
+
+    쌍둥이 묵혀 쓰기(music_twins) 후보 조회. ★ channel 필터 필수(채널끼리 곡이 섞이면 사고).
+    DB 미설정/오류 → [](호출부가 새 곡 생성으로 폴백).
+    """
+    url, key = _supabase_cfg()
+    if not (url and key):
+        return []
+    try:
+        with httpx.Client(timeout=30.0) as c:
+            r = c.get(
+                f"{url}/rest/v1/{_TABLE}",
+                headers={"apikey": key, "Authorization": f"Bearer {key}"},
+                params={
+                    "used": "eq.false", "status": "eq.SUCCESS",
+                    "channel": f"eq.{_resolve_channel(channel)}",
+                    "created_at": f"lte.{older_than_iso}",
+                    "select": "id,theme_slug,audio_id,title,tags,duration,r2_key,genre,channel,created_at",
+                    "order": "created_at.asc", "limit": str(limit),
+                },
+            )
+            r.raise_for_status()
+            rows = r.json()
+        return rows if isinstance(rows, list) else []
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[music-db] 묵힌 트랙 조회 실패(channel=%s): %s", channel, _http_err(e))
+        return []
+
+
 def track_language(theme_slug: str) -> str | None:
     """그 영상(theme_slug) 곡들의 언어 ko|en|inst(#345 영상 단위라 1곡만 본다). 없음·오류 → None."""
     url, key = _supabase_cfg()
