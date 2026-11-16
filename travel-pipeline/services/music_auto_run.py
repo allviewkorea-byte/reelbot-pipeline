@@ -164,14 +164,57 @@ def round_minute(channel: str, day: date, slot: int) -> int:
     return int(h, 16) % 60
 
 
+# 불규칙 공개 시각(대표 2026-11-16 "하루 1개, 시간은 불규칙적으로") — 하루 1회 채널은 공개 '시'도
+# 매일 창 안에서 랜덤(결정적). 채널끼리는 MIN_GAP_H 이상 떨어뜨려 제작(T−120분)이 겹치지 않게 한다.
+RANDOM_HOUR_MIN_GAP_H = 3
+
+
+def random_hour_window() -> tuple[int, int] | None:
+    """env MUSIC_RANDOM_HOUR_WINDOW "시작-끝"(기본 "10-23", 끝 포함). off/이상값 → None(고정 시각)."""
+    raw = (os.getenv("MUSIC_RANDOM_HOUR_WINDOW") or "10-23").strip().lower()
+    if raw in ("", "0", "off", "false", "no"):
+        return None
+    try:
+        a, b = (int(x) for x in raw.split("-", 1))
+    except ValueError:
+        return None
+    return (a, b) if 0 <= a <= b <= 23 else None
+
+
+def random_hour(channel: str, day: date) -> int | None:
+    """그날 그 채널의 공개 시(창 안, 결정적). 자동 회차 채널 순서대로 앞 채널과 MIN_GAP_H 이상 띄운다."""
+    win = random_hour_window()
+    if not win:
+        return None
+    chans = auto_run_channels()
+    if channel not in chans:
+        chans = chans + [channel]
+    taken: list[int] = []
+    for ch in chans:
+        hours = list(range(win[0], win[1] + 1))
+        ok = [h for h in hours if all(abs(h - t) >= RANDOM_HOUR_MIN_GAP_H for t in taken)] or hours
+        h = int(hashlib.sha256(f"hour|{ch}|{day.isoformat()}|{_salt()}".encode()).hexdigest(), 16)
+        pick = ok[h % len(ok)]
+        if ch == channel:
+            return pick
+        taken.append(pick)
+    return None
+
+
 def round_key(channel: str, day: date, slot: int) -> str:
     return f"auto-{channel}-{day.strftime('%Y%m%d')}-{slot}"
 
 
 def rounds_for_day(channel: str, day: date, hours: list[int], daily_cap: int) -> list[dict]:
-    """그날의 회차 목록. slot 은 1부터, T·start 는 KST aware datetime."""
+    """그날의 회차 목록. slot 은 1부터, T·start 는 KST aware datetime.
+    하루 1회(daily_cap 1)면 공개 '시'를 random_hour 로 매일 바꾼다(창 꺼지면 기존 고정 시각)."""
     out = []
-    for i, hour in enumerate(sorted(hours)[: max(1, daily_cap)], start=1):
+    picked = sorted(hours)[: max(1, daily_cap)]
+    if max(1, daily_cap) == 1:
+        rh = random_hour(channel, day)
+        if rh is not None:
+            picked = [rh]
+    for i, hour in enumerate(picked, start=1):
         t = datetime(day.year, day.month, day.day, hour, round_minute(channel, day, i), tzinfo=KST)
         out.append({
             "channel": channel, "day": day, "slot": i, "key": round_key(channel, day, i),
@@ -459,7 +502,24 @@ def _produce(r: dict, st: dict, *, sleep) -> str:
     # where: 14장르 프리셋 경로(장르 id 를 mood 로) — 장르는 균등 랜덤·같은 장르 연속 3회 금지.
     # 운동: 기존 그대로(mood None → 운동 기본 조합).
     r["phase"] = "pre_produce"
-    genre = pick_where_genre(r["channel"]) if r["channel"] == WHERE_CHANNEL else None
+    # 쌍둥이 묵혀 쓰기(대표 2026-11-16) — 1곡 영상이면 7일 이상 묵힌 쌍둥이부터. 있으면 그 곡의
+    # 장르(where)·태그 조합(운동)으로 만들고 Suno 는 안 부른다. 없으면 평소처럼 새 곡(→ 쌍둥이 적립).
+    twin = None
+    if int(st.get("track_count") or 1) == 1:
+        from services import music_twins
+        twin = music_twins.pick(r["channel"])
+    if twin and r["channel"] == WHERE_CHANNEL and twin.get("genre_id"):
+        genre = twin["genre_id"]
+    elif twin and r["channel"] == WHERE_CHANNEL:
+        twin = None   # 장르 모르는 where 쌍둥이는 쓰지 않는다(배경·해시태그가 장르를 따라간다)
+        genre = pick_where_genre(r["channel"])
+    else:
+        genre = pick_where_genre(r["channel"]) if r["channel"] == WHERE_CHANNEL else None
+    if twin:
+        from services import music_jobs as _mjt
+        _mjt.merge_metadata(r["key"], {"twin_audio_id": twin["audio_id"]})
+        logger.warning("[auto-run] 묵힌 쌍둥이 사용 %s audio_id=%s 만든날=%s", _fmt(r),
+                       twin["audio_id"], twin.get("created_at"))
     bg_style = None
     if genre:
         # 배경 스타일 — 허용 장르면 MUSIC_WHERE_STREET_RATE(기본 0.4)로 거리 스냅, 아니면 건축 공간.
@@ -476,7 +536,8 @@ def _produce(r: dict, st: dict, *, sleep) -> str:
     waited = 0
     while True:
         started = music_manual.start(
-            genre, st["track_count"], None, channel=r["channel"], auto_image=True,
+            genre, st["track_count"], (twin or {}).get("tag_combo") if r["channel"] != WHERE_CHANNEL else None,
+            channel=r["channel"], auto_image=True, twin=twin, keep_twin=True,
         )
         if started.get("ok"):
             break

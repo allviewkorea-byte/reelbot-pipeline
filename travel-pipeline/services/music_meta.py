@@ -575,12 +575,14 @@ def build_title(theme: dict, viz_spec: dict | None) -> str:
     ko_copy, en_copy = _generate_title_copy(theme, vs)
     tc = theme.get("track_count") or 0
     tc_label = f" {tc}곡 모음" if isinstance(tc, int) and tc >= 2 else ""
-    title = f"playlist🎧 {ko_copy} | {en_copy}{tc_label}".strip()
+    # 1곡 영상(대표 2026-11-16)은 플레이리스트가 아니라 "playlist🎧" 를 붙이지 않는다.
+    prefix = "" if tc == 1 else "playlist🎧 "
+    title = f"{prefix}{ko_copy} | {en_copy}{tc_label}".strip()
     if len(title) > 100:
-        room = max(4, 100 - len(f"playlist🎧  | {tc_label}"))
+        room = max(4, 100 - len(f"{prefix} | {tc_label}"))
         ko_room = room * 2 // 3
         en_room = room - ko_room
-        title = f"playlist🎧 {ko_copy[:ko_room]} | {en_copy[:en_room]}{tc_label}"
+        title = f"{prefix}{ko_copy[:ko_room]} | {en_copy[:en_room]}{tc_label}"
     try:  # 최근 제목 기록 — 다음 영상이 키워드·훅을 겹치지 않게(같은 slug 는 1번만). best-effort.
         from services import music_keyword_pool
         music_keyword_pool.note_title(_kw_channel(theme), str(theme.get("slug") or ""), ko_copy, en_copy)

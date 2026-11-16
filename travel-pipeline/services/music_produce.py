@@ -14,6 +14,7 @@ import logging
 import os
 import random
 import re
+import threading
 
 from adapters import r2_storage
 from services import music_genres, music_lyrics, music_master, music_mix, music_song_lang, music_store, music_suno
@@ -164,16 +165,25 @@ def _recycle_track(
         return None
 
 
-def _consume_generated(all_clips: list[dict], seen: set[str]) -> list[dict]:
+# 쌍둥이 묵혀 쓰기(music_twins) — produce() 가 켜 두면 둘째 클립을 (clip, 맥락)으로 모은다.
+# produce 는 제작 스레드 안에서 동기로 돌므로 스레드 로컬로 충분하다.
+_TWIN_SINK = threading.local()
+
+
+def _consume_generated(all_clips: list[dict], seen: set[str], ctx: dict | None = None) -> list[dict]:
     """신규 생성 클립 처리: 첫 클립만 사용(나머지는 재활용 풀로 적립), 사용분 used=true 마킹.
 
     이번 런에서 본 audio_id 는 전부 seen 에 넣어(막 적립한 둘째 클립 포함) 같은 런 내
-    중복 사용을 막는다(둘째 클립은 DB 에선 used=false 로 남아 다음 런에서 재활용 가능).
+    중복 사용을 막는다(둘째 클립은 DB 에선 used=false 로 남아 묵혀 쓰기 후보가 된다).
+    ctx: 둘째 클립을 나중에 쓸 때 필요한 맥락(가사·언어·제목 등) — 수집 중이면 함께 모은다.
     """
     for c in all_clips:
         aid = c.get("audio_id")
         if aid:
             seen.add(aid)
+    sink = getattr(_TWIN_SINK, "items", None)
+    if sink is not None and ctx is not None:
+        sink.extend((c, dict(ctx)) for c in all_clips[1:] if c.get("audio_id"))
     used = all_clips[:1]
     for c in used:
         aid = c.get("audio_id")
@@ -242,7 +252,10 @@ def _gen_vocal(
             continue
         # suno 1회 호출 = 2클립(같은 가사/스타일 변주). 곡수 N = N곡이 되도록 첫 클립만
         # 사용하고 둘째 클립은 used=false 로 적립(#34-B / #46). 보컬은 재활용하지 않음.
-        all_clips = _consume_generated(res.get("tracks", []), seen)
+        all_clips = _consume_generated(res.get("tracks", []), seen, ctx={
+            "language": theme["language"], "lyrics": lyric, "title": s.get("title") or "",
+            "sub_theme": s.get("sub_theme", ""), "core_message": s.get("core_message", ""),
+        })
         for rec in all_clips:
             audio_id = rec.get("audio_id")
             if not audio_id:
@@ -271,13 +284,13 @@ def _gen_instrumental(
     is_tag_path: bool = False, action: str = "", channel: str | None = None,
     theme_dict: dict | None = None,
     checkpoint=None,
-    recycle: bool = True,
+    recycle: bool = False,
     en_rate: float | None = None,
 ) -> tuple[list[dict], dict[str, str]]:
     """연주 경로: 가사 없이 style 만으로 연주곡 N회 생성(instrumental=True, 부분 실패 허용).
 
-    recycle=False: 보컬 영상에 섞는 연주곡 — 재활용 풀을 쓰지 않고 항상 새로 만든다(풀에 같은
-      장르 보컬 적립 클립이 섞여 있어 연주 자리에 보컬이 들어올 수 있다).
+    recycle: 같은 장르 미사용 트랙 즉시 재활용(#46). 2026-11-16부터 기본 False — 쌍둥이를 바로 다음
+      회차에 다시 써서 비슷한 곡이 붙어 나오던 문제. 남은 곡은 music_twins 가 7일 묵혀서 쓴다.
     en_rate: 제목 영어 비율(None → 기존 20%).
 
     가사 없음 → lyrics_by_id 는 빈 dict(믹스 JSON 에 가사 미포함).
@@ -343,7 +356,8 @@ def _gen_instrumental(
             logger.warning("[produce] 연주 %d 생성 실패: %s", i, e)
             continue
         # suno 1회 호출 = 2클립. 첫 클립만 사용(used=true), 둘째는 적립(used=false, #46).
-        for rec in _consume_generated(res.get("tracks", []), seen):
+        for rec in _consume_generated(res.get("tracks", []), seen,
+                                      ctx={"language": "inst", "title": title, "instrumental": True}):
             if rec.get("audio_id"):
                 if title and not (rec.get("title") or "").strip():
                     rec["title"] = title
@@ -427,6 +441,8 @@ def produce(
     progress=None,
     checkpoint=None,
     top_up: bool = True,
+    twin: dict | None = None,
+    twin_meta: dict | None = None,
 ) -> dict:
     """주제 → N곡 생성 → 마스터 → 믹스. 완성 오디오 메타 반환.
 
@@ -444,8 +460,83 @@ def produce(
     genre_id(#46): 14장르 id. 있으면 (1) 고정 Suno 태그·instrumental 적용(태그 매핑),
       (2) 같은 장르 미사용 트랙 재활용. 없거나 태그 없는 장르 → 기존 LLM 스타일 폴백.
     action: 어떨때 id(예: sleep, study). 트랙 DB에 저장(라이브러리 필터용).
+    twin(2026-11-16): music_twins.pick() 결과. 주면 Suno 를 부르지 않고 그 묵힌 쌍둥이 1곡으로 만든다.
+    twin_meta: 새로 만든 곡의 쌍둥이를 보관할 때 같이 남길 맥락(tag_combo·mood 등, 자동 회차가 준다).
+      None 이면 쌍둥이를 보관하지 않는다(수동 화면 경로 무변경).
     Returns: {theme_slug, track_type, songs:[...], produced:[record...], mastered, mix}
     """
+    if twin is not None:
+        return _produce_from_twin(theme_slug, twin, progress=progress, minutes=minutes,
+                                  seed=seed, do_master=do_master, do_mix=do_mix)
+    _TWIN_SINK.items = [] if twin_meta is not None else None
+    try:
+        return _produce_new(
+            theme_slug, n=n, genre_theme=genre_theme, base_style=base_style, language=language,
+            minutes=minutes, sub_theme_pool=sub_theme_pool, lyrics=lyrics, track_type=track_type,
+            style_prompt=style_prompt, lyric_tone=lyric_tone, do_master=do_master, do_mix=do_mix,
+            seed=seed, model=model, genre_id=genre_id, action=action, channel=channel,
+            progress=progress, checkpoint=checkpoint, top_up=top_up,
+        )
+    finally:
+        items = getattr(_TWIN_SINK, "items", None) or []
+        _TWIN_SINK.items = None
+        if twin_meta is not None and items:
+            from services import music_twins
+            for clip, ctx in items:
+                music_twins.save(channel, clip, {**ctx, **twin_meta, "genre_id": genre_id, "action": action})
+
+
+def _produce_from_twin(theme_slug: str, twin: dict, *, progress=None, minutes: float = 3.5,
+                       seed: int | None = None, do_master: bool = True, do_mix: bool = True) -> dict:
+    """묵힌 쌍둥이 1곡으로 마스터 → 믹스(Suno·가사 LLM 호출 없음)."""
+    from services import music_twins
+    rec = music_twins.consume(twin)
+    if progress:
+        progress(f"묵힌 쌍둥이 곡 사용 — Suno 호출 생략 (audio_id={rec['audio_id']})")
+    logger.warning("[twin] 묵힌 곡 사용 audio_id=%s language=%s slug=%s", rec["audio_id"], rec["language"], theme_slug)
+    vocal = rec["language"] != "inst"
+    songs = [{"title": rec["title"], "lyrics": rec["lyrics"], "language": rec["language"],
+              "sub_theme": rec.get("sub_theme", ""), "core_message": rec.get("core_message", "")}] if vocal else []
+    lyrics_by_id = {rec["audio_id"]: rec["lyrics"]} if vocal else {}
+    if vocal:
+        try:
+            if r2_storage.is_available():
+                r2_storage.upload_lyrics_text(rec["lyrics"], theme_slug, rec["audio_id"])
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[twin] 가사 원문 R2 저장 실패(audio_id=%s): %s", rec["audio_id"], e)
+    produced = [rec]
+    mastered = music_master.master_theme(theme_slug, produced) if do_master else []
+    mix = music_mix.build_mix(theme_slug, produced, minutes=minutes, seed=seed,
+                              lyrics_by_id=lyrics_by_id or None) if do_mix else None
+    return {"theme_slug": theme_slug, "track_type": "vocal" if vocal else "instrumental",
+            "songs": songs, "produced": produced, "mastered": mastered, "mix": mix, "twin": rec["audio_id"]}
+
+
+def _produce_new(
+    theme_slug: str,
+    *,
+    n: int,
+    genre_theme: str,
+    base_style: str,
+    language: str,
+    minutes: float,
+    sub_theme_pool: list[str] | None,
+    lyrics: list[dict] | None,
+    track_type: str,
+    style_prompt: str | None,
+    lyric_tone: str | None,
+    do_master: bool,
+    do_mix: bool,
+    seed: int | None,
+    model: str | None,
+    genre_id: str | None,
+    action: str,
+    channel: str | None,
+    progress,
+    checkpoint,
+    top_up: bool,
+) -> dict:
+    """새 곡 생성 경로(기존 produce 본문)."""
 
     def _log(msg: str) -> None:
         logger.info("[produce] %s", msg)

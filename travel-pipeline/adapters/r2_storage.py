@@ -489,6 +489,35 @@ def lyrics_url(theme_slug: str, audio_id: str) -> str:
     return f"{_music_public_base()}/{lyrics_key(theme_slug, audio_id)}"
 
 
+# ── 쌍둥이 곡 보관 정보 — music-twins/{channel}/{audio_id}.json (2026-11-16, 묵혀 쓰기) ──
+# Suno 1회 = 2클립. 안 쓴 둘째 클립을 나중에 같은 맥락(가사·언어·장르·태그 조합)으로 쓰기 위한 메모.
+def twin_ctx_key(channel: str, audio_id: str) -> str:
+    return f"music-twins/{(channel or 'rooftop_music').strip('/')}/{audio_id}.json"
+
+
+def put_twin_ctx(channel: str, audio_id: str, ctx: dict) -> None:
+    """쌍둥이 맥락 JSON 저장(음악 버킷). 실패는 예외 — 호출부가 삼킨다."""
+    import json
+
+    _get_client().put_object(
+        Bucket=_music_bucket(), Key=twin_ctx_key(channel, audio_id),
+        Body=json.dumps(ctx, ensure_ascii=False).encode("utf-8"),
+        ContentType="application/json; charset=utf-8",
+    )
+
+
+def get_twin_ctx(channel: str, audio_id: str) -> dict | None:
+    """쌍둥이 맥락 JSON. 없거나 오류면 None(그 곡은 묵혀 쓰기 대상 아님)."""
+    import json
+
+    try:
+        obj = _get_client().get_object(Bucket=_music_bucket(), Key=twin_ctx_key(channel, audio_id))
+        data = json.loads(obj["Body"].read().decode("utf-8"))
+        return data if isinstance(data, dict) else None
+    except Exception:  # noqa: BLE001 - 없는 키(NoSuchKey) 포함
+        return None
+
+
 # ── 음악 썸네일 — music-thumbnails/{slug}/{mix_id}.png (대시보드 업로드본) ──
 def music_thumbnail_key(theme_slug: str, mix_id: str) -> str:
     return f"music-thumbnails/{theme_slug.strip('/')}/{mix_id}.png"
