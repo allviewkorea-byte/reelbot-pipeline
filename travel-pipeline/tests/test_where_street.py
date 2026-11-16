@@ -68,7 +68,7 @@ def test_round_records_bg_style_and_injects(monkeypatch, caplog):
     monkeypatch.setenv("MUSIC_WHERE_STREET_RATE", "1")
     got = {}
 
-    def _start(mood, tc, combo, *, channel=None, auto_image=None):
+    def _start(mood, tc, combo, *, channel=None, auto_image=None, **_kw):
         music_manual._JOBS["js"] = {"status": "running"}
         return {"ok": True, "job_id": "js"}
 
@@ -90,7 +90,7 @@ def test_workout_round_has_no_style(monkeypatch):
     monkeypatch.setattr(ar, "_pick_image_action", lambda r: None)
     seen = {}
 
-    def _start(mood, tc, combo, *, channel=None, auto_image=None):
+    def _start(mood, tc, combo, *, channel=None, auto_image=None, **_kw):
         music_manual._JOBS["jw"] = {"status": "running"}
         return {"ok": True, "job_id": "jw"}
 

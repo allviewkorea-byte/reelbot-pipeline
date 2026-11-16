@@ -134,6 +134,7 @@ def _build_theme(
 def start(
     mood: str | None = None, track_count: int | None = None, tag_combo: dict | None = None,
     *, channel: str | None = None, auto_image: bool | None = None,
+    twin: dict | None = None, keep_twin: bool = False,
 ) -> dict:
     """수동 영상 생성 1개 시작(동시 1개 제한). {ok, job_id} 또는 {ok:False, error, busy_job}.
 
@@ -141,6 +142,8 @@ def start(
     tag_combo(③-A): 8축 태그 조합. 있으면 mood 무시, 태그 기반 style 생성.
     auto_image(PR-1): 운동 채널 배경 이미지 자동 생성. 운동 채널은 기본 ON(False 만 끔),
       where 는 값과 무관하게 항상 OFF(기존 동작).
+    twin(2026-11-16): 자동 회차가 고른 묵힌 쌍둥이(music_twins.pick) — 주면 Suno 없이 그 곡으로 만든다.
+    keep_twin: 새로 만든 곡의 쌍둥이를 묵혀 쓰기용으로 보관(자동 회차만 True, 수동 화면 무변경).
     """
     global _active_job
     from services.music_auto_image import wants_auto_image
@@ -172,6 +175,8 @@ def start(
             "tag_combo": tag_combo,
             "channel": channel,  # run() 이 produce 로 전달(None → where)
             "auto_image": auto,
+            "twin": twin,
+            "keep_twin": bool(keep_twin),
         }
         _active_job = job_id
     # 복구 F — 지난 작업에서 R2 저장이 실패해 보류된 Suno 곡이 있으면 백그라운드로 재취득(비차단).
@@ -185,6 +190,8 @@ def start(
         meta["tag_combo"] = tag_combo
     if auto:
         meta["auto_image_requested"] = True
+    if twin:
+        meta["twin_audio_id"] = twin.get("audio_id")
     try:
         from services import music_jobs
         music_jobs.start_job("manual_render", job_id=job_id, metadata=meta, channel=channel)
@@ -299,6 +306,9 @@ def run(job_id: str) -> None:
                 ),
                 progress=_produce_progress,
                 checkpoint=cp,
+                twin=job.get("twin"),
+                twin_meta=({"tag_combo": job.get("tag_combo"), "mood": job.get("mood")}
+                           if job.get("keep_twin") else None),
             )
             mix = result.get("mix")
             # 영상 언어(#345, 전 곡 같은 값) — 제목·해시태그·태그가 영어/연주 키워드 비중을 정한다(메타데이터만).

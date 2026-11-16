@@ -201,7 +201,7 @@ def run_env(monkeypatch):
            "image_review": {"ok": True}}
     calls: dict = {}
 
-    def _start(mood, tc, combo, *, channel=None, auto_image=None):
+    def _start(mood, tc, combo, *, channel=None, auto_image=None, **_kw):
         calls["start"] = (tc, channel, auto_image)
         music_manual._JOBS["j1"] = dict(job)
         return {"ok": True, "job_id": "j1"}

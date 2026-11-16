@@ -28,7 +28,7 @@
     10분 < T" 일 때만 예약하고, 다시 띄울 때는 실패 행을 조건부 PATCH 로 재선점(중복 실행 0).
     Suno 호출 뒤 실패는 기존 복구 A~G 에 맡긴다.
   - 실패 사유 코드: claim 행 metadata.fail_reason — llm_unavailable / image_failed / upload_gate /
-    upload / suno / render / busy / unknown.
+    upload / suno / suno_credit(잔액 부족, T 전까지 재시도) / render / busy / unknown.
   - 운동 배경 축: 회차마다 근력/유산소/워밍업 50/30/20 가중 랜덤(3연속 금지). 배경만 바꾼다.
 
 모든 로그 접두사 [auto-run] — 채널·회차·T 포함.
@@ -164,14 +164,57 @@ def round_minute(channel: str, day: date, slot: int) -> int:
     return int(h, 16) % 60
 
 
+# 불규칙 공개 시각(대표 2026-11-16 "하루 1개, 시간은 불규칙적으로") — 하루 1회 채널은 공개 '시'도
+# 매일 창 안에서 랜덤(결정적). 채널끼리는 MIN_GAP_H 이상 떨어뜨려 제작(T−120분)이 겹치지 않게 한다.
+RANDOM_HOUR_MIN_GAP_H = 3
+
+
+def random_hour_window() -> tuple[int, int] | None:
+    """env MUSIC_RANDOM_HOUR_WINDOW "시작-끝"(기본 "10-23", 끝 포함). off/이상값 → None(고정 시각)."""
+    raw = (os.getenv("MUSIC_RANDOM_HOUR_WINDOW") or "10-23").strip().lower()
+    if raw in ("", "0", "off", "false", "no"):
+        return None
+    try:
+        a, b = (int(x) for x in raw.split("-", 1))
+    except ValueError:
+        return None
+    return (a, b) if 0 <= a <= b <= 23 else None
+
+
+def random_hour(channel: str, day: date) -> int | None:
+    """그날 그 채널의 공개 시(창 안, 결정적). 자동 회차 채널 순서대로 앞 채널과 MIN_GAP_H 이상 띄운다."""
+    win = random_hour_window()
+    if not win:
+        return None
+    chans = auto_run_channels()
+    if channel not in chans:
+        chans = chans + [channel]
+    taken: list[int] = []
+    for ch in chans:
+        hours = list(range(win[0], win[1] + 1))
+        ok = [h for h in hours if all(abs(h - t) >= RANDOM_HOUR_MIN_GAP_H for t in taken)] or hours
+        h = int(hashlib.sha256(f"hour|{ch}|{day.isoformat()}|{_salt()}".encode()).hexdigest(), 16)
+        pick = ok[h % len(ok)]
+        if ch == channel:
+            return pick
+        taken.append(pick)
+    return None
+
+
 def round_key(channel: str, day: date, slot: int) -> str:
     return f"auto-{channel}-{day.strftime('%Y%m%d')}-{slot}"
 
 
 def rounds_for_day(channel: str, day: date, hours: list[int], daily_cap: int) -> list[dict]:
-    """그날의 회차 목록. slot 은 1부터, T·start 는 KST aware datetime."""
+    """그날의 회차 목록. slot 은 1부터, T·start 는 KST aware datetime.
+    하루 1회(daily_cap 1)면 공개 '시'를 random_hour 로 매일 바꾼다(창 꺼지면 기존 고정 시각)."""
     out = []
-    for i, hour in enumerate(sorted(hours)[: max(1, daily_cap)], start=1):
+    picked = sorted(hours)[: max(1, daily_cap)]
+    if max(1, daily_cap) == 1:
+        rh = random_hour(channel, day)
+        if rh is not None:
+            picked = [rh]
+    for i, hour in enumerate(picked, start=1):
         t = datetime(day.year, day.month, day.day, hour, round_minute(channel, day, i), tzinfo=KST)
         out.append({
             "channel": channel, "day": day, "slot": i, "key": round_key(channel, day, i),
@@ -307,9 +350,12 @@ def _retry_due(meta: dict, r: dict, now: datetime) -> bool | None:
     return now >= at
 
 
-def next_retry_at(r: dict, retries: int, early: bool, now: datetime) -> datetime | None:
-    """이른 실패면 10분 뒤 재시도 시각. 최대 3회, 그리고 "다음 시도 + 10분 < T" 일 때만."""
-    if not early or retries >= MAX_RETRIES:
+CREDIT_REASON = "suno_credit"   # Suno 크레딧 부족 — 충전하면 같은 날 회차를 살릴 수 있게 T 전까지 계속 재시도
+
+
+def next_retry_at(r: dict, retries: int, early: bool, now: datetime, reason: str | None = None) -> datetime | None:
+    """이른 실패면 10분 뒤 재시도 시각. 최대 3회(크레딧 부족은 횟수 제한 없음), "다음 시도 + 10분 < T" 일 때만."""
+    if not early or (retries >= MAX_RETRIES and reason != CREDIT_REASON):
         return None
     at = now + timedelta(minutes=RETRY_GAP_MIN)
     if at + timedelta(minutes=RETRY_GAP_MIN) >= r["publish_at"]:
@@ -342,7 +388,7 @@ def _run_round_safe(r: dict, st: dict, resume: dict | None) -> None:
         early = bool(getattr(e, "early", r.get("phase") == "pre_produce"))
         meta = (music_jobs.get_job(r["key"]) or {}).get("metadata") or {}
         retries = int(meta.get("retries") or 0) if isinstance(meta, dict) else 0
-        nxt = next_retry_at(r, retries, early, datetime.now(KST))
+        nxt = next_retry_at(r, retries, early, datetime.now(KST), reason)
         patch = {"state": "failed", "error": str(e)[:300], "fail_reason": reason,
                  "retry_at": nxt.isoformat() if nxt else None}
         if nxt:
@@ -350,7 +396,8 @@ def _run_round_safe(r: dict, st: dict, resume: dict | None) -> None:
         logger.warning("[auto-run] 회차 실패 %s reason=%s early=%s 재시도=%s: %s", _fmt(r), reason, early,
                        nxt.strftime("%H:%M") if nxt else "없음", e)
         music_jobs.merge_metadata(r["key"], patch)
-        tail = f" — {nxt.strftime('%H:%M')} 재시도 {retries + 1}/{MAX_RETRIES}" if nxt else ""
+        tail = (f" — {nxt.strftime('%H:%M')} 재시도"
+                + ("(충전되면 진행)" if reason == CREDIT_REASON else f" {retries + 1}/{MAX_RETRIES}")) if nxt else ""
         music_jobs.show_failed(
             r["key"], f"[자동 회차 {r['slot']} · T {r['publish_at'].strftime('%m-%d %H:%M')} · {reason}] {e}{tail}",
         )
@@ -452,6 +499,18 @@ def _await_recovered(r: dict, job_id: str, *, sleep) -> str:
     raise RoundFailed("끊긴 제작 복구 대기 시간 초과", "render")
 
 
+def _check_suno_credits(r: dict, st: dict) -> None:
+    """새 곡 회차 시작 전 Suno 잔액 확인(대표 2026-11-16 크레딧 소진으로 하루 회차가 날아감).
+    모자라면 곡 생성 전 실패(early) → 10분마다 T 전까지 재시도 — 그 사이 충전하면 그날 회차가 산다.
+    잔액 조회 실패(None)면 막지 않는다(기존처럼 진행)."""
+    from services import music_dashboard_summary as mds
+    bal = mds.fetch_suno_balance()
+    need = max(1, int(st.get("track_count") or 1)) * mds.CREDITS_PER_CALL
+    if bal is not None and bal < need:
+        raise RoundFailed(f"Suno 크레딧 부족(잔액 {bal}, 필요 {need}) — 충전하면 다음 재시도에 진행",
+                          CREDIT_REASON, early=True)
+
+
 def _produce(r: dict, st: dict, *, sleep) -> str:
     """수동 "곡 만들기" 경로로 1편 제작 → mix_id. 폴백 렌더·비 http 영상이면 예외."""
     from services import music_manual
@@ -459,7 +518,26 @@ def _produce(r: dict, st: dict, *, sleep) -> str:
     # where: 14장르 프리셋 경로(장르 id 를 mood 로) — 장르는 균등 랜덤·같은 장르 연속 3회 금지.
     # 운동: 기존 그대로(mood None → 운동 기본 조합).
     r["phase"] = "pre_produce"
-    genre = pick_where_genre(r["channel"]) if r["channel"] == WHERE_CHANNEL else None
+    # 쌍둥이 묵혀 쓰기(대표 2026-11-16) — 1곡 영상이면 7일 이상 묵힌 쌍둥이부터. 있으면 그 곡의
+    # 장르(where)·태그 조합(운동)으로 만들고 Suno 는 안 부른다. 없으면 평소처럼 새 곡(→ 쌍둥이 적립).
+    twin = None
+    if int(st.get("track_count") or 1) == 1:
+        from services import music_twins
+        twin = music_twins.pick(r["channel"])
+    if twin and r["channel"] == WHERE_CHANNEL and twin.get("genre_id"):
+        genre = twin["genre_id"]
+    elif twin and r["channel"] == WHERE_CHANNEL:
+        twin = None   # 장르 모르는 where 쌍둥이는 쓰지 않는다(배경·해시태그가 장르를 따라간다)
+        genre = pick_where_genre(r["channel"])
+    else:
+        genre = pick_where_genre(r["channel"]) if r["channel"] == WHERE_CHANNEL else None
+    if not twin:
+        _check_suno_credits(r, st)
+    if twin:
+        from services import music_jobs as _mjt
+        _mjt.merge_metadata(r["key"], {"twin_audio_id": twin["audio_id"]})
+        logger.warning("[auto-run] 묵힌 쌍둥이 사용 %s audio_id=%s 만든날=%s", _fmt(r),
+                       twin["audio_id"], twin.get("created_at"))
     bg_style = None
     if genre:
         # 배경 스타일 — 허용 장르면 MUSIC_WHERE_STREET_RATE(기본 0.4)로 거리 스냅, 아니면 건축 공간.
@@ -476,7 +554,8 @@ def _produce(r: dict, st: dict, *, sleep) -> str:
     waited = 0
     while True:
         started = music_manual.start(
-            genre, st["track_count"], None, channel=r["channel"], auto_image=True,
+            genre, st["track_count"], (twin or {}).get("tag_combo") if r["channel"] != WHERE_CHANNEL else None,
+            channel=r["channel"], auto_image=True, twin=twin, keep_twin=True,
         )
         if started.get("ok"):
             break

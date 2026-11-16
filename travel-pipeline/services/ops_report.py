@@ -74,9 +74,16 @@ def collect(now: datetime | None = None) -> dict:
         from services import yt_stats
         return yt_stats.report_summary(now)
 
+    def credits():
+        from services import music_auto_run as ar
+        from services import music_dashboard_summary as mds
+        from services import music_ops_log
+        states = {ch: ar.get_channel_state(ch) for ch in MUSIC_CHANNELS}
+        return mds.credit_view(mds.fetch_suno_balance(), states, music_ops_log.read_credit_snapshots())
+
     return {"since": since, "until": now.isoformat(), "system": _safe(system, {}), "channels": _safe(channels, {}),
             "music_jobs": _safe(jobs, []), "uploads": _safe(uploads, []), "collections": _safe(collections, []),
-            "youtube": _safe(youtube, {})}
+            "youtube": _safe(youtube, {}), "suno_credits": _safe(credits, {})}
 
 
 # ── 요약 ──────────────────────────────────────────────────────────────────
@@ -90,6 +97,36 @@ _SYSTEM = (
     '"issues": [{"title": "<무엇이 문제>", "cause": "<데이터로 본 원인>", "suggestion": "<대표가 할 일 또는 '
     'Claude Code에 맡길 일>"}], "good": ["<잘 된 점, 최대 3개>"]} — issues 최대 5개, 없으면 빈 배열.'
 )
+
+
+def credit_issue(data: dict) -> dict | None:
+    """Suno 크레딧 경고(규칙 — AI 요약과 상관없이 항상 맨 위). 다음 회차분 미만=error, N일치 미만=warn."""
+    c = data.get("suno_credits") or {}
+    if c.get("level") == "red":
+        return {"level": "error", "title": f"Suno 크레딧 부족 — 잔액 {c.get('balance')}",
+                "cause": f"다음 회차에 필요한 {c.get('one_round')} 크레딧보다 적어 오늘 제작이 멈춰요",
+                "suggestion": "sunoapi.org 에서 지금 충전하세요(충전하면 그날 회차는 공개 시각 전까지 자동 재시도)"}
+    if c.get("level") == "yellow":
+        return {"level": "warn", "title": f"Suno 크레딧 약 {c.get('days_left')}일치 남음 — 잔액 {c.get('balance')}",
+                "cause": f"하루 사용량 약 {c.get('daily')} 기준",
+                "suggestion": "며칠 안에 sunoapi.org 에서 충전하세요"}
+    return None
+
+
+def apply_credit_issue(summary: dict, data: dict) -> dict:
+    """요약 맨 앞에 크레딧 경고를 넣고 등급을 올린다(이미 같은 내용이 있으면 중복 제거)."""
+    ci = credit_issue(data)
+    if not ci:
+        return summary
+    level = ci.pop("level")
+    issues = [i for i in summary.get("issues") or [] if "크레딧" not in (i.get("title") or "")]
+    rank = {"ok": 0, "warn": 1, "error": 2}
+    out = {**summary, "issues": ([ci] + issues)[:5]}
+    if rank[level] > rank.get(summary.get("level"), 0):
+        out["level"] = level
+    if summary.get("level") == "ok" or not summary.get("issues"):
+        out["headline"] = ci["title"]
+    return out
 
 
 def rule_summary(data: dict) -> dict:
@@ -134,7 +171,7 @@ def run(now: datetime | None = None, llm=None) -> dict:
     now = now or datetime.now(timezone.utc)
     _safe(lambda: __import__("services.yt_stats", fromlist=["x"]).refresh(now), None)
     data = collect(now)
-    summary = summarize(data, llm=llm)
+    summary = apply_credit_issue(summarize(data, llm=llm), data)
     row = {"date": now.astimezone(KST).date().isoformat(), "data": data, "summary": summary,
            "created_at": now.isoformat()}
     _rest(TABLE, "POST", json_body=[row], prefer="resolution=merge-duplicates,return=minimal",

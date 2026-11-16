@@ -352,7 +352,7 @@ def test_produce_marks_early_from_manual_job(monkeypatch):
     monkeypatch.setattr(music_jobs, "merge_metadata", lambda *a, **k: None)
     monkeypatch.setattr(ar, "_pick_image_action", lambda r: None)
 
-    def _start(mood, tc, combo, *, channel=None, auto_image=None):
+    def _start(mood, tc, combo, *, channel=None, auto_image=None, **_kw):
         music_manual._JOBS["je"] = {"status": "error", "error": "LLM", "fail_reason": "llm_unavailable",
                                     "early_fail": True}
         return {"ok": True, "job_id": "je"}
@@ -490,7 +490,7 @@ def test_axis_only_changes_background_action(monkeypatch):
     monkeypatch.setattr(ar, "_pick_image_action", lambda r: "running")
     got = {}
 
-    def _start(mood, tc, combo, *, channel=None, auto_image=None):
+    def _start(mood, tc, combo, *, channel=None, auto_image=None, **_kw):
         got.update(mood=mood, combo=combo)
         music_manual._JOBS["jx"] = {"status": "running"}
         return {"ok": True, "job_id": "jx"}
